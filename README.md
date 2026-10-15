@@ -7,9 +7,11 @@
 ## 当前进度
 
 - 2026-10-15：建立仓库说明、学习路线和协作规则。
-- 计划使用 Pi Coding Agent `1.2.0`；依赖尚未安装，也尚未编写应用代码。
-- 下一步：在练习目录中运行原生 Pi，观察一次“读取文件 → 执行任务 → 保存结果”的过程。
+- 2026-10-15：在指定服务器目录安装 Pi Coding Agent `1.2.0`，使用已有 Node.js `24.16.0`；依赖检查、版本输出和隔离环境下的帮助命令均通过。
+- 下一步：选择并配置模型，在单独练习目录中运行原生 Pi，观察一次“读取文件 → 执行任务 → 保存结果”的过程。
 - 当前没有可启动的网页服务，没有执行模型调用，也没有开展自进化实验。
+
+安装位置、文件解释和验证记录见 [第 1 步 A：安装与运行 Pi](docs/01-安装与运行Pi.md)。服务器项目目录是 `/home/hanwen/Project/project/siNRA-pi/`，按用户指定拼写保留。
 
 ## 第一个目标
 
@@ -40,7 +42,7 @@
 - 原始参考仓库：[ZhxinMath/sirna-pi-agent-service-refactor](https://github.com/ZhxinMath/sirna-pi-agent-service-refactor)。
 - 自己账号下的参考副本：[zhw251030-sketch/sirna-pi-agent-service-refactor](https://github.com/zhw251030-sketch/sirna-pi-agent-service-refactor)。
 - 已阅读代码基准：`965c53fba4eaa23996f54aa0532c7f6e1064bfd8`；含贡献核查笔记的参考提交：`67d275494c50f1e5c205b96b72a7b1623acfbe1d`。
-- 参考项目使用 Pi `0.85.1`；学习版计划以 [Pi 1.2.0](https://github.com/earendil-works/pi/releases/tag/v1.2.0) 为起点，通过 npm 使用时要求 Node.js `>=22.19.0`。
+- 参考项目使用 Pi `0.85.1`；学习版以 [Pi 1.2.0](https://github.com/earendil-works/pi/releases/tag/v1.2.0) 为起点，通过 npm 使用时要求 Node.js `>=22.19.0`。
 - 新版已提供 [MCP 接入](https://github.com/earendil-works/pi/blob/v1.2.0/packages/coding-agent/docs/mcp.md)，具体接入代码按新版接口验证。
 
 参考项目用于理解问题、职责和实现思路。初始提交没有复制其应用代码；以后引用或改编具体实现时，记录来源、版本和修改内容，并核对相应许可。
@@ -55,10 +57,16 @@
 ## 目录
 
 ```text
-README.md             项目目标、当前进度和学习方式
-AGENTS.md             与编程助手协作时遵守的规则
-.gitignore            排除凭据、依赖和运行产物
-docs/学习路线.md       分阶段目标、参考文件和验收方式
+README.md                   项目目标、当前进度和学习方式
+AGENTS.md                   与编程助手协作时遵守的规则
+.gitignore                  排除凭据、依赖和运行产物
+.nvmrc                      项目使用的 Node.js 版本
+.npmrc                      npm 安装规则
+package.json                Pi 依赖和命令入口
+package-lock.json           npm 生成的精确依赖记录
+docs/学习路线.md             分阶段目标、参考文件和验收方式
+docs/01-安装与运行Pi.md       本轮安装说明与实际结果
+docs/superpowers/plans/      安装步骤与执行记录
 ```
 
-代码目录在对应学习步骤开始时建立。
+服务器的 `node_modules/` 保存已安装依赖，不进入 Git。我们自己的应用代码目录在后续对应学习步骤开始时建立。

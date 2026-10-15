@@ -32,7 +32,7 @@
 - [x] 提供 pi、pi:version、pi:help 三个 npm scripts，分别执行 pi、pi --version、pi --help。
 - [x] .nvmrc 写入 24.16.0；.npmrc 启用 engine-strict 和 save-exact。
 - [x] 在服务器临时目录用 Node 24/npm 11 运行 npm install --package-lock-only --ignore-scripts --no-audit --no-fund，将生成的锁文件取回本地。
-- [ ] 核对锁文件版本、来源、JSON 和 git diff --check 后提交安装配置到 main。
+- [x] 核对锁文件版本、来源、JSON 和 git diff --check 后提交安装配置到 main。
 
 ## Task 2：安装、验证和同步
 
@@ -42,11 +42,11 @@
 
 **Output:** 指定目录中的已安装 Pi、可重现命令和实际验证记录。
 
-- [ ] 本地创建 main 的 Git bundle，经 SSH 传输；再次核实目标为空，然后在指定目录克隆 main。
-- [ ] 将服务器 origin 设为个人 GitHub 仓库地址；明确服务器直接 GitHub 认证本轮未配置。
-- [ ] 选用 Node 24，运行 npm ci --ignore-scripts --no-audit --no-fund。
-- [ ] 运行 npm run pi:version、npm run pi:help、npm ls --depth=0；前两个命令使用空凭据环境、独立配置目录和 PI_OFFLINE=1，帮助命令关闭资源发现。确认 Pi 版本为 1.2.0、帮助可显示且命令成功退出。
-- [ ] 根据实际结果更新中文文档：文件作用、运行位置、命令、参考仓库对应关系、已验证和未验证内容。
+- [x] 本地创建 main 的 Git bundle，经 SSH 传输；再次核实目标为空，然后在指定目录克隆 main。
+- [x] 将服务器 origin 设为个人 GitHub 仓库地址；明确服务器直接 GitHub 认证本轮未配置。
+- [x] 选用 Node 24，运行 npm ci --ignore-scripts --no-audit --no-fund。
+- [x] 运行 npm run pi:version、npm run pi:help、npm ls --depth=0；前两个命令使用空凭据环境、独立配置目录和 PI_OFFLINE=1，帮助命令关闭资源发现。确认 Pi 版本为 1.2.0、帮助可显示且命令成功退出。
+- [x] 根据实际结果更新中文文档：文件作用、运行位置、命令、参考仓库对应关系、已验证和未验证内容。
 - [ ] 独立检查改动；验证无凭据或依赖目录入库，然后提交并推送 origin/main。
 - [ ] 用新的 Git bundle 在服务器快进 main；确认本地、GitHub、服务器提交一致，两个工作区干净，参考仓库未改动。
 
@@ -59,3 +59,4 @@
 - 2026-10-15：已确认服务器目录为空且可写，已有 Node 24.16.0/npm 11.13.0。按照用户要求直接在 main 完成此学习步骤，不新建分支。
 - 源码核查发现 --help 会创建内部运行对象，因此验收时隔离配置、关闭扩展等资源发现并开启离线模式；不把帮助可显示描述成模型任务已运行。
 - 首次依赖解析停在 retry 包的请求，单独 curl 返回 HTTP 200；终止已核对工作目录的本次 npm 进程，重试时将单请求超时设为 30 秒、重试次数设为 2。
+- 安装配置提交为 611c0b8。服务器 npm ci 安装 118 个包；Node 24.16.0、npm 11.13.0、Pi 1.2.0；依赖列表、版本和隔离帮助检查全部退出码 0。
