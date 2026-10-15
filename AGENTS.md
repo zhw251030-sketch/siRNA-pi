@@ -41,10 +41,11 @@
 - 唯一远端工作根目录是 /home/hanwen/Project/project/siNRA-pi；本阶段新增配置、日志、缓存、临时文件、Git 传输文件和练习产物都放在该目录内。
 - 使用已有 Node 24 运行环境即可；不再向用户主目录的 .pi、.config 或 /tmp 写入本项目状态。
 - MiniMax 国内服务使用 minimax-cn / MiniMax-M3。启动入口是 npm run pi:minimax，读取 docs/auth.json 并将 Pi 状态目录设为 runtime/pi。
+- SDK 入口为 npm run pi:sdk；--check 只创建并检查会话，不调用模型。SDK 状态位于 runtime/pi-sdk，任务事件位于 runtime/sdk-task.events.jsonl，结果位于 workspaces/sdk-task/result.json，保留原 CLI 练习证据。
 - 本阶段仅开放原生 read/write，关闭扩展、MCP、自动资源发现和会话保存；这是学习配置，不是操作系统级沙箱。
 
 ## 当前阶段
 
-2026-10-15：已完成仓库初始化、原生 Pi 安装，以及 MiniMax-M3 的首次真实文件任务。服务器使用 Node 24.16.0 / Pi 1.2.0；样例任务实际出现 4 次模型响应、3 次成功工具调用，结果 count=4、sum=100、mean=25，并通过独立检查。尚未实现 SDK 会话封装或网页服务。
+2026-10-15：已完成仓库初始化、原生 Pi 安装、CLI 首次任务，以及调用现有 SDK 的单任务会话示例。服务器使用 Node 24.16.0 / Pi 1.2.0；CLI 与 SDK 两次样例任务各出现 4 次模型响应、3 次成功工具调用，结果 count=4、sum=100、mean=25，均通过独立检查；7 项离线验收测试通过。尚未实现网页、会话复用、历史恢复或自进化。
 
-下一步学习用 SDK 创建会话、发送任务、接收事件；先解释再实现。实际记录见 docs/02-MiniMax与首次文件任务.md。服务器直接访问私有 GitHub 的认证尚未配置，继续通过本地 GitHub 授权与项目内 Git bundle 同步。
+下一步先理解 docs/03-SDK创建会话.md 中的代码，再设计最小后端和网页；按用户学习节奏先解释再实现。服务器直接访问私有 GitHub 的认证尚未配置，继续通过本地 GitHub 授权与项目内 Git bundle 同步。

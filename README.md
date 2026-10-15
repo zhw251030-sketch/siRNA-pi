@@ -9,12 +9,15 @@
 - 2026-10-15：建立仓库说明、学习路线和协作规则。
 - 2026-10-15：在指定服务器目录安装 Pi Coding Agent `1.2.0`，使用已有 Node.js `24.16.0`；依赖检查、版本输出和隔离环境下的帮助命令均通过。
 - 2026-10-15：接通 MiniMax 国内平台的 `MiniMax-M3`，完成“读取样例 → 计算 → 写入结果 → 重新读取”任务；实际结果为 4 个数、总和 100、平均值 25。
-- 下一步：用最少程序通过 SDK 创建 Pi 会话、发送任务并接收事件。
+- 2026-10-15：通过 Pi SDK 创建内存会话、订阅事件并完成相同文件任务；4 次模型响应、3 次成功工具调用，独立验证结果正确。
+- 下一步：理解 SDK 示例，再设计最小后端和网页，将用户输入交给 Pi 并显示结果。
 - 已有首次真实模型调用和工具执行；当前没有网页服务，也没有开展自进化实验。
 
 安装位置、文件解释和验证记录见 [第 1 步 A：安装与运行 Pi](docs/01-安装与运行Pi.md)。服务器项目目录是 `/home/hanwen/Project/project/siNRA-pi/`，按用户指定拼写保留。
 
 模型连接、工具轨迹、运行命令和结果检查见 [第 1 步 B：MiniMax 与首次文件任务](docs/02-MiniMax与首次文件任务.md)。后续远端工作均限制在上述项目目录内；用户提供的 `docs/auth.json` 仅在服务器保存，不进入 Git。
+
+SDK 示例、逐段代码解释和实际结果见 [第 2 步：调用 Pi SDK 创建会话](docs/03-SDK创建会话.md)。`npm run pi:sdk -- --check` 只检查会话配置，`npm run pi:sdk` 执行模型任务，`npm run verify:sdk-task` 独立检查已有结果。
 
 ## 第一个目标
 
@@ -68,13 +71,17 @@ AGENTS.md                   与编程助手协作时遵守的规则
 package.json                Pi 依赖和命令入口
 package-lock.json           npm 生成的精确依赖记录
 scripts/pi-minimax.mjs       读取项目内凭据并启动原生 Pi
-scripts/verify-first-task.mjs 检查首次任务的轨迹与真实文件
+scripts/pi-sdk.mjs           调用已有 SDK 创建会话、订阅事件和提交任务
+scripts/verify-first-task.mjs 检查 CLI 或 SDK 任务的轨迹与真实文件
+tests/verify-file-task.test.mjs 不调用模型的验收程序测试
 config/pi/                  不含密钥的模型和运行设置
 examples/01-file-task/       四个样例数和任务说明
+examples/02-sdk-task/        SDK 练习的任务说明
 docs/学习路线.md             分阶段目标、参考文件和验收方式
 docs/01-安装与运行Pi.md       本轮安装说明与实际结果
 docs/02-MiniMax与首次文件任务.md 模型接入与真实任务记录
+docs/03-SDK创建会话.md        SDK 应用代码与实际任务讲解
 docs/superpowers/plans/      安装步骤与执行记录
 ```
 
-服务器的 `node_modules/` 保存依赖，`runtime/` 保存运行状态，`workspaces/` 保存练习产物；这些都不进入 Git。当前启动脚本调用原生 CLI，我们自己的 SDK 会话代码在下一学习步骤建立。
+服务器的 `node_modules/` 保存依赖，`runtime/` 保存运行状态，`workspaces/` 保存练习产物；这些都不进入 Git。CLI 与 SDK 两种学习入口均已验证，使用同一份数字输入和各自独立的日志、结果文件。

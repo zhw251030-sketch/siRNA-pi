@@ -3,12 +3,18 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
+const args = process.argv.slice(2);
+if (args.length > 1 || (args.length === 1 && args[0] !== "--sdk")) {
+  console.error("验证参数只允许 --sdk；不传参数时检查原 CLI 练习。");
+  process.exit(1);
+}
+const stage = args[0] === "--sdk" ? "sdk-task" : "first-task";
 const inputPath = path.join(root, "examples", "01-file-task", "numbers.csv");
-const outputPath = path.join(root, "workspaces", "first-task", "result.json");
+const outputPath = path.join(root, "workspaces", stage, "result.json");
 const ensure = (condition, message) => { if (!condition) throw new Error(message); };
 
 try {
-  const events = fs.readFileSync(path.join(root, "runtime", "first-task.events.jsonl"), "utf8")
+  const events = fs.readFileSync(path.join(root, "runtime", `${stage}.events.jsonl`), "utf8")
     .split("\n").filter((line) => line.trim()).map((line) => JSON.parse(line));
   const header = events.find((event) => event.type === "session");
   ensure(header?.cwd === path.resolve(root), "运行目录与本项目不一致。");
