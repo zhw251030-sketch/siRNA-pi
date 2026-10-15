@@ -1,0 +1,28 @@
+# Credentials and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+.pi/auth.json
+.pi/sessions/
+
+# Dependencies and generated output
+node_modules/
+dist/
+coverage/
+*.log
+__pycache__/
+*.pyc
+
+# Local task state and generated artifacts
+runtime/
+workspaces/
+artifacts/
+*.sqlite
+*.sqlite-*
+
+# Operating system files
+.DS_Store
+Thumbs.db
