@@ -11,8 +11,10 @@
     "pi": "pi",
     "pi:minimax": "node scripts/pi-minimax.mjs",
     "pi:sdk": "node scripts/pi-sdk.mjs",
+    "web": "node scripts/web.mjs",
     "verify:first-task": "node scripts/verify-first-task.mjs",
     "verify:sdk-task": "node scripts/verify-first-task.mjs --sdk",
+    "verify:web-task": "node scripts/verify-first-task.mjs --web",
     "test": "node --test tests/*.test.mjs",
     "pi:version": "pi --version",
     "pi:help": "pi --help"

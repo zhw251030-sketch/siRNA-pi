@@ -10,14 +10,17 @@
 - 2026-10-15：在指定服务器目录安装 Pi Coding Agent `1.2.0`，使用已有 Node.js `24.16.0`；依赖检查、版本输出和隔离环境下的帮助命令均通过。
 - 2026-10-15：接通 MiniMax 国内平台的 `MiniMax-M3`，完成“读取样例 → 计算 → 写入结果 → 重新读取”任务；实际结果为 4 个数、总和 100、平均值 25。
 - 2026-10-15：通过 Pi SDK 创建内存会话、订阅事件并完成相同文件任务；4 次模型响应、3 次成功工具调用，独立验证结果正确。
-- 下一步：理解 SDK 示例，再设计最小后端和网页，将用户输入交给 Pi 并显示结果。
-- 已有首次真实模型调用和工具执行；当前没有网页服务，也没有开展自进化实验。
+- 2026-10-15：完成最小网页与 HTTP 服务，通过浏览器提交统计任务；4 次模型响应、3 次工具调用，真实文件通过独立验证，17 项离线测试通过。
+- 下一步：对照原仓库学习 SSE，让网页逐步显示模型回复与工具状态。
+- 当前已能通过网页执行一次独立任务；尚无多轮会话、历史恢复、停止按钮或自进化实验。
 
 安装位置、文件解释和验证记录见 [第 1 步 A：安装与运行 Pi](docs/01-安装与运行Pi.md)。服务器项目目录是 `/home/hanwen/Project/project/siNRA-pi/`，按用户指定拼写保留。
 
 模型连接、工具轨迹、运行命令和结果检查见 [第 1 步 B：MiniMax 与首次文件任务](docs/02-MiniMax与首次文件任务.md)。后续远端工作均限制在上述项目目录内；用户提供的 `docs/auth.json` 仅在服务器保存，不进入 Git。
 
 SDK 示例、逐段代码解释和实际结果见 [第 2 步：调用 Pi SDK 创建会话](docs/03-SDK创建会话.md)。`npm run pi:sdk -- --check` 只检查会话配置，`npm run pi:sdk` 执行模型任务，`npm run verify:sdk-task` 独立检查已有结果。
+
+网页请求、后端、任务目录与原仓库逐层对应见 [第 3 步：网页连接 Pi](docs/04-网页连接Pi.md)。服务器运行 `npm run web`，本机通过 SSH 隧道访问 `http://127.0.0.1:3000`。每次发送创建新任务；密钥仅由服务器读取。统计示例完成后可运行 `npm run verify:web-task -- <任务编号>` 独立检查。
 
 ## 第一个目标
 
@@ -72,8 +75,16 @@ package.json                Pi 依赖和命令入口
 package-lock.json           npm 生成的精确依赖记录
 scripts/pi-minimax.mjs       读取项目内凭据并启动原生 Pi
 scripts/pi-sdk.mjs           调用已有 SDK 创建会话、订阅事件和提交任务
-scripts/verify-first-task.mjs 检查 CLI 或 SDK 任务的轨迹与真实文件
+scripts/web.mjs              启动仅监听回环地址的网页服务
+src/server.mjs               HTTP 请求与静态页面
+src/web-task.mjs             网页任务的编号、目录与运行
+src/pi-session.mjs           CLI 与网页共用的 Pi SDK 调用
+src/workspace-files.mjs      网页任务 read/write 的文件范围检查
+public/                     网页结构、样式与交互
+scripts/verify-first-task.mjs 检查 CLI、SDK 或网页统计任务的轨迹与真实文件
 tests/verify-file-task.test.mjs 不调用模型的验收程序测试
+tests/web.test.mjs           HTTP 请求、错误、并发和静态访问测试
+tests/workspace-files.test.mjs 真实文件范围与链接检查
 config/pi/                  不含密钥的模型和运行设置
 examples/01-file-task/       四个样例数和任务说明
 examples/02-sdk-task/        SDK 练习的任务说明
@@ -81,7 +92,8 @@ docs/学习路线.md             分阶段目标、参考文件和验收方式
 docs/01-安装与运行Pi.md       本轮安装说明与实际结果
 docs/02-MiniMax与首次文件任务.md 模型接入与真实任务记录
 docs/03-SDK创建会话.md        SDK 应用代码与实际任务讲解
+docs/04-网页连接Pi.md         网页到服务器、SDK、文件的完整路径
 docs/superpowers/plans/      安装步骤与执行记录
 ```
 
-服务器的 `node_modules/` 保存依赖，`runtime/` 保存运行状态，`workspaces/` 保存练习产物；这些都不进入 Git。CLI 与 SDK 两种学习入口均已验证，使用同一份数字输入和各自独立的日志、结果文件。
+服务器的 `node_modules/` 保存依赖，`runtime/` 保存运行状态，`workspaces/` 保存练习产物；这些都不进入 Git。CLI、SDK 和网页三种学习入口均已验证。网页为每次任务建立独立目录，使用样例输入的副本和各自的日志、结果文件。

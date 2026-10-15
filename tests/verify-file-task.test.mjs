@@ -10,25 +10,29 @@ const testRoot = path.join(root, "runtime", "verification-tests");
 fs.mkdirSync(testRoot, { recursive: true });
 
 // 全部是人造记录，不使用密钥、真实运行日志或模型服务。
-function fixture(t, sdk = true) {
+function fixture(t, sdk = true, web = false) {
   const dir = fs.mkdtempSync(path.join(testRoot, "case-"));
   t.after(() => {
     assert.equal(path.dirname(dir), testRoot);
     fs.rmSync(dir, { recursive: true });
   });
   const stage = sdk ? "sdk-task" : "first-task";
-  for (const relative of ["scripts", "runtime", "examples/01-file-task", `workspaces/${stage}`]) {
+  const taskId = "12345678-1234-4123-8123-123456789abc";
+  const workspace = web ? `workspaces/web/${taskId}` : `workspaces/${stage}`;
+  const input = web ? `${workspace}/numbers.csv` : "examples/01-file-task/numbers.csv";
+  const eventLog = web ? `runtime/web/${taskId}.events.jsonl` : `runtime/${stage}.events.jsonl`;
+  for (const relative of ["scripts", "runtime/web", "examples/01-file-task", workspace]) {
     fs.mkdirSync(path.join(dir, relative), { recursive: true });
   }
   fs.copyFileSync(path.join(root, "scripts/verify-first-task.mjs"), path.join(dir, "scripts/verify-first-task.mjs"));
-  fs.writeFileSync(path.join(dir, "examples/01-file-task/numbers.csv"), "value\n10\n20\n30\n40\n");
-  const resultPath = path.join(dir, `workspaces/${stage}/result.json`);
+  fs.writeFileSync(path.join(dir, input), "value\n10\n20\n30\n40\n");
+  const resultPath = path.join(dir, workspace, "result.json");
   fs.writeFileSync(resultPath, JSON.stringify({ count: 4, sum: 100, mean: 25 }));
-  const events = [{ type: "session", cwd: dir, source: sdk ? "sdk" : "cli" }];
+  const events = [{ type: "session", cwd: web ? path.join(dir, workspace) : dir, source: web ? "web" : sdk ? "sdk" : "cli" }];
   const calls = [
-    ["read", "examples/01-file-task/numbers.csv"],
-    ["write", `workspaces/${stage}/result.json`],
-    ["read", `workspaces/${stage}/result.json`],
+    ["read", web ? "numbers.csv" : input],
+    ["write", web ? "result.json" : `${workspace}/result.json`],
+    ["read", web ? "result.json" : `${workspace}/result.json`],
   ];
   for (const [index, [toolName, filePath]] of calls.entries()) {
     events.push({ type: "message_end", message: { role: "assistant", provider: "minimax-cn", model: "MiniMax-M3", stopReason: "toolUse" } });
@@ -39,8 +43,8 @@ function fixture(t, sdk = true) {
   events.push({ type: "agent_settled", aborted: false });
   return {
     events, resultPath,
-    run(args = sdk ? ["--sdk"] : []) {
-      fs.writeFileSync(path.join(dir, `runtime/${stage}.events.jsonl`), events.map((event) => JSON.stringify(event)).join("\n") + "\n");
+    run(args = web ? ["--web", taskId] : sdk ? ["--sdk"] : []) {
+      fs.writeFileSync(path.join(dir, eventLog), events.map((event) => JSON.stringify(event)).join("\n") + "\n");
       return spawnSync(process.execPath, [path.join(dir, "scripts/verify-first-task.mjs"), ...args], { encoding: "utf8" });
     },
   };
@@ -76,4 +80,18 @@ test("未知练习参数被拒绝，不能误报旧练习成功", (t) => {
   const run = fixture(t, false).run(["--typo"]);
   assert.equal(run.status, 1);
   assert.match(run.stderr, /参数/);
+});
+
+test("网页统计检查按任务编号读取目录和轨迹", (t) => {
+  const run = fixture(t, true, true).run();
+  assert.equal(run.status, 0, run.stderr);
+  assert.deepEqual(JSON.parse(run.stdout).result, { count: 4, sum: 100, mean: 25 });
+});
+
+test("网页统计检查拒绝不匹配的任务目录", (t) => {
+  const f = fixture(t, true, true);
+  f.events[0].cwd = path.dirname(f.events[0].cwd);
+  const run = f.run();
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /运行目录/);
 });

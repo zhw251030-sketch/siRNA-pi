@@ -4,20 +4,23 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const args = process.argv.slice(2);
-if (args.length > 1 || (args.length === 1 && args[0] !== "--sdk")) {
-  console.error("验证参数只允许 --sdk；不传参数时检查原 CLI 练习。");
+const web = args.length === 2 && args[0] === "--web" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(args[1]);
+if (!(args.length === 0 || (args.length === 1 && args[0] === "--sdk") || web)) {
+  console.error("验证参数只允许 --sdk 或 --web <任务UUID>；不传参数时检查原 CLI 练习。");
   process.exit(1);
 }
 const stage = args[0] === "--sdk" ? "sdk-task" : "first-task";
-const inputPath = path.join(root, "examples", "01-file-task", "numbers.csv");
-const outputPath = path.join(root, "workspaces", stage, "result.json");
+const cwd = web ? path.join(root, "workspaces", "web", args[1]) : path.resolve(root);
+const inputPath = web ? path.join(cwd, "numbers.csv") : path.join(root, "examples", "01-file-task", "numbers.csv");
+const outputPath = web ? path.join(cwd, "result.json") : path.join(root, "workspaces", stage, "result.json");
+const eventPath = web ? path.join(root, "runtime", "web", `${args[1]}.events.jsonl`) : path.join(root, "runtime", `${stage}.events.jsonl`);
 const ensure = (condition, message) => { if (!condition) throw new Error(message); };
 
 try {
-  const events = fs.readFileSync(path.join(root, "runtime", `${stage}.events.jsonl`), "utf8")
+  const events = fs.readFileSync(eventPath, "utf8")
     .split("\n").filter((line) => line.trim()).map((line) => JSON.parse(line));
   const header = events.find((event) => event.type === "session");
-  ensure(header?.cwd === path.resolve(root), "运行目录与本项目不一致。");
+  ensure(header?.cwd === cwd, "运行目录与本任务不一致。");
   const settled = events.findLast((event) => event.type === "agent_settled");
   ensure(settled?.aborted === false, "没有正常完成的 agent_settled 事件。");
   const messages = events.filter((event) => event.type === "message_end" && event.message?.role === "assistant")
@@ -32,14 +35,14 @@ try {
   const allowedPaths = new Set([inputPath, outputPath]);
   for (const start of starts) {
     ensure(["read", "write"].includes(start.toolName), "出现本练习之外的工具。");
-    ensure(typeof start.args?.path === "string" && allowedPaths.has(path.resolve(root, start.args.path)), "工具访问了样例和结果之外的路径。");
-    ensure(start.toolName !== "write" || path.resolve(root, start.args.path) === outputPath, "工具修改了输入文件。");
+    ensure(typeof start.args?.path === "string" && allowedPaths.has(path.resolve(cwd, start.args.path)), "工具访问了样例和结果之外的路径。");
+    ensure(start.toolName !== "write" || path.resolve(cwd, start.args.path) === outputPath, "工具修改了输入文件。");
     const matches = ends.filter((end) => end.toolCallId === start.toolCallId);
     ensure(matches.length === 1 && matches[0].toolName === start.toolName && matches[0].isError === false, "工具调用失败或结束记录不匹配。");
   }
-  const inputRead = starts.findIndex((event) => event.toolName === "read" && path.resolve(root, event.args.path) === inputPath);
-  const outputWrite = starts.findIndex((event) => event.toolName === "write" && path.resolve(root, event.args.path) === outputPath);
-  const outputRead = starts.findIndex((event, index) => index > outputWrite && event.toolName === "read" && path.resolve(root, event.args.path) === outputPath);
+  const inputRead = starts.findIndex((event) => event.toolName === "read" && path.resolve(cwd, event.args.path) === inputPath);
+  const outputWrite = starts.findIndex((event) => event.toolName === "write" && path.resolve(cwd, event.args.path) === outputPath);
+  const outputRead = starts.findIndex((event, index) => index > outputWrite && event.toolName === "read" && path.resolve(cwd, event.args.path) === outputPath);
   ensure(inputRead >= 0 && outputWrite > inputRead && outputRead > outputWrite, "缺少读取输入、写入结果、重新读取结果的完整顺序。");
 
   const lines = fs.readFileSync(inputPath, "utf8").trim().split(/\r?\n/);

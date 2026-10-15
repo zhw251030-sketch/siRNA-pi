@@ -43,9 +43,11 @@
 - MiniMax 国内服务使用 minimax-cn / MiniMax-M3。启动入口是 npm run pi:minimax，读取 docs/auth.json 并将 Pi 状态目录设为 runtime/pi。
 - SDK 入口为 npm run pi:sdk；--check 只创建并检查会话，不调用模型。SDK 状态位于 runtime/pi-sdk，任务事件位于 runtime/sdk-task.events.jsonl，结果位于 workspaces/sdk-task/result.json，保留原 CLI 练习证据。
 - 本阶段仅开放原生 read/write，关闭扩展、MCP、自动资源发现和会话保存；这是学习配置，不是操作系统级沙箱。
+- 网页入口为 npm run web，只监听 127.0.0.1:3000，经 SSH 隧道访问；每次新建内存会话和 workspaces/web/<UUID>，事件位于 runtime/web/<UUID>.events.jsonl。网页 read/write 使用范围检查，不能读写任务目录外的文件；不要把它称为容器沙箱。
+- 通用 SDK 调用已抽到 src/pi-session.mjs；旧 scripts/pi-sdk.mjs 仍保留命令行入口。网页没有历史恢复、流式显示或停止按钮；真实网页统计任务可用 npm run verify:web-task -- <UUID> 检查。
 
 ## 当前阶段
 
-2026-10-15：已完成仓库初始化、原生 Pi 安装、CLI 首次任务，以及调用现有 SDK 的单任务会话示例。服务器使用 Node 24.16.0 / Pi 1.2.0；CLI 与 SDK 两次样例任务各出现 4 次模型响应、3 次成功工具调用，结果 count=4、sum=100、mean=25，均通过独立检查；7 项离线验收测试通过。尚未实现网页、会话复用、历史恢复或自进化。
+2026-10-15：已完成仓库初始化、原生 Pi 安装、CLI 首次任务、SDK 单任务示例和最小网页。服务器使用 Node 24.16.0 / Pi 1.2.0；CLI、SDK、网页三次样例任务均各出现 4 次模型响应、3 次成功工具调用，结果 count=4、sum=100、mean=25，均通过独立检查；17 项离线测试通过。尚未实现流式显示、会话复用、历史恢复或自进化。
 
-下一步先理解 docs/03-SDK创建会话.md 中的代码，再设计最小后端和网页；按用户学习节奏先解释再实现。服务器直接访问私有 GitHub 的认证尚未配置，继续通过本地 GitHub 授权与项目内 Git bundle 同步。
+下一步先理解 docs/04-网页连接Pi.md 的请求路径，再对照参考仓库学习 SSE 流式事件；按用户学习节奏先解释再实现。服务器直接访问私有 GitHub 的认证尚未配置，继续通过本地 GitHub 授权与项目内 Git bundle 同步。
