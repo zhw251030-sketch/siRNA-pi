@@ -9,6 +9,8 @@
   },
   "scripts": {
     "pi": "pi",
+    "pi:minimax": "node scripts/pi-minimax.mjs",
+    "verify:first-task": "node scripts/verify-first-task.mjs",
     "pi:version": "pi --version",
     "pi:help": "pi --help"
   },

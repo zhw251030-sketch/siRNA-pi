@@ -5,6 +5,7 @@
 *.pem
 *.key
 secrets/
+/docs/auth.json
 .pi/auth.json
 .pi/sessions/
 

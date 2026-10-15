@@ -1,0 +1,8 @@
+这是一次学习 Pi 原生工具调用的练习。
+工作范围仅限当前项目目录。
+先用 read 工具读取 examples/01-file-task/numbers.csv，不修改这个输入文件。
+计算 value 列的数量、总和、平均值。
+然后用 write 工具把结果保存到 workspaces/first-task/result.json。
+结果必须是合法 JSON，仅包含 count、sum、mean 三个数值字段。
+最后用 read 工具重新读取结果文件，确认内容，然后用中文简短说明结果。
+只读取上述输入和输出文件；不要读取凭据、配置或其他文件。

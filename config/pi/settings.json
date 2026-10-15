@@ -1,0 +1,12 @@
+{
+  "defaultProvider": "minimax-cn",
+  "defaultModel": "MiniMax-M3",
+  "defaultThinkingLevel": "off",
+  "cacheWarming": "off",
+  "retry": {
+    "enabled": false
+  },
+  "compaction": {
+    "enabled": false
+  }
+}

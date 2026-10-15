@@ -1,0 +1,12 @@
+{
+  "providers": {
+    "minimax-cn": {
+      "baseUrl": "https://api.minimax.cn/anthropic",
+      "modelOverrides": {
+        "MiniMax-M3": {
+          "maxTokens": 4096
+        }
+      }
+    }
+  }
+}
