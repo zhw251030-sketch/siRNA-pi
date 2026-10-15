@@ -1,0 +1,128 @@
+import { createServer } from "node:http";
+import fs from "node:fs/promises";
+import { TaskMessageService, TaskMessageSubmissionError } from "../../packages/task-core/task-message-service.mjs";
+
+const staticFiles = new Map([
+  ["/", ["index.html", "text/html; charset=utf-8"]],
+  ["/app.js", ["app.js", "text/javascript; charset=utf-8"]],
+  ["/sse.mjs", ["sse.mjs", "text/javascript; charset=utf-8"]],
+  ["/style.css", ["style.css", "text/css; charset=utf-8"]],
+]);
+function reply(response, status, data) {
+  response.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
+  response.end(JSON.stringify(data));
+}
+function invalid(message) { throw new TaskMessageSubmissionError(400, message); }
+
+async function readBody(request) {
+  if (request.headers["content-type"]?.split(";")[0].trim() !== "application/json" &&
+      !(Number(request.headers["content-length"] ?? 0) === 0 && !request.headers["transfer-encoding"])) {
+    request.resume();
+    throw new TaskMessageSubmissionError(415, "请使用 JSON 格式发送请求。");
+  }
+  // Drain an oversized request so we can still return an HTTP error reliably.
+  const chunks = [];
+  let bytes = 0;
+  for await (const chunk of request) {
+    bytes += chunk.length;
+    if (bytes <= 1048576) chunks.push(chunk);
+  }
+  if (bytes > 1048576) throw new TaskMessageSubmissionError(413, "请求正文过长。");
+  let body;
+  try { body = bytes ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {}; }
+  catch { invalid("无法读取 JSON 请求。"); }
+  if (!body || typeof body !== "object" || Array.isArray(body)) invalid("请求必须是 JSON 对象。");
+  return body;
+}
+
+// HTTP only coordinates transport. Task state and runtime execution stay in
+// their own packages, matching the reference repository's responsibility split.
+export function createAppServer({ taskStore, agentRuntime } = {}) {
+  const taskMessages = new TaskMessageService({ taskStore, agentRuntime });
+  const activeTurns = new Set();
+  const server = createServer(async (request, response) => {
+    response.setHeader("Cache-Control", "no-store");
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+    const host = request.headers.host ?? "";
+    if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host) ||
+        (request.headers.origin && request.headers.origin !== `http://${host}`)) {
+      request.resume();
+      return reply(response, 403, { error: "请从本机网页访问此服务。" });
+    }
+    let pathname;
+    try { pathname = new URL(request.url, `http://${host}`).pathname; }
+    catch { request.resume(); return reply(response, 400, { error: "请求地址格式不正确。" }); }
+    try {
+      if (request.method === "GET" && pathname === "/health") {
+        return reply(response, 200, { ready: true, busy: taskStore.listTasks().some((task) => task.status === "running"), runtime: agentRuntime?.runtimeInfo() });
+      }
+      if (request.method === "GET" && staticFiles.has(pathname)) {
+        const [name, type] = staticFiles.get(pathname);
+        const content = await fs.readFile(new URL(`../../public/${name}`, import.meta.url));
+        response.writeHead(200, { "Content-Type": type });
+        return response.end(content);
+      }
+      if (pathname === "/v1/chat") {
+        request.resume();
+        return reply(response, 410, { error: "Unbound chat sessions are disabled; use the task-scoped /v1/tasks API" });
+      }
+      if (request.method === "GET" && pathname === "/v1/tasks") return reply(response, 200, { tasks: taskStore.listTasks() });
+      if (request.method === "POST" && pathname === "/v1/tasks") {
+        const body = await readBody(request);
+        if (Object.keys(body).some((key) => !["requestId", "memoryFileIds", "dataAssetIds"].includes(key))) invalid("创建任务与发送消息是两个接口，请先创建任务。");
+        for (const key of ["memoryFileIds", "dataAssetIds"]) {
+          if (body[key] !== undefined && (!Array.isArray(body[key]) || body[key].length)) invalid("本学习阶段尚未接入记忆与数据资产。");
+        }
+        const result = await taskMessages.createTask(body.requestId);
+        return reply(response, result.deduplicated ? 200 : 201, {
+          task: result.task, memory: { count: 0, attachments: [] }, dataPool: { count: 0, bindings: [] },
+          ...(result.deduplicated ? { deduplicated: true } : {}),
+        });
+      }
+      const match = /^\/v1\/tasks\/([^/]+)\/messages$/.exec(pathname);
+      if (match && request.method === "GET") {
+        const task = taskStore.getTask(match[1]);
+        if (!task) return reply(response, 404, { error: "没有找到这个任务。" });
+        return reply(response, 200, { task, messages: taskStore.listMessages(task.id), runEvents: taskStore.listRunEvents(task.id), goal: null });
+      }
+      if (match && request.method === "POST") {
+        const body = await readBody(request);
+        if (Object.keys(body).some((key) => !["message", "requestId"].includes(key))) invalid("本学习阶段尚不支持消息修订或其他消息参数。");
+        // Validate/reserve before sending HTTP 200. Buffer immediate events,
+        // then stream throughout execution and durable message persistence.
+        let streaming = false;
+        const buffered = [];
+        const send = (event) => {
+          if (!streaming) buffered.push(event);
+          else if (!response.destroyed) response.write(`data: ${JSON.stringify(event)}\n\n`);
+        };
+        const turn = await taskMessages.start({ taskId: match[1], ...body }, send);
+        activeTurns.add(turn.completion);
+        void turn.completion.finally(() => activeTurns.delete(turn.completion));
+        response.writeHead(200, {
+          "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive", "X-Accel-Buffering": "no",
+        });
+        response.write(": connected\n\n");
+        streaming = true;
+        for (const event of buffered) send(event);
+        await turn.completion;
+        if (!response.destroyed) response.end();
+        return;
+      }
+      request.resume();
+      reply(response, 404, { error: "没有这个页面或接口。" });
+    } catch (error) {
+      if (!response.headersSent && !response.destroyed) {
+        reply(response, error instanceof TaskMessageSubmissionError ? error.statusCode : 500,
+          { error: error instanceof TaskMessageSubmissionError ? error.message : "服务处理失败，请检查项目内运行记录。" });
+      } else if (!response.destroyed) response.end();
+    }
+  });
+  server.requestTimeout = 15000;
+  server.headersTimeout = 10000;
+  // HTTP connections and accepted agent turns have different lifetimes.
+  server.waitForTaskCompletion = () => Promise.allSettled([...activeTurns]);
+  return server;
+}

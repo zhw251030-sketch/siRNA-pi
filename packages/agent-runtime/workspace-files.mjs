@@ -3,7 +3,7 @@ import path from "node:path";
 
 const maxBytes = 1024 * 1024;
 
-// 这是 read/write 的应用层范围检查，不是容器或操作系统沙箱。
+// SDK 过渡执行器的 read/write 范围检查，不是正式架构的容器沙箱。
 export function createWorkspaceOperations(directory) {
   const root = path.resolve(directory);
   async function check(target, { missing = false } = {}) {

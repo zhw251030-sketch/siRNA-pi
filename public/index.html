@@ -3,66 +3,54 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>siRNA-pi · 任务练习</title>
+    <title>siRNA-pi · 任务工作区</title>
     <link rel="stylesheet" href="/style.css">
-    <script src="/app.js" defer></script>
+    <script src="/app.js" type="module"></script>
   </head>
   <body>
-    <main class="page">
-      <header class="page-header">
-        <p class="brand">siRNA-pi <span>学习工作台</span></p>
-        <p class="eyebrow">第 3 步 · 通过网页操作 Pi</p>
-        <h1>让 Pi 完成一个小任务</h1>
-        <p class="intro">写下要求，Pi 会在服务器上执行，再把结果带回这里。</p>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand"><span class="brand-mark" aria-hidden="true">si</span>siRNA-pi <span class="brand-label">学习工作区</span></div>
+        <p>从一个任务开始，逐步理解 Agent</p>
+        <button id="refresh-tasks" class="button secondary" type="button">刷新记录</button>
       </header>
-
-      <div class="workspace">
-        <section class="panel" aria-labelledby="task-heading">
-          <div class="panel-heading">
-            <span class="step-number" aria-hidden="true">01</span>
-            <h2 id="task-heading">提出任务</h2>
-          </div>
-          <form id="task-form">
-            <label for="message">希望 Pi 做什么？</label>
-            <p id="message-help" class="help">可以先用统计示例，观察它读取文件、计算并保存结果。</p>
-            <textarea id="message" name="message" rows="9" maxlength="4000" required
-              aria-describedby="message-help task-boundary"
-              placeholder="例如：读取 numbers.csv，计算这些数的平均值，并保存结果。"></textarea>
-            <div class="form-actions">
-              <button id="example-button" class="button secondary" type="button">填入统计示例</button>
-              <button id="submit-button" class="button primary" type="submit">发送任务 <span aria-hidden="true">→</span></button>
-            </div>
-          </form>
-          <p id="task-boundary" class="boundary">每次发送都是新任务，不会记住上一次的对话。本阶段只能读取和写入当前练习目录中的文件；运行中请等待完成。</p>
-        </section>
-
-        <section id="result-panel" class="panel result-panel" aria-labelledby="result-heading" aria-busy="false">
-          <div class="panel-heading">
-            <span class="step-number" aria-hidden="true">02</span>
-            <h2 id="result-heading">查看结果</h2>
-          </div>
-          <p id="task-status" class="status" role="status" aria-live="polite" aria-atomic="true" data-state="idle">等待提交任务</p>
-          <div id="empty-state" class="empty-state">
-            <span class="empty-symbol" aria-hidden="true">↗</span>
-            <p>从一个能检查结果的小任务开始</p>
-            <p class="help">统计示例中的 4 个数是 10、20、30、40。预期总和为 100，平均值为 25。</p>
-          </div>
-          <div id="task-result" hidden>
-            <h3>Pi 的回答</h3>
-            <pre id="answer" class="answer"></pre>
-            <details class="task-details">
-              <summary>任务记录与文件位置</summary>
-              <dl>
-                <dt>任务编号</dt><dd id="task-id"></dd>
-                <dt>服务器工作目录</dt><dd id="task-workspace"></dd>
-                <dt>执行轨迹文件</dt><dd id="task-event-log"></dd>
-                <dt>本次执行</dt><dd id="task-counts"></dd>
-              </dl>
-            </details>
+      <main class="workspace">
+        <aside class="thread-panel panel" aria-label="任务列表">
+          <div class="panel-heading"><span class="eyebrow">TASKS</span><h2>我的任务</h2></div>
+          <button id="new-session" class="button primary new-task" type="button">＋ 新建设计任务</button>
+          <p class="navigation-label">最近任务</p>
+          <nav id="task-list" aria-label="最近任务"><p class="help">正在读取任务…</p></nav>
+          <div class="sidebar-note"><strong>一个任务，可以继续聊</strong><p>在同一个任务里追问，会沿用对话和文件。新任务有独立的记录与工作目录。</p></div>
+        </aside>
+        <section id="chat-panel" class="chat-panel panel" aria-label="Agent 对话" aria-busy="false">
+          <header class="chat-header">
+            <p class="eyebrow">CONVERSATION</p>
+            <h1 id="chat-title">选择或创建一个任务</h1>
+            <p id="task-status" class="status" role="status" aria-live="polite" aria-atomic="true" data-state="idle">正在连接工作区…</p>
+          </header>
+          <div id="messages" class="messages" aria-live="polite" aria-relevant="additions text"></div>
+          <div class="composer-area">
+            <div class="quick-actions"><button id="example-button" class="button secondary" type="button" disabled>填入统计示例</button><span>示例：4 个数，总和 100，平均值 25</span></div>
+            <form id="composer">
+              <label class="sr-only" for="message-input">任务要求或后续问题</label>
+              <textarea id="message-input" name="message" rows="3" maxlength="120000" required disabled aria-describedby="composer-help" placeholder="写下任务要求，或继续追问…"></textarea>
+              <button id="send-button" class="button primary" type="submit" disabled>发送 <span aria-hidden="true">↑</span></button>
+            </form>
+            <div class="composer-footer"><p id="composer-help">当前练习可以读取、写入本任务目录中的文件。</p><button id="recover-message" class="button secondary" type="button" hidden>恢复本次发送</button></div>
           </div>
         </section>
-      </div>
-      <footer>从“发出要求”到“真正完成文件操作”，一步一步理解 Agent。</footer>
-    </main>
+        <aside class="context-panel panel" aria-label="执行进度">
+          <div class="panel-heading"><span class="eyebrow">ACTIVITY</span><h2>执行进度</h2></div>
+          <p class="help">执行时，新的说明和工具状态会出现在这里。</p>
+          <h3>工具操作</h3><div id="tool-activity"><p class="help">还没有工具操作</p></div>
+          <h3>运行动态</h3><ol id="run-log" class="run-log"><li class="help">等待任务开始</li></ol>
+          <details class="task-details"><summary>任务记录与文件位置</summary><dl>
+            <dt>任务编号</dt><dd id="task-id">尚未创建</dd>
+            <dt>项目内工作目录</dt><dd id="task-workspace">任务开始后生成</dd>
+            <dt>最近一次执行记录</dt><dd id="task-event-log">尚未运行</dd>
+          </dl></details>
+        </aside>
+      </main>
+    </div>
   </body>
 </html>

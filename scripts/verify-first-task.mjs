@@ -4,16 +4,18 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const args = process.argv.slice(2);
-const web = args.length === 2 && args[0] === "--web" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(args[1]);
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const web = args[0] === "--web" && uuid.test(args[1])
+  && (args.length === 2 || (args.length === 4 && args[2] === "--run" && uuid.test(args[3])));
 if (!(args.length === 0 || (args.length === 1 && args[0] === "--sdk") || web)) {
-  console.error("验证参数只允许 --sdk 或 --web <任务UUID>；不传参数时检查原 CLI 练习。");
+  console.error("验证参数只允许 --sdk 或 --web <执行会话UUID> [--run <运行UUID>]；不传参数时检查原 CLI 练习。");
   process.exit(1);
 }
 const stage = args[0] === "--sdk" ? "sdk-task" : "first-task";
 const cwd = web ? path.join(root, "workspaces", "web", args[1]) : path.resolve(root);
 const inputPath = web ? path.join(cwd, "numbers.csv") : path.join(root, "examples", "01-file-task", "numbers.csv");
 const outputPath = web ? path.join(cwd, "result.json") : path.join(root, "workspaces", stage, "result.json");
-const eventPath = web ? path.join(root, "runtime", "web", `${args[1]}.events.jsonl`) : path.join(root, "runtime", `${stage}.events.jsonl`);
+const eventPath = web ? path.join(root, "runtime", "web", `${args[1]}${args.length === 4 ? `.${args[3]}` : ""}.events.jsonl`) : path.join(root, "runtime", `${stage}.events.jsonl`);
 const ensure = (condition, message) => { if (!condition) throw new Error(message); };
 
 try {

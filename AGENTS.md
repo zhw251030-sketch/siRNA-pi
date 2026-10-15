@@ -12,6 +12,7 @@
 - 保持实现尽量小；复杂目录、容器编排、工具治理和自进化机制在对应阶段引入。
 - 区分 Pi 已有能力、参考项目新增能力和本学习仓库新增能力。
 - 用户的当前指示优先于这里的默认安排。
+- 用户已澄清以原仓库正式架构为重建目标，包括 Agent Compose 与独立任务容器。逐步学习时应尽量保持同一职责分层、任务接口、事件语义和交互流程；暂缓功能须标明，不能默默另设计一套简化协议。
 
 ## 参考与版本
 
@@ -42,12 +43,14 @@
 - 使用已有 Node 24 运行环境即可；不再向用户主目录的 .pi、.config 或 /tmp 写入本项目状态。
 - MiniMax 国内服务使用 minimax-cn / MiniMax-M3。启动入口是 npm run pi:minimax，读取 docs/auth.json 并将 Pi 状态目录设为 runtime/pi。
 - SDK 入口为 npm run pi:sdk；--check 只创建并检查会话，不调用模型。SDK 状态位于 runtime/pi-sdk，任务事件位于 runtime/sdk-task.events.jsonl，结果位于 workspaces/sdk-task/result.json，保留原 CLI 练习证据。
-- 本阶段仅开放原生 read/write，关闭扩展、MCP、自动资源发现和会话保存；这是学习配置，不是操作系统级沙箱。
-- 网页入口为 npm run web，只监听 127.0.0.1:3000，经 SSH 隧道访问；每次新建内存会话和 workspaces/web/<UUID>，事件位于 runtime/web/<UUID>.events.jsonl。网页 read/write 使用范围检查，不能读写任务目录外的文件；不要把它称为容器沙箱。
-- 通用 SDK 调用已抽到 src/pi-session.mjs；旧 scripts/pi-sdk.mjs 仍保留命令行入口。网页没有历史恢复、流式显示或停止按钮；真实网页统计任务可用 npm run verify:web-task -- <UUID> 检查。
+- 本阶段仅开放原生 read/write，关闭扩展、MCP 和自动资源发现；CLI/SDK 命令行练习仍用内存会话，网页使用项目内 Pi 持久化会话。这不是操作系统级沙箱。
+- 网页入口为 npm run web → apps/api/bootstrap.mjs，只监听 127.0.0.1:3000，经 SSH 隧道访问。先 POST /v1/tasks 创建，再 POST /v1/tasks/:id/messages 发送；不要恢复成旧的一次性合并接口。
+- 网页历史保存在 runtime/tasks/tasks.sqlite；Pi 上下文位于 runtime/pi-web/sessions；执行元数据位于 runtime/task-sessions。每项任务沿用 workspaces/web/<executionSessionId>，日志按 runtime/web/<executionSessionId>.<runId>.events.jsonl 分开。网页 read/write 不能越过任务目录，不称为容器沙箱。
+- 通用 SDK 调用位于 packages/agent-runtime/pi-sdk.mjs；scripts/pi-sdk.mjs 保留命令行入口。网页支持多轮、SSE、历史恢复，尚无停止按钮。SSE 的 done 后还要保存消息并发出 task_saved；连接断开不能取消已接受任务，正常关闭服务也须等待后台任务落盘。
+- 当前网页统计检查：npm run verify:web-task -- <executionSessionId> --run <runId>；旧命令 --web <UUID> 仅用于原第 3 步历史样例。
 
 ## 当前阶段
 
-2026-10-15：已完成仓库初始化、原生 Pi 安装、CLI 首次任务、SDK 单任务示例和最小网页。服务器使用 Node 24.16.0 / Pi 1.2.0；CLI、SDK、网页三次样例任务均各出现 4 次模型响应、3 次成功工具调用，结果 count=4、sum=100、mean=25，均通过独立检查；17 项离线测试通过。尚未实现流式显示、会话复用、历史恢复或自进化。
+2026-10-15：已完成第 4 步的任务流程对齐，采用 apps/api、packages/task-core、packages/agent-runtime、public 的职责目录。真实网页第一轮统计任务通过独立验收（4 次模型响应、3 次工具调用）；重启网页服务后在同一任务追问，Pi 保持同一会话编号并正确回忆前文标记（1 次模型响应、0 次工具调用）。原 CLI/SDK/旧网页证据仍通过检查。完整记录见 docs/05-对齐原仓库任务架构.md。尚未部署 Agent Compose、任务容器、停止功能或自进化。
 
-下一步先理解 docs/04-网页连接Pi.md 的请求路径，再对照参考仓库学习 SSE 流式事件；按用户学习节奏先解释再实现。服务器直接访问私有 GitHub 的认证尚未配置，继续通过本地 GitHub 授权与项目内 Git bundle 同步。
+下一步先沿 docs/05-对齐原仓库任务架构.md 理解当前请求和保存链路，再按原仓库接入正式 Agent Compose 与任务容器。只读预检发现 hanwen 无 Docker socket 权限，尚无 agent-compose 命令；容器阶段须解决权限和状态目录前提，不擅自修改系统用户组或项目外配置。服务器直接访问私有 GitHub 的认证尚未配置，继续通过本地 GitHub 授权与项目内 Git bundle 同步。

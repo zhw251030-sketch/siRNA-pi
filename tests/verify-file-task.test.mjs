@@ -10,7 +10,7 @@ const testRoot = path.join(root, "runtime", "verification-tests");
 fs.mkdirSync(testRoot, { recursive: true });
 
 // 全部是人造记录，不使用密钥、真实运行日志或模型服务。
-function fixture(t, sdk = true, web = false) {
+function fixture(t, sdk = true, web = false, runId) {
   const dir = fs.mkdtempSync(path.join(testRoot, "case-"));
   t.after(() => {
     assert.equal(path.dirname(dir), testRoot);
@@ -20,7 +20,7 @@ function fixture(t, sdk = true, web = false) {
   const taskId = "12345678-1234-4123-8123-123456789abc";
   const workspace = web ? `workspaces/web/${taskId}` : `workspaces/${stage}`;
   const input = web ? `${workspace}/numbers.csv` : "examples/01-file-task/numbers.csv";
-  const eventLog = web ? `runtime/web/${taskId}.events.jsonl` : `runtime/${stage}.events.jsonl`;
+  const eventLog = web ? `runtime/web/${taskId}${runId ? `.${runId}` : ""}.events.jsonl` : `runtime/${stage}.events.jsonl`;
   for (const relative of ["scripts", "runtime/web", "examples/01-file-task", workspace]) {
     fs.mkdirSync(path.join(dir, relative), { recursive: true });
   }
@@ -42,8 +42,8 @@ function fixture(t, sdk = true, web = false) {
   events.push({ type: "message_end", message: { role: "assistant", provider: "minimax-cn", model: "MiniMax-M3", stopReason: "stop" } });
   events.push({ type: "agent_settled", aborted: false });
   return {
-    events, resultPath,
-    run(args = web ? ["--web", taskId] : sdk ? ["--sdk"] : []) {
+    events, resultPath, taskId,
+    run(args = web ? ["--web", taskId, ...(runId ? ["--run", runId] : [])] : sdk ? ["--sdk"] : []) {
       fs.writeFileSync(path.join(dir, eventLog), events.map((event) => JSON.stringify(event)).join("\n") + "\n");
       return spawnSync(process.execPath, [path.join(dir, "scripts/verify-first-task.mjs"), ...args], { encoding: "utf8" });
     },
@@ -95,3 +95,30 @@ test("网页统计检查拒绝不匹配的任务目录", (t) => {
   assert.equal(run.status, 1);
   assert.match(run.stderr, /运行目录/);
 });
+
+test("网页统计检查按执行会话和运行编号读取轨迹，并使用会话工作目录", (t) => {
+  const run = fixture(t, true, true, "87654321-4321-4321-8321-cba987654321").run();
+  assert.equal(run.status, 0, run.stderr);
+  assert.deepEqual(JSON.parse(run.stdout).result, { count: 4, sum: 100, mean: 25 });
+});
+
+test("指定的网页运行轨迹不存在时，不回退到旧的会话轨迹", (t) => {
+  const f = fixture(t, true, true);
+  const run = f.run(["--web", f.taskId, "--run", "87654321-4321-4321-8321-cba987654321"]);
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /无法读取或解析运行记录/);
+});
+
+for (const args of [
+  ["--run", "87654321-4321-4321-8321-cba987654321"],
+  ["--sdk", "--run", "87654321-4321-4321-8321-cba987654321"],
+  ["--web", "12345678-1234-4123-8123-123456789abc", "--run"],
+  ["--web", "12345678-1234-4123-8123-123456789abc", "--run", "../other"],
+  ["--web", "../other", "--run", "87654321-4321-4321-8321-cba987654321"],
+]) {
+  test(`网页运行检查拒绝无效参数 ${args.join(" ")}`, (t) => {
+    const run = fixture(t, true, true).run(args);
+    assert.equal(run.status, 1);
+    assert.match(run.stderr, /参数/);
+  });
+}

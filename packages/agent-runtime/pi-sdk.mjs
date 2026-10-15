@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createWorkspaceOperations } from "./workspace-files.mjs";
 
-export const projectRoot = path.resolve(fileURLToPath(new URL("../", import.meta.url)));
+export const projectRoot = path.resolve(fileURLToPath(new URL("../../", import.meta.url)));
 
 export function ensureProjectDirectory(directory) {
   const relative = path.relative(projectRoot, directory);
@@ -17,7 +17,8 @@ export function ensureProjectDirectory(directory) {
   }
 }
 
-export async function createLearningSession({ cwd = projectRoot, agentName = "pi-sdk", scopedFiles = false } = {}) {
+export async function createLearningSession({ cwd = projectRoot, agentName = "pi-sdk", scopedFiles = false,
+  persistSession = false, sessionFile } = {}) {
   const agentDir = path.join(projectRoot, "runtime", agentName);
   const temporaryDir = path.join(projectRoot, "runtime", "tmp");
   const cacheDir = path.join(projectRoot, "runtime", "cache");
@@ -69,20 +70,35 @@ export async function createLearningSession({ cwd = projectRoot, agentName = "pi
       createWriteToolDefinition(cwd, { operations: operations.write }),
     ];
   }
+  let sessionManager = SessionManager.inMemory(cwd);
+  if (persistSession) {
+    const sessionDir = path.join(agentDir, "sessions");
+    ensureProjectDirectory(sessionDir);
+    if (sessionFile) {
+      if (path.dirname(sessionFile) !== sessionDir || (fs.existsSync(sessionFile) && fs.realpathSync(sessionFile) !== sessionFile)) {
+        throw new Error("session file path");
+      }
+      // 没有发过消息的空会话不会落盘；第一轮开始前允许创建。
+      sessionManager = fs.existsSync(sessionFile) ? SessionManager.open(sessionFile, sessionDir, cwd) : SessionManager.create(cwd, sessionDir);
+    } else sessionManager = SessionManager.create(cwd, sessionDir);
+  }
   const { session } = await createAgentSession({
     cwd, agentDir, model, modelRuntime, settingsManager, resourceLoader,
     thinkingLevel: "off", tools: ["read", "write"], customTools,
-    sessionManager: SessionManager.inMemory(cwd),
+    sessionManager,
   });
   return { session, agentDir, redact: (text) => text.replaceAll(apiKey, "[REDACTED]") };
 }
 
 export async function runPiTask({ prompt, cwd = projectRoot, agentName = "pi-sdk", eventPath,
-  source = "sdk", scopedFiles = false, onEvent = () => {}, timeoutMs = 180000, maxResponses = 12 }) {
+  source = "sdk", scopedFiles = false, onEvent = () => {}, timeoutMs = 180000, maxResponses = 12,
+  persistSession = false, sessionFile, onSession = () => {} }) {
   let session, unsubscribe, eventFile, timer;
   try {
-    const created = await createLearningSession({ cwd, agentName, scopedFiles });
+    const created = await createLearningSession({ cwd, agentName, scopedFiles, persistSession, sessionFile });
     session = created.session;
+    const initialMessageCount = session.messages.length;
+    onSession({ sessionId: session.sessionId, sessionFile: session.sessionManager.getSessionFile() });
     if (fs.existsSync(eventPath) && fs.lstatSync(eventPath).isSymbolicLink()) throw new Error("event path");
     eventFile = fs.openSync(eventPath, source === "web" ? "wx" : "w", 0o600);
     const record = (event) => fs.writeSync(eventFile, created.redact(JSON.stringify(event)) + "\n");
@@ -106,7 +122,7 @@ export async function runPiTask({ prompt, cwd = projectRoot, agentName = "pi-sdk
     });
     timer = setTimeout(() => stop("timeout"), timeoutMs);
     await session.prompt(prompt);
-    const messages = session.messages.filter((message) => message.role === "assistant");
+    const messages = session.messages.slice(initialMessageCount).filter((message) => message.role === "assistant");
     if (limitReached || settled?.aborted !== false || session.state.errorMessage || messages.at(-1)?.stopReason !== "stop" ||
         messages.some((message) => !["toolUse", "stop"].includes(message.stopReason))) throw new Error("incomplete run");
     const answer = messages.at(-1).content.filter((part) => part.type === "text").map((part) => part.text).join("\n");

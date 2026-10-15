@@ -14,7 +14,7 @@ async function fixture(t) {
     assert.equal(path.dirname(root), parent);
     await fs.rm(root, { recursive: true, force: true });
   });
-  const { createWorkspaceOperations } = await import("../src/workspace-files.mjs");
+  const { createWorkspaceOperations } = await import("../packages/agent-runtime/workspace-files.mjs");
   return { root, workspace, ...createWorkspaceOperations(workspace) };
 }
 

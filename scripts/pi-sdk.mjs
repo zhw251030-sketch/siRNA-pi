@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { projectRoot, ensureProjectDirectory, createLearningSession, runPiTask } from "../src/pi-session.mjs";
+import { projectRoot, ensureProjectDirectory, createLearningSession, runPiTask } from "../packages/agent-runtime/pi-sdk.mjs";
 
 const args = process.argv.slice(2);
 if (args.length > 1 || (args.length === 1 && args[0] !== "--check")) {
