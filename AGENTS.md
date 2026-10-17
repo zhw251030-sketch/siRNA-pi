@@ -59,3 +59,9 @@
 2026-10-17：用户确认系统安装并提供管理员认证，已安装 uidmap 1:4.8.1-2ubuntu2.2，升级/删除为零。项目 rootless Docker 28.3.0 已由 hanwen 启动，固定摘要的官方 hello-world 容器运行成功，退出码 0，测试容器已自动清理。详见 docs/06-Docker运行环境.md。
 
 Docker 使用脚本 scripts/project-docker.sh 显式连接 runtime/docker/run/docker.sock；不要让命令回落到共享 /var/run/docker.sock。启动入口 scripts/start-project-docker.sh，配置 config/docker/daemon.json，状态均在 runtime/docker；外层目录 0700，Docker 数据子目录允许其原生的 0710。已有 PID/socket/RootlessKit 状态时拒绝启动，不盲目清理；尚未配置开机自启。实际 cgroup 为 systemd/v2，内存和进程数限制被 Docker 报告为可用并由测试容器接受，CPU 配额不可用。下一步接入 Agent Compose 控制服务及 guest，当前网页仍为 local-pi。后续新系统权限/服务变更继续按用户要求确认，不把这次 uidmap 授权扩大到其他系统操作。
+
+2026-10-18：Agent Compose v2609.3.0 控制服务已健康运行，127.0.0.1:7410；配置 compose.yml / agent-compose.yml，入口 scripts/start-project-agent-compose.sh、project-agent-compose.sh。项目独立管理 token 位于 runtime/agent-compose/control.env（0600，不显示或提交），与模型 key 分开；CLI 在管理容器内经 Unix socket 连接，HTTP 管理请求要求 token。不要输出 Docker Compose 完整解析配置或控制容器完整 inspect，以免显示 token；配置检查用 config --quiet。
+
+已用 scripts/verify-agent-compose-workspace.mjs 完成真实无模型命令验收：创建 guest、运行成功、文件挂载与网络核对、宿主/guest 未登录请求均 401、停止后资源 released 且文件保留。证据 runtime/agent-compose/verify-RaHJj9；日期分层路径从 inspect.workspace_path 读取。默认 guest 实际无内存/进程/CPU 配额。官方 guest 内置 Pi 0.82.1，本轮未启动它；不能据此声称个人 Pi 1.2.0 容器接通。AGENT_COMPOSE_RUNTIME_BASE_URL 本轮刻意留空，避免模型代理准备读取凭据；后续真实模型阶段才配置可访问回调和模型配置。
+
+当前下一步：制作并验证 Pi 1.2.0 定制 guest 与 MiniMax，再接网页 Agent Compose 运行时。现有网页仍 local-pi / taskContainers=false，49 项离线测试通过；本轮不修改研究阶段。完整解释和已验证边界见 docs/07-AgentCompose与任务环境.md。大镜像直连下载失败后采用官方摘要校验的本机归档传输，归档保留 runtime/image-transfer，不配置系统代理。

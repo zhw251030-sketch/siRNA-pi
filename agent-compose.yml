@@ -1,0 +1,11 @@
+# Same agent name and driver boundary as the reference; no model run in this step.
+name: sirna-pi-learning
+agents:
+  designer:
+    provider: pi
+    model: minimax-cn/MiniMax-M3
+    image: chaitin/agent-compose-guest:v2609.3.0@sha256:14f0740fe39ba22da96edeff9d40c1fd41185389bbb1edcf5cb68e7af85f7b7b
+    driver:
+      docker: {}
+    sandbox:
+      stopped_runtime_policy: remove

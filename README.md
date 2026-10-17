@@ -14,7 +14,8 @@
 - 本轮代码：按原仓库拆开“创建任务”和“发送消息”，增加任务列表、SQLite 历史、同任务多轮会话、SSE 执行动态，并采用 `apps/api`、`packages/task-core`、`packages/agent-runtime` 的职责目录。
 - 本轮验证：49 项离线测试通过；真实网页统计结果正确，服务重启后同一 Pi 会话成功继续回答前文问题。完整记录见 [第 4 步：对齐原仓库任务架构](docs/05-对齐原仓库任务架构.md)。
 - 2026-10-17：经确认安装 uidmap，启动项目 rootless Docker，固定摘要的官方 hello-world 容器运行成功、退出码 0。全部项目数据位于指定目录；已核对重启和客户端连接范围。见 [第 5 步 A：Docker 运行环境](docs/06-Docker运行环境.md)。
-- 后续继续接入正式 Agent Compose 与 Pi 任务容器。网页仍使用 local-pi；CPU 配额、开机自启、任务停止操作、专业 siRNA 工具与自进化尚未实现。
+- 2026-10-18：启动正式 Agent Compose v2609.3.0，由其创建命令任务容器，验证执行、文件挂载、管理接口鉴权和停止释放；文件及运行记录保留，49 项离线测试通过。见 [第 5 步 B：Agent Compose 与任务环境](docs/07-AgentCompose与任务环境.md)。
+- 后续验证 Pi 1.2.0 定制 guest 与 MiniMax，再接入网页。网页仍使用 local-pi；guest 资源配额、开机自启、网页停止操作、专业 siRNA 工具与自进化尚未实现。
 
 安装位置、文件解释和验证记录见 [第 1 步 A：安装与运行 Pi](docs/01-安装与运行Pi.md)。服务器项目目录是 `/home/hanwen/Project/project/siNRA-pi/`，按用户指定拼写保留。
 
@@ -35,6 +36,9 @@ SDK 示例、逐段代码解释和实际结果见 [第 2 步：调用 Pi SDK 创
 | `npm run pi:sdk -- --check` | 检查 Pi SDK 会话配置 | 否 |
 | `sh scripts/check-docker-rootless.sh` | 服务器上的 Docker 前提检查，不启动或安装服务 | 否 |
 | `sh scripts/project-docker.sh info` | 检查项目 Docker 的实际模式、目录和能力 | 否 |
+| `sh scripts/start-project-agent-compose.sh` | 准备私有状态并启动 Agent Compose 控制服务 | 否 |
+| `sh scripts/project-agent-compose.sh status` | 查询管理服务状态；同一入口支持 up、inspect 等命令 | 否 |
+| `node scripts/verify-agent-compose-workspace.mjs` | 新建固定命令测试环境，检查文件及隔离范围，再停止环境；保留证据 | 否 |
 | `npm run pi:sdk` | 再做第 2 步固定文件练习，替换该练习原有输出 | 是 |
 | `npm run verify:first-task` | 验证已有 CLI 样例产物 | 否 |
 | `npm run verify:sdk-task` | 验证已有 SDK 样例产物 | 否 |
@@ -101,6 +105,12 @@ scripts/check-docker-rootless.sh 服务器 rootless Docker 只读预检
 scripts/start-project-docker.sh  以 hanwen 启动项目自己的 Docker
 scripts/project-docker.sh        Docker 客户端连接项目 socket
 config/docker/daemon.json        项目 Docker 的数据、执行、日志与 socket 设置
+compose.yml                     Docker Compose 启动管理服务
+agent-compose.yml               Agent Compose 的 designer 环境配置
+scripts/prepare-agent-compose.mjs        创建私有状态和独立管理令牌
+scripts/start-project-agent-compose.sh   启动管理服务并等待健康
+scripts/project-agent-compose.sh         经控制容器本地 socket 调用官方 CLI
+scripts/verify-agent-compose-workspace.mjs 真实命令工作区验收
 apps/api/bootstrap.mjs      组合数据库、运行时与 HTTP 服务，启动网页
 apps/api/router.mjs         任务接口、SSE 传输与静态页面
 packages/task-core/task-store.mjs           SQLite 任务、消息和运行事件
@@ -131,7 +141,8 @@ docs/03-SDK创建会话.md        SDK 应用代码与实际任务讲解
 docs/04-网页连接Pi.md         网页到服务器、SDK、文件的完整路径
 docs/05-对齐原仓库任务架构.md 当前任务流程、职责分层和正式架构方向
 docs/06-Docker运行环境.md     系统前提、项目 Docker 和真实容器验证
+docs/07-AgentCompose与任务环境.md 控制服务、任务环境、挂载与实际验收
 docs/superpowers/plans/      安装步骤与执行记录
 ```
 
-服务器的 `node_modules/` 保存依赖，`runtime/` 保存运行状态，`workspaces/` 保存练习产物；这些都不进入 Git。网页任务历史位于 `runtime/tasks/tasks.sqlite`；Pi 上下文会话位于 `runtime/pi-web/sessions/`；同一执行会话沿用 `workspaces/web/<executionSessionId>/`，每次运行另有 `runtime/web/<executionSessionId>.<runId>.events.jsonl`。文件范围检查仍是应用层限制，尚未提供独立容器。
+服务器的 `node_modules/` 保存依赖，`runtime/` 保存运行状态，`workspaces/` 保存练习产物；这些都不进入 Git。网页任务历史位于 `runtime/tasks/tasks.sqlite`；Pi 上下文会话位于 `runtime/pi-web/sessions/`；同一执行会话沿用 `workspaces/web/<executionSessionId>/`，每次运行另有 `runtime/web/<executionSessionId>.<runId>.events.jsonl`。网页的文件范围检查仍是应用层限制，尚未切换到任务容器。新管理服务的数据位于 `runtime/agent-compose/data/`，本轮命令环境的目录由其按日期与 sandboxId 组织，独立于现有网页工作区。

@@ -1,0 +1,49 @@
+# Docker Compose starts the manager. agent-compose.yml describes its task guests.
+name: sirna-pi
+services:
+  agent-compose:
+    image: chaitin/agent-compose:v2609.3.0@sha256:91168af6c048ca811cff33a6fddbb1c176b1636456add94fb506d9b9952d0cb3
+    platform: linux/amd64
+    environment:
+      RUNTIME_DRIVER: docker
+      DATA_ROOT: /data
+      HTTP_LISTEN: 0.0.0.0:7410
+      DOCKER_HOST: unix:///var/run/docker.sock
+      AGENT_COMPOSE_SOCKET: /var/run/agent-compose.sock
+      AGENT_COMPOSE_HOST: ""
+      # Command-only learning step: no model facade or provider credential yet.
+      AGENT_COMPOSE_RUNTIME_BASE_URL: ""
+      DEFAULT_IMAGE: chaitin/agent-compose-guest:v2609.3.0@sha256:14f0740fe39ba22da96edeff9d40c1fd41185389bbb1edcf5cb68e7af85f7b7b
+    env_file:
+      - path: ./runtime/agent-compose/control.env
+        required: true
+    volumes:
+      - type: bind
+        source: ./runtime/docker/run/docker.sock
+        target: /var/run/docker.sock
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./runtime/agent-compose/data
+        target: /data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./agent-compose.yml
+        target: /project/agent-compose.yml
+        read_only: true
+        bind:
+          create_host_path: false
+    working_dir: /project
+    ports:
+      - "127.0.0.1:7410:7410"
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, /app/agent-compose, --json, status]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    networks:
+      default:
+        aliases: [agent-compose]
