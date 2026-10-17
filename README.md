@@ -14,6 +14,7 @@
 - 本轮代码：按原仓库拆开“创建任务”和“发送消息”，增加任务列表、SQLite 历史、同任务多轮会话、SSE 执行动态，并采用 `apps/api`、`packages/task-core`、`packages/agent-runtime` 的职责目录。
 - 本轮验证：49 项离线测试通过；真实网页统计结果正确，服务重启后同一 Pi 会话成功继续回答前文问题。完整记录见 [第 4 步：对齐原仓库任务架构](docs/05-对齐原仓库任务架构.md)。
 - 后续继续接入正式 Agent Compose 与任务容器。目前服务器 Docker 使用权限尚未满足条件；停止操作、专业 siRNA 工具与自进化仍未实现。
+- 2026-10-17：完成 Docker 只读预检，准备项目 rootless Docker 配置及检查脚本。缺少的系统包 uidmap 尚待确认安装；容器还未启动。见 [第 5 步 A：Docker 运行环境](docs/06-Docker运行环境.md)。
 
 安装位置、文件解释和验证记录见 [第 1 步 A：安装与运行 Pi](docs/01-安装与运行Pi.md)。服务器项目目录是 `/home/hanwen/Project/project/siNRA-pi/`，按用户指定拼写保留。
 

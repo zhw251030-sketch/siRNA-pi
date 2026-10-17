@@ -39,6 +39,7 @@
 
 ## 远端工作范围
 
+- 用户于 2026-10-17 明确授权助手执行全部项目工作及必要管理员操作；涉及系统安装、系统权限/服务变更、破坏性操作等风险命令，先说明具体命令、目标与影响并取得确认。普通只读检查和项目内可逆准备继续执行，不要求用户代做安装。管理员密码只经约定的认证通道使用，不输出、不持久写入项目。
 - 唯一远端工作根目录是 /home/hanwen/Project/project/siNRA-pi；本阶段新增配置、日志、缓存、临时文件、Git 传输文件和练习产物都放在该目录内。
 - 使用已有 Node 24 运行环境即可；不再向用户主目录的 .pi、.config 或 /tmp 写入本项目状态。
 - MiniMax 国内服务使用 minimax-cn / MiniMax-M3。启动入口是 npm run pi:minimax，读取 docs/auth.json 并将 Pi 状态目录设为 runtime/pi。
@@ -54,3 +55,5 @@
 2026-10-15：已完成第 4 步的任务流程对齐，采用 apps/api、packages/task-core、packages/agent-runtime、public 的职责目录。真实网页第一轮统计任务通过独立验收（4 次模型响应、3 次工具调用）；重启网页服务后在同一任务追问，Pi 保持同一会话编号并正确回忆前文标记（1 次模型响应、0 次工具调用）。原 CLI/SDK/旧网页证据仍通过检查。完整记录见 docs/05-对齐原仓库任务架构.md。尚未部署 Agent Compose、任务容器、停止功能或自进化。
 
 下一步先沿 docs/05-对齐原仓库任务架构.md 理解当前请求和保存链路，再按原仓库接入正式 Agent Compose 与任务容器。只读预检发现 hanwen 无 Docker socket 权限，尚无 agent-compose 命令；容器阶段须解决权限和状态目录前提，不擅自修改系统用户组或项目外配置。服务器直接访问私有 GitHub 的认证尚未配置，继续通过本地 GitHub 授权与项目内 Git bundle 同步。
+
+2026-10-17：Docker 准备阶段发现缺少 uidmap，已有从属 UID/GID 范围和可用用户命名空间。准备项目 rootless Docker 配置与只读检查脚本，详情见 docs/06-Docker运行环境.md。管理员安装尚待用户确认和身份验证；尚未启动 Docker 或任务容器。

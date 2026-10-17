@@ -1,0 +1,14 @@
+{
+  "hosts": [
+    "unix:///home/hanwen/Project/project/siNRA-pi/runtime/docker/run/docker.sock"
+  ],
+  "data-root": "/home/hanwen/Project/project/siNRA-pi/runtime/docker/data",
+  "exec-root": "/home/hanwen/Project/project/siNRA-pi/runtime/docker/run/exec",
+  "pidfile": "/home/hanwen/Project/project/siNRA-pi/runtime/docker/run/dockerd.pid",
+  "storage-driver": "overlay2",
+  "log-driver": "local",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  }
+}
