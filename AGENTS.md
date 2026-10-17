@@ -56,4 +56,6 @@
 
 下一步先沿 docs/05-对齐原仓库任务架构.md 理解当前请求和保存链路，再按原仓库接入正式 Agent Compose 与任务容器。只读预检发现 hanwen 无 Docker socket 权限，尚无 agent-compose 命令；容器阶段须解决权限和状态目录前提，不擅自修改系统用户组或项目外配置。服务器直接访问私有 GitHub 的认证尚未配置，继续通过本地 GitHub 授权与项目内 Git bundle 同步。
 
-2026-10-17：Docker 准备阶段发现缺少 uidmap，已有从属 UID/GID 范围和可用用户命名空间。准备项目 rootless Docker 配置与只读检查脚本，详情见 docs/06-Docker运行环境.md。管理员安装尚待用户确认和身份验证；尚未启动 Docker 或任务容器。
+2026-10-17：用户确认系统安装并提供管理员认证，已安装 uidmap 1:4.8.1-2ubuntu2.2，升级/删除为零。项目 rootless Docker 28.3.0 已由 hanwen 启动，固定摘要的官方 hello-world 容器运行成功，退出码 0，测试容器已自动清理。详见 docs/06-Docker运行环境.md。
+
+Docker 使用脚本 scripts/project-docker.sh 显式连接 runtime/docker/run/docker.sock；不要让命令回落到共享 /var/run/docker.sock。启动入口 scripts/start-project-docker.sh，配置 config/docker/daemon.json，状态均在 runtime/docker；外层目录 0700，Docker 数据子目录允许其原生的 0710。已有 PID/socket/RootlessKit 状态时拒绝启动，不盲目清理；尚未配置开机自启。实际 cgroup 为 systemd/v2，内存和进程数限制被 Docker 报告为可用并由测试容器接受，CPU 配额不可用。下一步接入 Agent Compose 控制服务及 guest，当前网页仍为 local-pi。后续新系统权限/服务变更继续按用户要求确认，不把这次 uidmap 授权扩大到其他系统操作。

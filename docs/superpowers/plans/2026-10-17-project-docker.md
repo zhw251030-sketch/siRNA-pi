@@ -24,19 +24,19 @@ Files: `scripts/check-docker-rootless.sh`、`config/docker/daemon.json`、`docs/
 - [x] 读取参考项目和官方说明，核对现有程序、系统版本、文件系统、用户命名空间和软件包模拟结果。
 - [x] 准备只读检查脚本和指定绝对路径的 daemon.json；记录系统安装命令及其目录外影响。
 - [x] 在服务器用 `sh -n` 检查脚本、用 `dockerd --validate --config-file` 检查配置，并实际运行只读预检。配置检查通过；预检如实报告缺少 newuidmap/newgidmap，以退出码 1 停止，没有启动服务。
-- [ ] 审查改动并同步个人仓库 main；文档明确记录仍待完成的事项。
+- [x] 准备文件已审查并通过 d6e2034 同步个人仓库 main 和服务器；明确区分准备与实际运行。
 
 ## Task 2：经确认安装系统前提
 
-- [ ] 用户确认 docs/06 中列出的 apt 命令和系统写入范围；确认可用的管理员身份验证方式。没有确认不执行安装。
-- [ ] 管理员身份运行 `apt-get update`，再模拟指定版本的安装；只接受 uidmap 一个新增包，范围变化则停止再确认。
-- [ ] 保留实际 apt 交互确认，核对事务列表后安装。记录包版本与验证结果，不记录密码。
-- [ ] 用 hanwen 运行 `sh scripts/check-docker-rootless.sh`，确认前提通过。
+- [x] 用户确认继续执行并提供管理员账号；通过 SSH 密码提示及 sudo 验证。密码不写入项目。
+- [x] 管理员身份运行 `apt-get update`，再模拟指定版本的安装；实际清单仍仅新增 uidmap，无升级/删除。
+- [x] 不使用 -y，安装 uidmap 1:4.8.1-2ubuntu2.2 成功；本次 APT 没有额外 Y/n 问题。验证两项辅助程序权限后退出管理员会话。
+- [x] 用 hanwen 运行 `sh scripts/check-docker-rootless.sh`，前提全部通过。
 
 ## Task 3：启动和最小容器验证
 
-- [ ] 确认项目内状态路径无重定向、目录私有；检查旧 PID/socket 后准备启动入口，将临时文件、日志及 Docker 状态限制在项目目录。
-- [ ] 以 hanwen 直接启动官方 dockerd-rootless.sh；不使用全局服务安装器，不增加公网监听端口。
-- [ ] 通过项目 Unix socket 检查 rootless 安全选项与 DockerRootDir；失败则记录实际错误，不更改系统安全配置绕过。
-- [ ] 使用来源已核对的小型官方镜像运行容器，记录实际 digest、输出、退出码及资源限制的可用程度。
-- [ ] 更新学习记录并提交 main。只有本项通过后再推进 Agent Compose，不能将 Docker 配置验收写成正式任务架构已经完成。
+- [x] 新增 start-project-docker.sh 和 project-docker.sh，固定项目路径与临时目录；外层目录私有，拒绝重定向和重复启动。
+- [x] 以 hanwen 启动官方 dockerd-rootless.sh；完成正常停止与重启验证。根据真实重启结果修正 data-root 0710 权限检查。
+- [x] 通过项目 Unix socket 确认 rootless、overlay2 及正确的 DockerRootDir；客户端排除继承的其他连接设置。
+- [x] 固定摘要的官方 hello-world 执行成功，退出码 0。无网络、只读根目录，接受 32 MiB 内存与 32 进程上限；不声称已验证资源耗尽或 CPU 配额。
+- [x] 更新学习记录，明确 Docker 已就绪、Agent Compose 和 Pi 任务容器尚未接入；本轮实现按 main 同步流程交付。

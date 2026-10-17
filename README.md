@@ -13,8 +13,8 @@
 - 2026-10-15：完成最小网页与 HTTP 服务，通过浏览器提交统计任务；4 次模型响应、3 次工具调用，真实文件通过独立验证，17 项离线测试通过。
 - 本轮代码：按原仓库拆开“创建任务”和“发送消息”，增加任务列表、SQLite 历史、同任务多轮会话、SSE 执行动态，并采用 `apps/api`、`packages/task-core`、`packages/agent-runtime` 的职责目录。
 - 本轮验证：49 项离线测试通过；真实网页统计结果正确，服务重启后同一 Pi 会话成功继续回答前文问题。完整记录见 [第 4 步：对齐原仓库任务架构](docs/05-对齐原仓库任务架构.md)。
-- 后续继续接入正式 Agent Compose 与任务容器。目前服务器 Docker 使用权限尚未满足条件；停止操作、专业 siRNA 工具与自进化仍未实现。
-- 2026-10-17：完成 Docker 只读预检，准备项目 rootless Docker 配置及检查脚本。缺少的系统包 uidmap 尚待确认安装；容器还未启动。见 [第 5 步 A：Docker 运行环境](docs/06-Docker运行环境.md)。
+- 2026-10-17：经确认安装 uidmap，启动项目 rootless Docker，固定摘要的官方 hello-world 容器运行成功、退出码 0。全部项目数据位于指定目录；已核对重启和客户端连接范围。见 [第 5 步 A：Docker 运行环境](docs/06-Docker运行环境.md)。
+- 后续继续接入正式 Agent Compose 与 Pi 任务容器。网页仍使用 local-pi；CPU 配额、开机自启、任务停止操作、专业 siRNA 工具与自进化尚未实现。
 
 安装位置、文件解释和验证记录见 [第 1 步 A：安装与运行 Pi](docs/01-安装与运行Pi.md)。服务器项目目录是 `/home/hanwen/Project/project/siNRA-pi/`，按用户指定拼写保留。
 
@@ -33,6 +33,8 @@ SDK 示例、逐段代码解释和实际结果见 [第 2 步：调用 Pi SDK 创
 | `npm run web` | 启动 `apps/api/bootstrap.mjs`；只监听 `127.0.0.1:3000` | 启动不调用；网页发送消息后调用 |
 | `npm test` | 运行离线行为测试 | 否 |
 | `npm run pi:sdk -- --check` | 检查 Pi SDK 会话配置 | 否 |
+| `sh scripts/check-docker-rootless.sh` | 服务器上的 Docker 前提检查，不启动或安装服务 | 否 |
+| `sh scripts/project-docker.sh info` | 检查项目 Docker 的实际模式、目录和能力 | 否 |
 | `npm run pi:sdk` | 再做第 2 步固定文件练习，替换该练习原有输出 | 是 |
 | `npm run verify:first-task` | 验证已有 CLI 样例产物 | 否 |
 | `npm run verify:sdk-task` | 验证已有 SDK 样例产物 | 否 |
@@ -95,6 +97,10 @@ package.json                Pi 依赖和命令入口
 package-lock.json           npm 生成的精确依赖记录
 scripts/pi-minimax.mjs       读取项目内凭据并启动原生 Pi
 scripts/pi-sdk.mjs           调用已有 SDK 创建会话、订阅事件和提交任务
+scripts/check-docker-rootless.sh 服务器 rootless Docker 只读预检
+scripts/start-project-docker.sh  以 hanwen 启动项目自己的 Docker
+scripts/project-docker.sh        Docker 客户端连接项目 socket
+config/docker/daemon.json        项目 Docker 的数据、执行、日志与 socket 设置
 apps/api/bootstrap.mjs      组合数据库、运行时与 HTTP 服务，启动网页
 apps/api/router.mjs         任务接口、SSE 传输与静态页面
 packages/task-core/task-store.mjs           SQLite 任务、消息和运行事件
@@ -124,6 +130,7 @@ docs/02-MiniMax与首次文件任务.md 模型接入与真实任务记录
 docs/03-SDK创建会话.md        SDK 应用代码与实际任务讲解
 docs/04-网页连接Pi.md         网页到服务器、SDK、文件的完整路径
 docs/05-对齐原仓库任务架构.md 当前任务流程、职责分层和正式架构方向
+docs/06-Docker运行环境.md     系统前提、项目 Docker 和真实容器验证
 docs/superpowers/plans/      安装步骤与执行记录
 ```
 
