@@ -44,7 +44,24 @@
             <div class="composer-footer"><p id="composer-help">选择或创建任务后，可以填入统计示例。</p><button id="recover-message" class="button secondary" type="button" hidden>恢复本次发送</button></div>
           </div>
         </section>
-        <aside class="context-panel panel" aria-label="执行进度">
+        <aside class="context-panel panel" aria-label="任务文件与执行进度">
+          <section id="files-panel" class="files-panel" aria-labelledby="files-heading" aria-busy="false">
+            <div class="files-heading"><div><span class="eyebrow">FILES</span><h2 id="files-heading">任务文件</h2></div><button id="refresh-files" class="button secondary" type="button" disabled>刷新文件</button></div>
+            <div class="file-groups" role="group" aria-label="文件分类">
+              <button id="input-files" class="file-group" type="button" aria-pressed="false" aria-controls="file-list">输入资料（0）</button>
+              <button id="output-files" class="file-group" type="button" aria-pressed="true" aria-controls="file-list">输出结果（0）</button>
+            </div>
+            <p id="files-status" class="help files-status" role="status" aria-live="polite">选择任务后查看文件。</p>
+            <ul id="file-list" class="file-list" aria-label="输出结果"></ul>
+            <section id="file-preview" class="file-preview" aria-labelledby="file-preview-title" hidden>
+              <div class="file-preview-heading"><h3 id="file-preview-title"></h3><button id="close-file-preview" class="button secondary" type="button">关闭预览</button></div>
+              <p id="file-preview-meta" class="file-meta"></p>
+              <p id="file-preview-status" class="help" role="status" aria-live="polite"></p>
+              <pre id="file-preview-text" class="file-preview-text" tabindex="0" aria-label="文件原始文本" hidden></pre>
+              <a id="file-preview-download" class="file-download">下载此文件</a>
+            </section>
+            <p class="file-note">文本可预览至 256 KiB；单文件下载上限 50 MB。</p>
+          </section>
           <div class="panel-heading"><span class="eyebrow">ACTIVITY</span><h2>执行进度</h2></div>
           <p class="help">执行时，新的说明和工具状态会出现在这里。</p>
           <h3>工具操作</h3><div id="tool-activity"><p class="help">还没有工具操作</p></div>

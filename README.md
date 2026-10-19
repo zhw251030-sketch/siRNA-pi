@@ -18,7 +18,8 @@
 - 2026-10-20：构建锁定依赖的 Pi 1.2.0 guest，经 Agent Compose 模型转接接通 MiniMax-M3；真实文件任务和同会话续问通过，停止后容器释放且文件保留。96 项 Node 测试与 4 项 Linux 凭据测试通过。见 [第 5 步 C：容器中的 Pi 与模型连接](docs/08-容器中的Pi与模型连接.md)。
 - 2026-10-20：网页接入正式 Agent Compose RPC，真实统计、不同任务独立环境、网页服务重启后同 Pi 会话续聊通过；170 项 Node 测试与 4 项 Linux 凭据测试通过。详见 [第 5 步 D：网页接入 Agent Compose](docs/09-网页接入AgentCompose.md)。
 - 2026-10-20：完成停止本轮、结束任务与容器释放。真实网页停止后同会话续聊成功，运行中结束后 guest 释放、8 条消息及文件保留，刷新只读；239 项 Node 测试与4项 Linux 凭据测试通过。见 [第 6 步：停止运行与结束任务](docs/10-停止运行与结束任务.md)。
-- 下一步对照原仓库学习任务文件查看和结果获取，再进入工具封装。第 5 步 D 的两个网页 guest 仍保留；本步两个专用验收 guest 已释放，文件保留。资源配额、开机自启、专业 siRNA 工具与自进化尚未实现。
+- 2026-10-20：完成网页任务文件列表、文本预览与下载。已结束任务仍能查看 CSV/JSON，浏览器下载与宿主字节一致，切换任务不混入其他结果。Linux 271 项 Node 测试通过；本轮没有模型调用。见 [第 7 步：网页查看任务文件](docs/11-网页查看任务文件.md)。
+- 下一步对照原仓库增加输入上传及任务文件归档／同步，再进入工具封装。第 5 步 D 的两个网页 guest 仍保留；生命周期专用验收 guest 已释放，文件保留。资源配额、开机自启、专业 siRNA 工具与自进化尚未实现。
 
 安装位置、文件解释和验证记录见 [第 1 步 A：安装与运行 Pi](docs/01-安装与运行Pi.md)。服务器项目目录是 `/home/hanwen/Project/project/siNRA-pi/`，按用户指定拼写保留。
 
@@ -49,6 +50,7 @@ SDK 示例、逐段代码解释和实际结果见 [第 2 步：调用 Pi SDK 创
 | `npm run verify:first-task` | 验证已有 CLI 样例产物 | 否 |
 | `npm run verify:sdk-task` | 验证已有 SDK 样例产物 | 否 |
 | `node scripts/verify-compose-web-task.mjs <taskId>` | 验证新容器网页统计任务的记录、原生会话和真实文件 | 否 |
+| `node scripts/verify-compose-task-files.mjs <taskId>` | 校验文件接口、下载与宿主字节一致、读取不改变任务记录 | 否 |
 | `npm run verify:web-task -- <executionSessionId> --run <runId>` | 验证旧 SDK 网页统计示例的一次具体执行 | 否 |
 | `npm run verify:web-task -- <旧任务编号>` | 兼容第 3 步原有网页样例 | 否 |
 
@@ -139,6 +141,7 @@ scripts/verify-compose-lifecycle.mjs           中断、续聊、释放后的状
 apps/api/router.mjs         任务接口、SSE 传输与静态页面
 packages/task-core/task-store.mjs           SQLite 任务、消息和运行事件
 packages/task-core/task-message-service.mjs 消息检查、去重、执行协调与保存
+packages/task-core/workspace.mjs           任务 input/output 列表、受限读取与 SHA-256
 packages/agent-runtime/runtime-port.mjs     上层调用执行器的边界说明
 packages/agent-runtime/local-pi-runtime.mjs 旧 SDK 任务的执行会话与事件转换
 packages/agent-runtime/pi-sdk.mjs           CLI/网页共用的 SDK 创建与运行
@@ -147,6 +150,7 @@ public/index.html           任务列表、对话、执行动态三个区域
 public/app.js               创建任务、发消息、切换与恢复历史
 public/sse.mjs              连续读取服务端事件，确认保存完成
 public/lifecycle.mjs        停止/结束按钮、迟到状态和待发送草稿规则
+public/files.mjs            文件请求、文本预览与切换任务后的过期响应保护
 public/style.css            网页样式
 scripts/verify-first-task.mjs 检查 CLI、SDK 或网页统计任务的轨迹与真实文件
 tests/verify-file-task.test.mjs 不调用模型的验收程序测试
@@ -155,6 +159,9 @@ tests/task-core.test.mjs     真实 SQLite、多轮消息、去重与恢复测�
 tests/runtime-events.test.mjs SDK 事件转换行为测试
 tests/sse.test.mjs           字节分块、事件帧和保存完成检查
 tests/workspace-files.test.mjs 真实文件范围与链接检查
+tests/task-workspace-files.test.mjs 网页任务文件范围、链接、变化与容量检查
+tests/task-files-http.test.mjs 文件 API、文本/附件响应和错误检查
+tests/files-ui.test.mjs      文件请求竞争、预览与切换任务检查
 tests/pi-session.integration.mjs 已安装 SDK 的会话落盘与重开检查，不调用模型
 config/pi/                  不含密钥的模型和运行设置
 examples/01-file-task/       四个样例数和任务说明

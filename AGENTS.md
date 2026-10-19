@@ -90,3 +90,13 @@ DETACH任务可能在网页进程意外退出后继续：重启提示只能说�
 真实复验任务36ba635d-8b5c-44d2-a4fe-ec272564f5d6：正常统计→停止→同Pi会话01a155d6-267f-73c5-953d-d4237f42c428续问→运行中结束。最终8条消息，guest0、released/graceful，统计文件4/100/25，原生JSONL前8607字节不变、增长到34509。证据runtime/compose-web/lifecycle-v2-{baseline,canceled,resumed,ended}.json；只读验收scripts/verify-compose-lifecycle.mjs。诊断任务f612f8c2-3481-43ae-b92e-c570c4f75cc9也已释放并保留失败记录。第5步D两项旧guest仍运行。239项Node测试与4项Linux凭据测试通过；详细说明docs/10-停止运行与结束任务.md。
 
 最新下一步：对照原仓库任务文件接口，学习网页查看输入/输出与获取结果，再进入工具封装。本步无新系统安装、权限或系统服务配置修改；main单分支，不修改RSI研究项目及其阶段。代码继续本机GitHub提交/推送、项目内bundle同步服务器，不强制覆盖未提交修改。
+
+以上为第6步结束时的安排；以下为最新状态。
+
+2026-10-20：第7步完成网页任务文件列表、文本预览与下载。入口 packages/task-core/workspace.mjs，GET /v1/tasks/:id/files 和 /files/:kind/:encodedName；元数据字段同原仓库，额外 state=ready/unprepared/unsupported。只读已保存的 Compose workspacePath/input|output，不启动模型或容器；旧 SDK 扁平目录明确暂不支持。当前直接读宿主绑定目录，尚无原仓库独立 task-files 归档／同步层，因此仍依赖 graceful stop 保留文件。
+
+Linux 用目录描述符锚定逐层读取，拒绝符号链接、硬链接、特殊文件与越界；前后身份和时间检查发现变化返回409。文本预览256KiB，单文件50,000,000字节，列表哈希100,000,000字节／1000条目，超限413。前端 public/files.mjs 的取消与请求编号防止任务切换后显示旧文件；文件内容只作纯文本。不能称这些HTTP检查为Pi工具沙箱或多用户鉴权。
+
+第7步验收：Linux271项Node测试通过（新增32项，无跳过）；Windows268通过、3项Linux专属检查跳过。已结束任务36ba635d-8b5c-44d2-a4fe-ec272564f5d6的CSV18字节／JSON45字节可预览下载，JSON指纹b62fa3ddc398457bbb243e0bbe7dbed5b4293f896eebbc4f8e1acdee587b03bf，内容4/100/25。另一任务52072665-52fb-4f0e-b93c-167ada3950e4只有自己的输入，没有输出混入。新建空任务b430129d-72e1-4304-9907-cb97103c0d0b用于文件空状态检查，没有发送模型消息。验收入口scripts/verify-compose-task-files.mjs，私有证据runtime/compose-web/files-*-acceptance.json。参考说明docs/11-网页查看任务文件.md。本轮无模型调用、无系统变更，两个旧guest未停止。
+
+最新下一步：按原仓库加入输入文件上传、独立任务文件归档以及与sandbox的同步，再学习工具封装。继续main提交与GitHub/bundle服务器同步，只改siRNA-pi学习项目。

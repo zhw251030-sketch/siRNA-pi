@@ -1,11 +1,15 @@
 import { consumeSse } from "./sse.mjs";
 import { lifecycleControls, mergeTaskState, pendingDisposition } from "./lifecycle.mjs";
+import { createTaskFiles, taskFileUrl, canPreviewFile, canDownloadFile } from "./files.mjs";
 
 const elements = Object.fromEntries([
   "new-session", "refresh-tasks", "task-list", "chat-panel", "chat-title", "task-status",
   "messages", "composer", "message-input", "send-button", "example-button", "recover-message",
   "tool-activity", "run-log", "task-id", "task-workspace", "task-event-log", "composer-help",
   "stop-run", "end-task", "lifecycle-help",
+  "files-panel", "refresh-files", "input-files", "output-files", "files-status", "file-list",
+  "file-preview", "file-preview-title", "file-preview-meta", "file-preview-status", "file-preview-text",
+  "file-preview-download", "close-file-preview",
 ].map((id) => [id, document.getElementById(id)]));
 const exampleMessages = {
   "local-pi": "请使用 read 工具读取当前目录的 numbers.csv，计算其中数值的数量 count、总和 sum 和平均值 mean。使用 write 工具将结果保存为当前目录的 result.json，内容只包含 count、sum、mean 三个字段。最后再次使用 read 工具读取 result.json，核对保存的结果，并用中文简要说明。",
@@ -15,6 +19,10 @@ const state = { tasks: [], task: null, execution: null, busy: false, lifecycleBu
 const pendingKey = "sirna-pi.pending-message";
 const selectedKey = "sirna-pi.selected-task";
 const creationKey = "sirna-pi.pending-creation";
+let fileGroup = "output";
+let previousFilesView = null;
+let taskSelectionVersion = 0;
+const taskFiles = createTaskFiles({ onChange: renderTaskFiles });
 
 function readStored(storage, key) {
   try { return JSON.parse(storage.getItem(key) || "null"); } catch { return null; }
@@ -32,6 +40,77 @@ function node(tag, className, text) {
   if (className) result.className = className;
   if (text !== undefined) result.textContent = text;
   return result;
+}
+function fileSize(size) {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KiB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MiB`;
+}
+function fileMetadata(file) {
+  const modified = new Date(file.modifiedAt);
+  const date = Number.isNaN(modified.getTime()) ? "时间未知" : modified.toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  return `${fileSize(file.size)} · ${date}`;
+}
+function renderTaskFiles(view, forceList = false) {
+  // A preview response must not replace its focused list button.
+  if (forceList || !previousFilesView || view.files !== previousFilesView.files || view.listStatus !== previousFilesView.listStatus || view.taskId !== previousFilesView.taskId) {
+    elements["files-panel"].setAttribute("aria-busy", String(view.listStatus === "loading"));
+    elements["refresh-files"].disabled = !view.taskId || view.listStatus === "loading";
+    elements["refresh-files"].textContent = view.listStatus === "loading" ? "读取中…" : "刷新文件";
+    for (const kind of ["input", "output"]) {
+      const button = elements[`${kind}-files`];
+      button.textContent = `${kind === "input" ? "输入资料" : "输出结果"}（${view.files.filter((file) => file.kind === kind).length}）`;
+      button.setAttribute("aria-pressed", String(fileGroup === kind));
+    }
+    const files = view.files.filter((file) => file.kind === fileGroup);
+    const label = fileGroup === "input" ? "输入资料" : "输出结果";
+    let message = !view.taskId ? "选择任务后查看文件。" : "文件尚未载入，可点击“刷新文件”。";
+    if (view.listStatus === "loading") message = "正在读取本任务文件…";
+    else if (view.listStatus === "error") message = `读取失败：${view.error}`;
+    else if (view.workspaceState === "unprepared") message = "本任务尚未生成文件目录，没有可查看的文件。查看或刷新文件不会启动任务。";
+    else if (view.workspaceState === "unsupported") message = "此旧版任务暂不支持网页文件查看，可在下方查看原工作目录。";
+    else if (view.workspaceState === "ready") message = files.length ? `${files.length} 个${label}。点击文本文件名可预览。` : `暂无${label}。`;
+    elements["files-status"].textContent = message;
+    elements["files-status"].dataset.state = view.listStatus;
+    elements["file-list"].setAttribute("aria-label", label);
+    elements["file-list"].replaceChildren();
+    for (const file of files) {
+      const row = node("li", "file-item");
+      const previewable = canPreviewFile(file);
+      const name = node(previewable ? "button" : "strong", "file-name", file.name);
+      if (previewable) {
+        name.type = "button";
+        name.setAttribute("aria-label", `预览 ${file.name}`);
+        name.addEventListener("click", () => void taskFiles.previewFile(file));
+      }
+      row.append(name, node("p", "file-meta", fileMetadata(file)));
+      const actions = node("div", "file-actions");
+      actions.append(node("span", "file-hint", previewable ? "文本预览" : file.size > 256 * 1024 ? "请下载查看" : "此格式仅供下载"));
+      if (canDownloadFile(file)) {
+        const download = node("a", "file-download", "下载");
+        download.href = taskFileUrl(view.taskId, file, true);
+        download.download = file.name.split("/").at(-1);
+        download.setAttribute("aria-label", `下载 ${file.name}`);
+        actions.append(download);
+      } else actions.append(node("span", "file-hint", "超过 50 MB 下载上限"));
+      row.append(actions);
+      elements["file-list"].append(row);
+    }
+  }
+  const preview = view.preview;
+  elements["file-preview"].hidden = !preview;
+  elements["file-preview"].setAttribute("aria-busy", String(preview?.status === "loading"));
+  elements["file-preview-text"].hidden = preview?.status !== "ready";
+  elements["file-preview-text"].textContent = preview?.text || "";
+  elements["file-preview-title"].textContent = preview?.file.name || "";
+  elements["file-preview-meta"].textContent = preview ? fileMetadata(preview.file) : "";
+  elements["file-preview-status"].textContent = !preview ? "" : preview.status === "loading" ? "正在读取文本…" : preview.status === "error" ? `预览失败：${preview.error}` : preview.text ? "原始文本" : "这是一个空文件。";
+  elements["file-preview-status"].dataset.state = preview?.status || "idle";
+  if (preview) {
+    elements["file-preview-download"].href = taskFileUrl(view.taskId, preview.file, true);
+    elements["file-preview-download"].download = preview.file.name.split("/").at(-1);
+  } else elements["file-preview-download"].removeAttribute("href");
+  previousFilesView = view;
 }
 function setStatus(text, kind = "idle") {
   if (state.task?.status === "stopped") {
@@ -206,6 +285,7 @@ function handleStreamEvent(event) {
   if (event.type === "task" || event.type === "task_saved") {
     upsertTask(event.task);
     if (event.type === "task_saved" && event.task?.status !== "running") state.stopRequested = false;
+    if (event.type === "task_saved") void taskFiles.refresh();
     if (event.message) saveMessage(event.message, state.pendingUser);
   } else if (event.type === "session") {
     state.execution = exampleMessages[event.backend] ? {
@@ -248,8 +328,19 @@ async function refreshTaskList() {
   renderTaskList();
 }
 async function selectTask(id) {
-  const data = await readJson(`/v1/tasks/${encodeURIComponent(id)}/messages`);
+  const selection = ++taskSelectionVersion;
   const sameTask = state.task?.id === id;
+  // Select and clear immediately so a failed or delayed request cannot leave
+  // the previous task's files actionable under the new selection.
+  state.task = sameTask ? state.task : state.tasks.find((task) => task.id === id) || { id, title: "正在读取任务…", status: "pending" };
+  if (!sameTask) state.execution = null;
+  taskFiles.setTask(id);
+  if (!sameTask) { state.stopRequested = false; renderMessages([]); resetActivity(); }
+  renderIdentity();
+  renderTaskList();
+  const data = await readJson(`/v1/tasks/${encodeURIComponent(id)}/messages`);
+  if (selection !== taskSelectionVersion) return;
+  if (data.task?.id !== id) throw new Error("服务器返回了不同的任务，请刷新记录。");
   state.task = mergeTaskState(state.task, data.task);
   state.execution = data.execution ?? null;
   if (!sameTask || state.task.status !== "running" && !state.execution?.stopUnconfirmed) state.stopRequested = false;
@@ -274,6 +365,7 @@ async function selectTask(id) {
   else if (pending) setStatus("另一个任务的发送还待确认。请回到该任务，刷新记录或恢复发送。", "error");
   else if (data.task.status === "failed") setStatus("上次运行未完成，已保留记录。可以查看原因后继续提问。", "error");
   else setStatus(data.messages?.length ? "对话与执行记录已恢复，可以继续追问。" : "任务已创建，写下第一条要求。", data.messages?.length ? "success" : "idle");
+  void taskFiles.refresh();
 }
 async function withBusy(action) {
   if (state.busy || state.lifecycleBusy) return;
@@ -363,6 +455,18 @@ elements["example-button"].addEventListener("click", () => {
 elements["recover-message"].addEventListener("click", () => void withBusy(sendPending));
 elements["stop-run"].addEventListener("click", () => void changeLifecycle("stop"));
 elements["end-task"].addEventListener("click", () => void changeLifecycle("end"));
+elements["refresh-files"].addEventListener("click", () => void taskFiles.refresh());
+for (const kind of ["input", "output"]) elements[`${kind}-files`].addEventListener("click", () => {
+  fileGroup = kind;
+  taskFiles.closePreview();
+  renderTaskFiles(taskFiles.state, true);
+});
+elements["close-file-preview"].addEventListener("click", () => {
+  const name = taskFiles.state.preview?.file.name;
+  taskFiles.closePreview();
+  const button = [...elements["file-list"].querySelectorAll("button")].find((item) => item.textContent === name);
+  (button || elements[`${fileGroup}-files`]).focus();
+});
 elements.composer.addEventListener("submit", (event) => {
   event.preventDefault();
   if (state.busy || state.lifecycleBusy || state.stopRequested || !state.task || state.task.status === "running" || state.task.status === "stopped" || pending) return;
@@ -374,6 +478,7 @@ elements.composer.addEventListener("submit", (event) => {
 });
 
 renderMessages([]);
+renderTaskFiles(taskFiles.state);
 void withBusy(async () => {
   await refreshTaskList();
   const remembered = pending?.taskId || readStored(localStorage, selectedKey);

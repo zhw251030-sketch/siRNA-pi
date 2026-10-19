@@ -1,12 +1,14 @@
 import { createServer } from "node:http";
 import fs from "node:fs/promises";
 import { TaskMessageService, TaskMessageSubmissionError } from "../../packages/task-core/task-message-service.mjs";
+import { WorkspaceFileError } from "../../packages/task-core/workspace.mjs";
 
 const staticFiles = new Map([
   ["/", ["index.html", "text/html; charset=utf-8"]],
   ["/app.js", ["app.js", "text/javascript; charset=utf-8"]],
   ["/sse.mjs", ["sse.mjs", "text/javascript; charset=utf-8"]],
   ["/lifecycle.mjs", ["lifecycle.mjs", "text/javascript; charset=utf-8"]],
+  ["/files.mjs", ["files.mjs", "text/javascript; charset=utf-8"]],
   ["/style.css", ["style.css", "text/css; charset=utf-8"]],
 ]);
 function reply(response, status, data) {
@@ -14,6 +16,14 @@ function reply(response, status, data) {
   response.end(JSON.stringify(data));
 }
 function invalid(message) { throw new TaskMessageSubmissionError(400, message); }
+const previewExtensions = new Set(['txt', 'md', 'csv', 'tsv', 'tab', 'aln', 'json', 'yaml', 'yml', 'fa', 'fasta', 'fna', 'fastq', 'fq']);
+
+function fileDisposition(name, inline) {
+  // A quoted ASCII fallback plus an encoded filename prevents header injection.
+  const filename = name.split('/').at(-1);
+  const encoded = encodeURIComponent(filename).replace(/['()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `${inline ? 'inline' : 'attachment'}; filename="workspace-file"; filename*=UTF-8''${encoded}`;
+}
 
 async function readBody(request) {
   if (request.headers["content-type"]?.split(";")[0].trim() !== "application/json" &&
@@ -38,7 +48,7 @@ async function readBody(request) {
 
 // HTTP only coordinates transport. Task state and runtime execution stay in
 // their own packages, matching the reference repository's responsibility split.
-export function createAppServer({ taskStore, agentRuntime } = {}) {
+export function createAppServer({ taskStore, agentRuntime, workspaceFiles } = {}) {
   const taskMessages = new TaskMessageService({ taskStore, agentRuntime });
   const activeTurns = new Set();
   const track = (operation) => {
@@ -56,8 +66,8 @@ export function createAppServer({ taskStore, agentRuntime } = {}) {
       request.resume();
       return reply(response, 403, { error: "请从本机网页访问此服务。" });
     }
-    let pathname;
-    try { pathname = new URL(request.url, `http://${host}`).pathname; }
+    let url, pathname;
+    try { url = new URL(request.url, `http://${host}`); pathname = url.pathname; }
     catch { request.resume(); return reply(response, 400, { error: "请求地址格式不正确。" }); }
     try {
       if (request.method === "GET" && pathname === "/health") {
@@ -74,6 +84,29 @@ export function createAppServer({ taskStore, agentRuntime } = {}) {
         return reply(response, 410, { error: "Unbound chat sessions are disabled; use the task-scoped /v1/tasks API" });
       }
       if (request.method === "GET" && pathname === "/v1/tasks") return reply(response, 200, { tasks: taskStore.listTasks() });
+      const filesRoute = /^\/v1\/tasks\/([^/]+)\/files(?:\/(input|output)\/([^/]+))?$/.exec(pathname);
+      if (request.method === 'GET' && filesRoute) {
+        const task = taskStore.getTask(filesRoute[1]);
+        if (!task) return reply(response, 404, { error: '没有找到这个任务。' });
+        if (!workspaceFiles) return reply(response, 503, { error: '任务文件服务尚未配置。' });
+        if (!filesRoute[2]) return reply(response, 200, await workspaceFiles.list(task));
+        let name;
+        try { name = decodeURIComponent(filesRoute[3]); }
+        catch { invalid('文件名称编码不正确。'); }
+        const inline = url.searchParams.get('download') !== 'true' && previewExtensions.has(name.split('.').at(-1).toLowerCase());
+        const { data } = await workspaceFiles.read(task, filesRoute[2], name, { maxBytes: inline ? 256 * 1024 : 50_000_000 });
+        if (inline) {
+          try { new TextDecoder('utf-8', { fatal: true }).decode(data); }
+          catch { return reply(response, 415, { error: '此文件不是有效的 UTF-8 文本，请下载后查看。' }); }
+        }
+        response.writeHead(200, {
+          'Content-Type': inline ? 'text/plain; charset=utf-8' : 'application/octet-stream',
+          'Content-Length': data.length,
+          'Content-Disposition': fileDisposition(name, inline),
+          'Content-Security-Policy': "default-src 'none'; sandbox",
+        });
+        return response.end(data);
+      }
       if (request.method === "POST" && pathname === "/v1/tasks") {
         const body = await readBody(request);
         if (Object.keys(body).some((key) => !["requestId", "memoryFileIds", "dataAssetIds"].includes(key))) invalid("创建任务与发送消息是两个接口，请先创建任务。");
@@ -134,8 +167,9 @@ export function createAppServer({ taskStore, agentRuntime } = {}) {
       reply(response, 404, { error: "没有这个页面或接口。" });
     } catch (error) {
       if (!response.headersSent && !response.destroyed) {
-        reply(response, error instanceof TaskMessageSubmissionError ? error.statusCode : 500,
-          { error: error instanceof TaskMessageSubmissionError ? error.message : "服务处理失败，请检查项目内运行记录。" });
+        const known = error instanceof TaskMessageSubmissionError || error instanceof WorkspaceFileError;
+        reply(response, known ? error.statusCode : 500,
+          { error: known ? error.message : "服务处理失败，请检查项目内运行记录。" });
       } else if (!response.destroyed) response.end();
     }
   });
