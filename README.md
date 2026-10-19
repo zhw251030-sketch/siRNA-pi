@@ -15,7 +15,8 @@
 - 本轮验证：49 项离线测试通过；真实网页统计结果正确，服务重启后同一 Pi 会话成功继续回答前文问题。完整记录见 [第 4 步：对齐原仓库任务架构](docs/05-对齐原仓库任务架构.md)。
 - 2026-10-17：经确认安装 uidmap，启动项目 rootless Docker，固定摘要的官方 hello-world 容器运行成功、退出码 0。全部项目数据位于指定目录；已核对重启和客户端连接范围。见 [第 5 步 A：Docker 运行环境](docs/06-Docker运行环境.md)。
 - 2026-10-18：启动正式 Agent Compose v2609.3.0，由其创建命令任务容器，验证执行、文件挂载、管理接口鉴权和停止释放；文件及运行记录保留，49 项离线测试通过。见 [第 5 步 B：Agent Compose 与任务环境](docs/07-AgentCompose与任务环境.md)。
-- 后续验证 Pi 1.2.0 定制 guest 与 MiniMax，再接入网页。网页仍使用 local-pi；guest 资源配额、开机自启、网页停止操作、专业 siRNA 工具与自进化尚未实现。
+- 2026-10-20：构建锁定依赖的 Pi 1.2.0 guest，经 Agent Compose 模型转接接通 MiniMax-M3；真实文件任务和同会话续问通过，停止后容器释放且文件保留。96 项 Node 测试与 4 项 Linux 凭据测试通过。见 [第 5 步 C：容器中的 Pi 与模型连接](docs/08-容器中的Pi与模型连接.md)。
+- 下一步将网页接入 Agent Compose 运行时。网页仍使用 local-pi；guest 资源配额、开机自启、网页停止操作、专业 siRNA 工具与自进化尚未实现。
 
 安装位置、文件解释和验证记录见 [第 1 步 A：安装与运行 Pi](docs/01-安装与运行Pi.md)。服务器项目目录是 `/home/hanwen/Project/project/siNRA-pi/`，按用户指定拼写保留。
 
@@ -37,8 +38,11 @@ SDK 示例、逐段代码解释和实际结果见 [第 2 步：调用 Pi SDK 创
 | `sh scripts/check-docker-rootless.sh` | 服务器上的 Docker 前提检查，不启动或安装服务 | 否 |
 | `sh scripts/project-docker.sh info` | 检查项目 Docker 的实际模式、目录和能力 | 否 |
 | `sh scripts/start-project-agent-compose.sh` | 准备私有状态并启动 Agent Compose 控制服务 | 否 |
+| `sh scripts/build-project-guest.sh` | 从固定官方底座构建个人 Pi 1.2.0 任务镜像；首次启动前执行 | 否 |
 | `sh scripts/project-agent-compose.sh status` | 查询管理服务状态；同一入口支持 up、inspect 等命令 | 否 |
 | `node scripts/verify-agent-compose-workspace.mjs` | 新建固定命令测试环境，检查文件及隔离范围，再停止环境；保留证据 | 否 |
+| `node scripts/verify-agent-compose-model.mjs` | 新建容器，完成文件任务及同会话续问，验收后释放容器并保留证据 | 是 |
+| `python3 tests/controller-secret.test.py` | 用临时假数据测试控制服务凭据读取；Linux 检查权限和链接 | 否 |
 | `npm run pi:sdk` | 再做第 2 步固定文件练习，替换该练习原有输出 | 是 |
 | `npm run verify:first-task` | 验证已有 CLI 样例产物 | 否 |
 | `npm run verify:sdk-task` | 验证已有 SDK 样例产物 | 否 |
@@ -111,6 +115,13 @@ scripts/prepare-agent-compose.mjs        创建私有状态和独立管理令牌
 scripts/start-project-agent-compose.sh   启动管理服务并等待健康
 scripts/project-agent-compose.sh         经控制容器本地 socket 调用官方 CLI
 scripts/verify-agent-compose-workspace.mjs 真实命令工作区验收
+containers/agent-compose-guest/           个人 Pi 1.2.0 镜像及启动包装器
+containers/agent-compose/entrypoint.py    从只读文件加载控制端模型凭据
+config/agent-compose-models.json          无密钥的模型目录与环境变量引用
+config/pi/compose-settings.json           guest 的重试、压缩和遥测设置
+scripts/build-project-guest.sh            用项目 Docker 构建 guest
+scripts/verify-agent-compose-model.mjs    真实容器模型任务及上下文续接验收
+scripts/lib/verify-compose-file-task.mjs  按原生会话与真实文件独立验收
 apps/api/bootstrap.mjs      组合数据库、运行时与 HTTP 服务，启动网页
 apps/api/router.mjs         任务接口、SSE 传输与静态页面
 packages/task-core/task-store.mjs           SQLite 任务、消息和运行事件
@@ -142,6 +153,7 @@ docs/04-网页连接Pi.md         网页到服务器、SDK、文件的完整路�
 docs/05-对齐原仓库任务架构.md 当前任务流程、职责分层和正式架构方向
 docs/06-Docker运行环境.md     系统前提、项目 Docker 和真实容器验证
 docs/07-AgentCompose与任务环境.md 控制服务、任务环境、挂载与实际验收
+docs/08-容器中的Pi与模型连接.md  镜像、模型转接、凭据范围与真实模型任务
 docs/superpowers/plans/      安装步骤与执行记录
 ```
 

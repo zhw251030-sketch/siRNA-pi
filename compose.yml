@@ -4,6 +4,8 @@ services:
   agent-compose:
     image: chaitin/agent-compose:v2609.3.0@sha256:91168af6c048ca811cff33a6fddbb1c176b1636456add94fb506d9b9952d0cb3
     platform: linux/amd64
+    entrypoint: [/usr/bin/tini, --, /usr/bin/python3, /project/controller-entrypoint.py]
+    command: [daemon]
     environment:
       RUNTIME_DRIVER: docker
       DATA_ROOT: /data
@@ -11,13 +13,28 @@ services:
       DOCKER_HOST: unix:///var/run/docker.sock
       AGENT_COMPOSE_SOCKET: /var/run/agent-compose.sock
       AGENT_COMPOSE_HOST: ""
-      # Command-only learning step: no model facade or provider credential yet.
-      AGENT_COMPOSE_RUNTIME_BASE_URL: ""
-      DEFAULT_IMAGE: chaitin/agent-compose-guest:v2609.3.0@sha256:14f0740fe39ba22da96edeff9d40c1fd41185389bbb1edcf5cb68e7af85f7b7b
+      # Guests reach the model facade through the private project network.
+      AGENT_COMPOSE_RUNTIME_BASE_URL: http://agent-compose:7410
+      DEFAULT_IMAGE: sirna-pi-guest:pi1.2.0
     env_file:
       - path: ./runtime/agent-compose/control.env
         required: true
     volumes:
+      - type: bind
+        source: ./containers/agent-compose/entrypoint.py
+        target: /project/controller-entrypoint.py
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ./docs/auth.json
+        target: /run/secrets/minimax-api-key
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ./config/agent-compose-models.json
+        target: /data/models.json
+        read_only: true
+        bind: {create_host_path: false}
       - type: bind
         source: ./runtime/docker/run/docker.sock
         target: /var/run/docker.sock

@@ -1,0 +1,11 @@
+# Allow only the guest build inputs; never send credentials or runtime state.
+**
+!package.json
+!package-lock.json
+!containers/
+!containers/agent-compose-guest/
+!containers/agent-compose-guest/Dockerfile
+!containers/agent-compose-guest/pi.sh
+!config/
+!config/pi/
+!config/pi/compose-settings.json

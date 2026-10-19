@@ -65,3 +65,11 @@ Docker 使用脚本 scripts/project-docker.sh 显式连接 runtime/docker/run/do
 已用 scripts/verify-agent-compose-workspace.mjs 完成真实无模型命令验收：创建 guest、运行成功、文件挂载与网络核对、宿主/guest 未登录请求均 401、停止后资源 released 且文件保留。证据 runtime/agent-compose/verify-RaHJj9；日期分层路径从 inspect.workspace_path 读取。默认 guest 实际无内存/进程/CPU 配额。官方 guest 内置 Pi 0.82.1，本轮未启动它；不能据此声称个人 Pi 1.2.0 容器接通。AGENT_COMPOSE_RUNTIME_BASE_URL 本轮刻意留空，避免模型代理准备读取凭据；后续真实模型阶段才配置可访问回调和模型配置。
 
 当前下一步：制作并验证 Pi 1.2.0 定制 guest 与 MiniMax，再接网页 Agent Compose 运行时。现有网页仍 local-pi / taskContainers=false，49 项离线测试通过；本轮不修改研究阶段。完整解释和已验证边界见 docs/07-AgentCompose与任务环境.md。大镜像直连下载失败后采用官方摘要校验的本机归档传输，归档保留 runtime/image-transfer，不配置系统代理。
+
+2026-10-20：第 5 步 C 已完成。个人 `sirna-pi-guest:pi1.2.0` 使用完整 lockfile，实际 ImageID 为 `sha256:e34a8f3fe6b2b74a3fa7f1a6143a126ae1e5414fa8a334c7bba82fe57d28971b`。wrapper 保留官方 session 参数，仅启用 read/write、禁用 MCP/自动资源、重试和压缩；不覆盖官方 facade models.json。read/write 允许清单不等于 guest 内严格路径沙箱。
+
+controller 通过只读单文件挂载读取既有 docs/auth.json，Python 入口将 key 注入 daemon 进程而非 Docker Config.Env。官方会把 key 存入 runtime/agent-compose/data/data.db，因此管理数据也属于敏感状态，不能输出凭据列或挂给 guest。模型目录为 config/agent-compose-models.json，国内 api.minimax.cn/anthropic/v1，maxOutputTokens4096 为单响应上限；回调现为 http://agent-compose:7410。guest 使用绑定 sandbox/provider/protocol 的 facade token，不能称其自动定时过期或精确锁单模型。
+
+真实验收入口 scripts/verify-agent-compose-model.mjs 会调用模型并产生额度消耗。证据 runtime/agent-compose/model-verify-IT2dgw：第一轮4次响应、3次成功工具，count4/sum100/mean25；第二轮同Pi会话回忆随机口令，1次响应、0工具；停止后 released 且文件保留。96 项 Node 测试和4项目标Linux凭据测试通过。命令工作区回归证据 verify-oKmfDl。详见 docs/08-容器中的Pi与模型连接.md。
+
+最新下一步：将网页运行时接入正式 Agent Compose RPC，沿用已有任务和消息接口。网页目前仍 local-pi / taskContainers=false；本轮只验证 CLI detached 与它共用的 PiRunner，不能声称网页 RPC/事件链已经完成。无新增系统安装或权限变更，不修改 RSI 研究项目或其阶段。
