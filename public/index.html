@@ -27,6 +27,11 @@
             <p class="eyebrow">CONVERSATION</p>
             <h1 id="chat-title">选择或创建一个任务</h1>
             <p id="task-status" class="status" role="status" aria-live="polite" aria-atomic="true" data-state="idle">正在连接工作区…</p>
+            <div class="lifecycle-actions" aria-label="任务运行控制">
+              <button id="stop-run" class="button secondary" type="button" disabled aria-describedby="lifecycle-help">停止本轮</button>
+              <button id="end-task" class="button end-task" type="button" disabled aria-describedby="lifecycle-help">结束任务</button>
+            </div>
+            <p id="lifecycle-help" class="help lifecycle-help">选择任务后查看可用操作。</p>
           </header>
           <div id="messages" class="messages" aria-live="polite" aria-relevant="additions text"></div>
           <div class="composer-area">

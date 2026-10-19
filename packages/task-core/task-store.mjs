@@ -145,7 +145,8 @@ export class TaskStore {
     const columns = { executionSessionId: "execution_session_id", piSessionId: "pi_session_id", currentRunId: "current_run_id", status: "status" };
     const entries = Object.entries(columns).filter(([key]) => changes[key] !== undefined);
     if (entries.length) {
-      this.#db.prepare(`UPDATE design_tasks SET ${entries.map(([, column]) => `${column} = ?`).join(", ")}, updated_at = ? WHERE id = ?`)
+      this.#db.prepare(`UPDATE design_tasks SET ${entries.map(([, column]) => column === "status"
+        ? "status = CASE WHEN status = 'stopped' THEN 'stopped' ELSE ? END" : `${column} = ?`).join(", ")}, updated_at = ? WHERE id = ?`)
         .run(...entries.map(([key]) => changes[key]), timestamp(), taskId);
     }
     return this.getTask(taskId);
@@ -154,7 +155,7 @@ export class TaskStore {
   appendAssistantMessage(taskId, content, status) {
     return this.#transaction(() => {
       const message = this.#insertMessage(taskId, "assistant", content.trim(), status);
-      this.#db.prepare("UPDATE design_tasks SET status = ? WHERE id = ?").run(status === "failed" ? "failed" : "idle", taskId);
+      this.#db.prepare("UPDATE design_tasks SET status = ? WHERE id = ? AND status != 'stopped'").run(status === "failed" ? "failed" : "idle", taskId);
       return message;
     });
   }

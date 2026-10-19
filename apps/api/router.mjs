@@ -6,6 +6,7 @@ const staticFiles = new Map([
   ["/", ["index.html", "text/html; charset=utf-8"]],
   ["/app.js", ["app.js", "text/javascript; charset=utf-8"]],
   ["/sse.mjs", ["sse.mjs", "text/javascript; charset=utf-8"]],
+  ["/lifecycle.mjs", ["lifecycle.mjs", "text/javascript; charset=utf-8"]],
   ["/style.css", ["style.css", "text/css; charset=utf-8"]],
 ]);
 function reply(response, status, data) {
@@ -40,6 +41,11 @@ async function readBody(request) {
 export function createAppServer({ taskStore, agentRuntime } = {}) {
   const taskMessages = new TaskMessageService({ taskStore, agentRuntime });
   const activeTurns = new Set();
+  const track = (operation) => {
+    activeTurns.add(operation);
+    operation.then(() => activeTurns.delete(operation), () => activeTurns.delete(operation));
+    return operation;
+  };
   const server = createServer(async (request, response) => {
     response.setHeader("Cache-Control", "no-store");
     response.setHeader("X-Content-Type-Options", "nosniff");
@@ -80,6 +86,15 @@ export function createAppServer({ taskStore, agentRuntime } = {}) {
           ...(result.deduplicated ? { deduplicated: true } : {}),
         });
       }
+      const lifecycle = /^\/v1\/tasks\/([^/]+)\/(cancel|runtime)$/.exec(pathname);
+      if (lifecycle && (lifecycle[2] === "cancel" && request.method === "POST" || lifecycle[2] === "runtime" && request.method === "DELETE")) {
+        const body = await readBody(request);
+        if (Object.keys(body).length) invalid("此操作不接受其他请求参数。");
+        const operation = lifecycle[2] === "cancel" ? taskMessages.cancelTask(lifecycle[1]) : taskMessages.endTask(lifecycle[1]);
+        const result = await track(operation);
+        if (!response.destroyed) reply(response, 200, result);
+        return;
+      }
       const match = /^\/v1\/tasks\/([^/]+)\/messages$/.exec(pathname);
       if (match && request.method === "GET") {
         const task = taskStore.getTask(match[1]);
@@ -103,8 +118,7 @@ export function createAppServer({ taskStore, agentRuntime } = {}) {
           else if (!response.destroyed) response.write(`data: ${JSON.stringify(event)}\n\n`);
         };
         const turn = await taskMessages.start({ taskId: match[1], ...body }, send);
-        activeTurns.add(turn.completion);
-        void turn.completion.finally(() => activeTurns.delete(turn.completion));
+        track(turn.completion);
         response.writeHead(200, {
           "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform",
           Connection: "keep-alive", "X-Accel-Buffering": "no",

@@ -48,7 +48,7 @@
 - 网页入口为 npm run web → apps/api/bootstrap.mjs，只监听 127.0.0.1:3000，经 SSH 隧道访问。先 POST /v1/tasks 创建，再 POST /v1/tasks/:id/messages 发送；不要恢复成旧的一次性合并接口。
 - 网页历史保存在 runtime/tasks/tasks.sqlite。旧 SDK 任务的 Pi 上下文位于 runtime/pi-web/sessions，执行元数据 runtime/task-sessions，目录 workspaces/web/<executionSessionId>，日志 runtime/web/<executionSessionId>.<runId>.events.jsonl；该旧路径有任务目录读写限制。
 - 新任务默认 Agent Compose：元数据 runtime/compose-sessions，投影日志 runtime/compose-web，实际文件/原生 Pi 会话在 runtime/agent-compose/data/sandboxes/<日期>/<sandboxId> 下。日期路径必须读取 inspect.workspace_path；guest 中 read/write 允许清单不等于严格路径限制。通过 RuntimeRouter 保留旧 SDK 任务，不将故障新任务静默改走 SDK。
-- 通用 SDK 调用位于 packages/agent-runtime/pi-sdk.mjs；scripts/pi-sdk.mjs 保留命令行入口。网页支持多轮、SSE、历史恢复，尚无停止按钮。SSE 的 done 后还要保存消息并发出 task_saved；连接断开不能取消已接受任务，正常关闭服务也须等待后台任务落盘。
+- 通用 SDK 调用位于 packages/agent-runtime/pi-sdk.mjs；scripts/pi-sdk.mjs 保留命令行入口。网页支持多轮、SSE、历史恢复；Compose 任务现支持停止/结束。SSE 的 done 后还要保存消息并发出 task_saved；连接断开不能取消已接受任务，正常关闭服务也须等待后台任务和生命周期操作落盘。
 - 容器网页统计检查：node scripts/verify-compose-web-task.mjs <taskId>；旧 SDK 网页检查仍为 npm run verify:web-task -- <executionSessionId> --run <runId>；--web <UUID> 仅用于原第3步历史样例。
 
 ## 当前阶段
@@ -81,4 +81,12 @@ controller 通过只读单文件挂载读取既有 docs/auth.json，Python 入�
 
 DETACH任务可能在网页进程意外退出后继续：重启提示只能说结果未确认。新一轮先依序查pending/running，失败不认作空闲；已知运行的RPC异常尝试StopRun，停止未确认保留标志，不自动重试付费任务。单网页进程，不声称跨副本原子锁或自动重新附着。凭据清理不保证识别任意文本秘密，原始记录仍私有。
 
-最新下一步：对照参考仓库完成停止本轮、结束任务和容器释放，再进入专业工具学习。本轮无新系统安装、权限或服务配置修改；没有新增Git分支、不修改RSI研究项目及其阶段。
+以上为第5步D结束状态；第6步最新完成记录见下。
+
+2026-10-20：第6步完成。POST /v1/tasks/:id/cancel 请求停止本轮；DELETE /v1/tasks/:id/runtime 等待保存后释放并标记 stopped。TaskCore与Runtime分别保护运行/取消/结束竞争；旧SDK任务禁用新功能。RPC以StopRun+终态流/GetRun确认结束，不把running确认当成功。网页维持SSE至task_saved，结束状态不会被迟到事件复活；未送达草稿保留于浏览器sessionStorage但不阻塞新任务。
+
+重要版本差异：v2609.3.0的sandbox rm会删除整个sandbox目录，不得用于保留文件的结束流程。执行sandbox stop --graceful，检查vm_status=stopped和stopped_runtime_state=released。当前Docker prompt attach可能把中断变为failed/context canceled；只有持久化userCancelRequested、后台终态、精确错误文本且无cleanupError才解释为canceled，保留daemonStatus/Error等原始字段，普通失败仍失败。初始化中断允许既有固定命令收尾、不提交模型；首轮过早中断可能无法恢复完整上下文，不静默重建。
+
+真实复验任务36ba635d-8b5c-44d2-a4fe-ec272564f5d6：正常统计→停止→同Pi会话01a155d6-267f-73c5-953d-d4237f42c428续问→运行中结束。最终8条消息，guest0、released/graceful，统计文件4/100/25，原生JSONL前8607字节不变、增长到34509。证据runtime/compose-web/lifecycle-v2-{baseline,canceled,resumed,ended}.json；只读验收scripts/verify-compose-lifecycle.mjs。诊断任务f612f8c2-3481-43ae-b92e-c570c4f75cc9也已释放并保留失败记录。第5步D两项旧guest仍运行。239项Node测试与4项Linux凭据测试通过；详细说明docs/10-停止运行与结束任务.md。
+
+最新下一步：对照原仓库任务文件接口，学习网页查看输入/输出与获取结果，再进入工具封装。本步无新系统安装、权限或系统服务配置修改；main单分支，不修改RSI研究项目及其阶段。代码继续本机GitHub提交/推送、项目内bundle同步服务器，不强制覆盖未提交修改。

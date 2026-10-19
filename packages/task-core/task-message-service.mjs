@@ -24,8 +24,10 @@ function safeSend(emit, event) {
 }
 
 export class TaskMessageService {
-  #active = new Set();
+  #active = new Map();
   #creating = new Map();
+  #canceling = new Map();
+  #ending = new Map();
 
   constructor({ taskStore, agentRuntime }) {
     this.taskStore = taskStore;
@@ -76,12 +78,13 @@ export class TaskMessageService {
       return { ...result, completion: Promise.resolve(result) };
     }
     if (!this.agentRuntime) throw new TaskMessageSubmissionError(503, "Agent runtime is unavailable");
-    if (this.#active.has(taskId) || existing.status === "running" || existing.status === "stopped") {
+    if (this.#active.has(taskId) || this.#ending.has(taskId) || this.#canceling.has(taskId) || existing.status === "running" || existing.status === "stopped") {
       throw new TaskMessageSubmissionError(409, "This design task cannot accept a new message now");
     }
     // No await before this reservation and database insert: simultaneous HTTP
     // submissions cannot both start a turn on the same task.
-    this.#active.add(taskId);
+    const active = { controller: new AbortController(), completion: null };
+    this.#active.set(taskId, active);
     let turn;
     try { turn = this.taskStore.beginTurn(taskId, message, requestId); }
     catch {
@@ -90,11 +93,82 @@ export class TaskMessageService {
     }
     const send = (event) => safeSend(emit, event);
     send({ type: "task", task: turn.task, message: turn.message });
-    const completion = this.#execute(turn, message, send);
+    // Install the controller and completion before dispatch: queued preparation
+    // and active RPC both receive the same cancellation signal.
+    const completion = Promise.resolve().then(() => this.#execute(turn, message, send, active.controller.signal));
+    active.completion = completion;
     return { task: turn.task, userMessage: turn.message, deduplicated: false, completion };
   }
 
-  async #execute(turn, message, send) {
+  async #checkLifecycle(task) {
+    try {
+      const description = await this.agentRuntime?.describe?.(task.executionSessionId);
+      if (description?.backend !== "agent-compose" || description.supportsLifecycle === false ||
+          typeof this.agentRuntime?.cancel !== "function" || typeof this.agentRuntime?.remove !== "function") {
+        throw new TaskMessageSubmissionError(409, "此任务的执行环境不支持停止或结束操作。");
+      }
+    } catch (error) {
+      if (error instanceof TaskMessageSubmissionError) throw error;
+      throw new TaskMessageSubmissionError(503, "暂时无法确认执行环境，请刷新记录后重试。");
+    }
+  }
+
+  #lifecycleOperation(map, taskId, operation) {
+    const pending = Promise.resolve().then(operation).catch((error) => {
+      if (error instanceof TaskMessageSubmissionError) throw error;
+      throw new TaskMessageSubmissionError(503, "操作尚未确认，任务记录已保留，请刷新记录后重试。");
+    });
+    map.set(taskId, pending);
+    // Avoid an unhandled rejection from a discarded finally() promise.
+    pending.then(() => map.delete(taskId), () => map.delete(taskId));
+    return pending;
+  }
+
+  async cancelTask(taskId) {
+    const existing = this.taskStore.getTask(taskId);
+    if (!existing) throw new TaskMessageSubmissionError(404, "没有找到这个任务。");
+    if (this.#ending.has(taskId)) throw new TaskMessageSubmissionError(409, "任务正在结束，请等待记录保存。");
+    if (this.#canceling.has(taskId)) return this.#canceling.get(taskId);
+    return this.#lifecycleOperation(this.#canceling, taskId, async () => {
+      await this.#checkLifecycle(existing);
+      if (existing.status === "stopped") return { task: this.taskStore.getTask(taskId), stopRequested: false };
+      const active = this.#active.get(taskId);
+      active?.controller.abort();
+      const session = await this.agentRuntime.cancel(existing.executionSessionId);
+      if (active) {
+        // The run owns its final status until its assistant message is saved.
+        return { task: this.taskStore.getTask(taskId), stopRequested: true };
+      }
+      if (!["idle", "failed", "stopped"].includes(session?.status)) throw new Error("Stop was not confirmed");
+      const task = this.taskStore.updateExecution(taskId, { status: session.status });
+      return { task, stopRequested: false };
+    });
+  }
+
+  async endTask(taskId) {
+    const existing = this.taskStore.getTask(taskId);
+    if (!existing) throw new TaskMessageSubmissionError(404, "没有找到这个任务。");
+    if (this.#ending.has(taskId)) return this.#ending.get(taskId);
+    // Reserve synchronously, before metadata inspection or a preceding stop.
+    return this.#lifecycleOperation(this.#ending, taskId, async () => {
+      await this.#checkLifecycle(existing);
+      if (existing.status === "stopped") return { task: this.taskStore.getTask(taskId) };
+      const stopping = this.#canceling.get(taskId);
+      if (stopping) await stopping;
+      const active = this.#active.get(taskId);
+      if (active) {
+        active.controller.abort();
+        await this.agentRuntime.cancel(existing.executionSessionId);
+        const saved = await active.completion;
+        if (!saved.assistantMessage) throw new Error("The accepted turn was not durably saved");
+      }
+      const session = await this.agentRuntime.remove(existing.executionSessionId);
+      if (session?.status !== "stopped") throw new Error("Release was not confirmed");
+      return { task: this.taskStore.updateExecution(taskId, { status: "stopped" }) };
+    });
+  }
+
+  async #execute(turn, message, send, signal) {
     const taskId = turn.task.id;
     let assistantText = "";
     let runId;
@@ -131,7 +205,7 @@ export class TaskMessageService {
     };
     try {
       try {
-        await this.agentRuntime.run({ sessionId: turn.task.executionSessionId, message }, accept);
+        await this.agentRuntime.run({ sessionId: turn.task.executionSessionId, message }, accept, signal);
         if (!finalStatus) throw new Error("Runtime did not finish");
         if (!runId) {
           runId = randomUUID();

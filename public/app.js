@@ -1,15 +1,17 @@
 import { consumeSse } from "./sse.mjs";
+import { lifecycleControls, mergeTaskState, pendingDisposition } from "./lifecycle.mjs";
 
 const elements = Object.fromEntries([
   "new-session", "refresh-tasks", "task-list", "chat-panel", "chat-title", "task-status",
   "messages", "composer", "message-input", "send-button", "example-button", "recover-message",
   "tool-activity", "run-log", "task-id", "task-workspace", "task-event-log", "composer-help",
+  "stop-run", "end-task", "lifecycle-help",
 ].map((id) => [id, document.getElementById(id)]));
 const exampleMessages = {
   "local-pi": "请使用 read 工具读取当前目录的 numbers.csv，计算其中数值的数量 count、总和 sum 和平均值 mean。使用 write 工具将结果保存为当前目录的 result.json，内容只包含 count、sum、mean 三个字段。最后再次使用 read 工具读取 result.json，核对保存的结果，并用中文简要说明。",
   "agent-compose": "请使用 read 工具读取 /workspace/input/numbers.csv，计算其中数值的数量 count、总和 sum 和平均值 mean。使用 write 工具将结果保存为 /workspace/output/result.json，内容只包含 count、sum、mean 三个字段。最后再次使用 read 工具读取 /workspace/output/result.json，核对保存的结果，并用中文简要说明。",
 };
-const state = { tasks: [], task: null, execution: null, busy: false, messages: new Map(), tools: new Map(), assistant: null, pendingUser: null };
+const state = { tasks: [], task: null, execution: null, busy: false, lifecycleBusy: null, stopRequested: false, messages: new Map(), tools: new Map(), assistant: null, pendingUser: null };
 const pendingKey = "sirna-pi.pending-message";
 const selectedKey = "sirna-pi.selected-task";
 const creationKey = "sirna-pi.pending-creation";
@@ -32,6 +34,10 @@ function node(tag, className, text) {
   return result;
 }
 function setStatus(text, kind = "idle") {
+  if (state.task?.status === "stopped") {
+    text = "任务已结束，运行环境已释放。对话、记录和文件已保留，可在这里查看。";
+    kind = "idle";
+  }
   elements["task-status"].textContent = text;
   elements["task-status"].dataset.state = kind;
 }
@@ -39,23 +45,31 @@ function statusLabel(status) {
   return { idle: "可继续", running: "运行中", failed: "运行失败", stopped: "已结束", pending: "等待中", succeeded: "已完成", canceled: "已中断", cancelled: "已中断" }[status] || "等待中";
 }
 function syncControls() {
+  const navigating = state.busy || Boolean(state.lifecycleBusy);
   const recovering = Boolean(pending && pending.taskId === state.task?.id);
-  const blocked = state.busy || state.task?.status === "running" || state.task?.status === "stopped" || Boolean(pending) || !state.task;
+  const blocked = navigating || state.stopRequested || state.task?.status === "running" || state.task?.status === "stopped" || Boolean(pending) || !state.task;
   elements["send-button"].disabled = blocked;
   elements["example-button"].disabled = blocked || !exampleMessages[state.execution?.backend];
   elements["message-input"].disabled = !state.task;
   elements["message-input"].readOnly = blocked;
-  elements["new-session"].disabled = state.busy;
-  elements["refresh-tasks"].disabled = state.busy;
+  elements["new-session"].disabled = navigating;
+  elements["refresh-tasks"].disabled = navigating;
   elements["recover-message"].hidden = !recovering || state.task?.status === "running";
-  elements["recover-message"].disabled = state.busy;
+  elements["recover-message"].disabled = navigating || state.task?.status === "stopped";
   elements["send-button"].textContent = state.busy && state.task ? "处理中…" : "发送 ↑";
   elements["chat-panel"].setAttribute("aria-busy", String(state.busy || state.task?.status === "running"));
-  for (const button of elements["task-list"].querySelectorAll("button")) button.disabled = state.busy;
+  const controls = lifecycleControls(state);
+  elements["stop-run"].disabled = !controls.canStop;
+  elements["end-task"].disabled = !controls.canEnd;
+  elements["stop-run"].textContent = state.lifecycleBusy === "stop" || state.stopRequested ? "正在停止…" : "停止本轮";
+  elements["end-task"].textContent = state.lifecycleBusy === "end" ? "正在结束…" : "结束任务";
+  for (const button of elements["task-list"].querySelectorAll("button")) button.disabled = navigating;
 }
 function upsertTask(task) {
   if (!task?.id) return;
   const index = state.tasks.findIndex((item) => item.id === task.id);
+  task = mergeTaskState(state.tasks[index], task);
+  if (state.task?.id === task.id) task = mergeTaskState(state.task, task);
   if (index < 0) state.tasks.unshift(task);
   else state.tasks[index] = task;
   if (state.task?.id === task.id) {
@@ -71,7 +85,7 @@ function renderTaskList() {
   for (const task of tasks) {
     const button = node("button", "task-item");
     button.type = "button";
-    button.disabled = state.busy;
+    button.disabled = state.busy || Boolean(state.lifecycleBusy);
     button.setAttribute("aria-current", String(task.id === state.task?.id));
     button.append(node("strong", "", task.title || "新的设计任务"));
     const date = new Date(task.updatedAt);
@@ -90,9 +104,15 @@ function renderIdentity() {
   elements["task-id"].textContent = task?.id || "尚未创建";
   elements["task-workspace"].textContent = execution?.workspacePath || (known ? "任务开始后生成" : waiting);
   elements["task-event-log"].textContent = execution?.eventLogPath || (known ? "尚未运行" : waiting);
-  elements["composer-help"].textContent = known
+  elements["composer-help"].textContent = task?.status === "stopped" ? "此任务已结束，仅供查看。请新建任务以继续工作。" : known
     ? "当前练习可以读取、写入本任务目录中的文件。"
     : task ? "正在等待任务文件信息；请刷新记录后再填入统计示例。" : "选择或创建任务后，可以填入统计示例。";
+  elements["lifecycle-help"].textContent = task?.status === "stopped"
+    ? "运行环境已释放；历史和文件保留。"
+    : execution?.backend === "agent-compose" && execution.supportsLifecycle !== false
+      ? execution.stopUnconfirmed ? "上轮停止尚未确认，可再次停止或结束任务。"
+        : "停止本轮后可继续聊；结束任务会释放运行环境，保留历史和文件。"
+      : task ? "当前任务的运行环境不支持这些操作，或信息暂不可用。" : "选择任务后查看可用操作。";
 }
 function appendMessage(role, content, id) {
   if (id && state.messages.has(id)) {
@@ -130,7 +150,7 @@ function renderMessages(messages) {
   state.pendingUser = null;
   if (!messages.length) {
     const welcome = node("div", "welcome");
-    welcome.append(node("span", "welcome-mark", "↗"), node("h2", "", "先做一个能检查结果的小任务"), node("p", "help", state.task ? "点击下方“填入统计示例”，观察 Pi 如何读取文件并保存结果。完成后可以在这里继续追问。" : "点击“新建设计任务”，建立一段独立的对话。"));
+    welcome.append(node("span", "welcome-mark", "↗"), node("h2", "", state.task?.status === "stopped" ? "此任务已结束" : "先做一个能检查结果的小任务"), node("p", "help", state.task?.status === "stopped" ? "本任务尚无对话。已有记录和文件位置仍可查看。" : state.task ? "点击下方“填入统计示例”，观察 Pi 如何读取文件并保存结果。完成后可以在这里继续追问。" : "点击“新建设计任务”，建立一段独立的对话。"));
     elements.messages.append(welcome);
   }
   for (const message of messages) saveMessage(message);
@@ -150,7 +170,8 @@ function addRunEntry(title, text, kind = "") {
 }
 function showActivity(event) {
   if (event.type === "tool_start" || event.type === "tool_end") {
-    const key = `${event.runId || state.task?.currentRunId || ""}:${event.toolCallId}`;
+    const runId = event.runId || state.task?.currentRunId || "";
+    const key = `${runId}:${event.toolCallId}`;
     let tool = state.tools.get(key);
     if (!tool) {
       elements["tool-activity"].querySelector(".help")?.remove();
@@ -161,7 +182,7 @@ function showActivity(event) {
       const path = node("p", "");
       article.append(heading, path);
       elements["tool-activity"].append(article);
-      tool = { article, label, path };
+      tool = { article, label, path, runId };
       state.tools.set(key, tool);
     }
     tool.article.dataset.state = event.type === "tool_start" ? "running" : event.isError ? "error" : "success";
@@ -169,17 +190,28 @@ function showActivity(event) {
     if (typeof event.args?.path === "string") tool.path.textContent = event.args.path;
   } else if (event.type === "progress_message") addRunEntry("执行说明", event.text || "");
   else if (event.type === "run_status") addRunEntry("运行状态", statusLabel(event.status), event.status === "failed" ? "error" : "");
-  else if (event.type === "done") addRunEntry("本次执行结束", statusLabel(event.status), event.status === "failed" ? "error" : "");
+  else if (event.type === "done") {
+    const runId = event.runId || state.task?.currentRunId || "";
+    for (const tool of state.tools.values()) {
+      if (tool.runId !== runId || tool.article.dataset.state !== "running") continue;
+      tool.article.dataset.state = "unconfirmed";
+      tool.label.textContent = ["canceled", "cancelled"].includes(event.status) ? "已中断，结果未确认" : "结果未确认";
+    }
+    addRunEntry("本次执行结束", statusLabel(event.status), event.status === "failed" ? "error" : "");
+  }
   else if (event.type === "error") addRunEntry("执行失败", event.error || "任务未能完成。", "error");
 }
 function handleStreamEvent(event) {
-  if (event.taskId && event.taskId !== state.task?.id) return;
+  if ((event.taskId && event.taskId !== state.task?.id) || (event.task?.id && event.task.id !== state.task?.id)) return;
   if (event.type === "task" || event.type === "task_saved") {
     upsertTask(event.task);
+    if (event.type === "task_saved" && event.task?.status !== "running") state.stopRequested = false;
     if (event.message) saveMessage(event.message, state.pendingUser);
   } else if (event.type === "session") {
     state.execution = exampleMessages[event.backend] ? {
+      ...(state.execution?.backend === event.backend ? state.execution : {}),
       backend: event.backend,
+      stopUnconfirmed: false,
       ...(typeof event.sandboxId === "string" ? { sandboxId: event.sandboxId } : {}),
       workspacePath: typeof event.workspacePath === "string" ? event.workspacePath : null,
       eventLogPath: typeof event.eventLogPath === "string" ? event.eventLogPath : null,
@@ -201,45 +233,90 @@ function handleStreamEvent(event) {
     setStatus("这条消息已被接收，正在恢复已有记录…", "running");
   }
   showActivity(event);
+  syncControls();
 }
 async function readJson(url, options) {
   const response = await fetch(url, options);
-  const body = await response.json();
-  if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : "暂时无法读取任务，请稍后刷新。");
+  const body = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(typeof body?.error === "string" ? body.error : `请求失败（HTTP ${response.status}），请刷新记录后重试。`);
+  if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("服务器返回的信息不完整，请刷新记录。");
   return body;
 }
 async function refreshTaskList() {
   const data = await readJson("/v1/tasks");
-  state.tasks = data.tasks || [];
+  state.tasks = (data.tasks || []).map((task) => mergeTaskState(state.tasks.find((item) => item.id === task.id), task));
   renderTaskList();
 }
 async function selectTask(id) {
   const data = await readJson(`/v1/tasks/${encodeURIComponent(id)}/messages`);
-  state.task = data.task;
+  const sameTask = state.task?.id === id;
+  state.task = mergeTaskState(state.task, data.task);
   state.execution = data.execution ?? null;
+  if (!sameTask || state.task.status !== "running" && !state.execution?.stopUnconfirmed) state.stopRequested = false;
   store(localStorage, selectedKey, id);
   upsertTask(data.task);
   renderMessages(data.messages || []);
   resetActivity();
   for (const record of (data.runEvents || []).slice(-120)) showActivity({ ...(record.payload || record), runId: record.runId || record.payload?.runId });
-  // Recover accepted messages from server state; otherwise keep the same ID.
-  if (pending?.taskId === id && data.task.status !== "running" && data.messages?.some((message) => message.clientRequestId === pending.requestId)) {
+  // Ended tasks cannot retry a never-accepted send. Keep that text as a visible
+  // local draft while releasing the pending reservation for other tasks.
+  const disposition = pendingDisposition(pending, state.task, data.messages);
+  if (disposition === "archive") store(sessionStorage, `sirna-pi.unsent:${id}`, pending);
+  if (disposition !== "keep") {
     pending = null;
     store(sessionStorage, pendingKey, null);
   }
-  if (data.task.status === "running") setStatus("任务仍在运行。点击“刷新记录”查看新的执行进展。", "running");
+  const unsent = readStored(sessionStorage, `sirna-pi.unsent:${id}`);
+  if (unsent) addRunEntry("未发送的本地草稿", unsent.message);
+  if (state.task.status === "stopped") setStatus("");
+  else if (data.task.status === "running") setStatus("任务仍在运行。可停止本轮，或点击“刷新记录”查看新的执行进展。", "running");
   else if (pending?.taskId === id) setStatus("上次连接中断。可恢复本次发送，系统会核对已有记录，避免重复执行。", "error");
   else if (pending) setStatus("另一个任务的发送还待确认。请回到该任务，刷新记录或恢复发送。", "error");
   else if (data.task.status === "failed") setStatus("上次运行未完成，已保留记录。可以查看原因后继续提问。", "error");
   else setStatus(data.messages?.length ? "对话与执行记录已恢复，可以继续追问。" : "任务已创建，写下第一条要求。", data.messages?.length ? "success" : "idle");
 }
 async function withBusy(action) {
-  if (state.busy) return;
+  if (state.busy || state.lifecycleBusy) return;
   state.busy = true;
   syncControls();
   try { await action(); }
   catch (error) { setStatus(error instanceof Error ? error.message : "连接失败，请刷新任务记录。", "error"); }
   finally { state.busy = false; syncControls(); }
+}
+
+async function changeLifecycle(action) {
+  const controls = lifecycleControls(state);
+  if (action === "stop" ? !controls.canStop : !controls.canEnd) return;
+  const id = state.task.id;
+  state.lifecycleBusy = action;
+  syncControls();
+  setStatus(action === "stop" ? "正在请求停止本轮，等待执行和记录保存。" : "正在结束任务，等待本轮保存并释放运行环境。", "running");
+  try {
+    const data = await readJson(`/v1/tasks/${encodeURIComponent(id)}/${action === "stop" ? "cancel" : "runtime"}`, { method: action === "stop" ? "POST" : "DELETE" });
+    if (data.task?.id !== id) throw new Error("服务器尚未确认任务状态，请刷新记录。");
+    upsertTask(data.task);
+    state.stopRequested = action === "stop" && data.stopRequested === true && state.task.status === "running";
+    if (action === "end" && data.task.status !== "stopped") throw new Error("任务结束尚未确认，请刷新记录。");
+    // Keep the send stream and pending request intact until its task_saved.
+    // Without a stream (e.g. after reload), read the newly settled history now.
+    if (state.task.status !== "running" || !state.busy) {
+      await selectTask(id);
+      await refreshTaskList();
+    }
+    const requested = action === "stop" && data.stopRequested === true;
+    const text = action === "end" ? "运行环境已释放，历史和文件已保留。"
+      : requested ? "停止请求已接收。请等待状态确认；本轮记录会继续保存，任务环境保留。"
+        : "本轮已不在运行，记录和任务环境保留，可以继续提问。";
+    addRunEntry(action === "end" ? "任务已结束" : requested ? "停止请求已接收" : "本轮已结束", text);
+    setStatus(text, requested && state.task.status === "running" ? "running" : "idle");
+  } catch (error) {
+    const text = error instanceof Error ? error.message : "操作未能确认，请刷新记录。";
+    addRunEntry(action === "stop" ? "停止未能确认" : "结束未能确认", text, "error");
+    setStatus(text, "error");
+  } finally {
+    state.lifecycleBusy = null;
+    syncControls();
+  }
 }
 async function sendPending() {
   if (!pending || pending.taskId !== state.task?.id) return;
@@ -284,9 +361,11 @@ elements["example-button"].addEventListener("click", () => {
   elements["message-input"].focus();
 });
 elements["recover-message"].addEventListener("click", () => void withBusy(sendPending));
+elements["stop-run"].addEventListener("click", () => void changeLifecycle("stop"));
+elements["end-task"].addEventListener("click", () => void changeLifecycle("end"));
 elements.composer.addEventListener("submit", (event) => {
   event.preventDefault();
-  if (state.busy || !state.task || state.task.status === "running" || state.task.status === "stopped" || pending) return;
+  if (state.busy || state.lifecycleBusy || state.stopRequested || !state.task || state.task.status === "running" || state.task.status === "stopped" || pending) return;
   const message = elements["message-input"].value.trim();
   if (!message || message.length > 120000) { setStatus("请输入 1 到 120000 个字符的任务要求。", "error"); return; }
   pending = { taskId: state.task.id, requestId: `message:${crypto.randomUUID()}`, message };

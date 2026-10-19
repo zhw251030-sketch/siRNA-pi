@@ -17,7 +17,8 @@
 - 2026-10-18：启动正式 Agent Compose v2609.3.0，由其创建命令任务容器，验证执行、文件挂载、管理接口鉴权和停止释放；文件及运行记录保留，49 项离线测试通过。见 [第 5 步 B：Agent Compose 与任务环境](docs/07-AgentCompose与任务环境.md)。
 - 2026-10-20：构建锁定依赖的 Pi 1.2.0 guest，经 Agent Compose 模型转接接通 MiniMax-M3；真实文件任务和同会话续问通过，停止后容器释放且文件保留。96 项 Node 测试与 4 项 Linux 凭据测试通过。见 [第 5 步 C：容器中的 Pi 与模型连接](docs/08-容器中的Pi与模型连接.md)。
 - 2026-10-20：网页接入正式 Agent Compose RPC，真实统计、不同任务独立环境、网页服务重启后同 Pi 会话续聊通过；170 项 Node 测试与 4 项 Linux 凭据测试通过。详见 [第 5 步 D：网页接入 Agent Compose](docs/09-网页接入AgentCompose.md)。
-- 下一步补齐停止本轮与释放任务容器。测试后的两个网页 guest 保留运行；资源配额、开机自启、专业 siRNA 工具与自进化尚未实现。
+- 2026-10-20：完成停止本轮、结束任务与容器释放。真实网页停止后同会话续聊成功，运行中结束后 guest 释放、8 条消息及文件保留，刷新只读；239 项 Node 测试与4项 Linux 凭据测试通过。见 [第 6 步：停止运行与结束任务](docs/10-停止运行与结束任务.md)。
+- 下一步对照原仓库学习任务文件查看和结果获取，再进入工具封装。第 5 步 D 的两个网页 guest 仍保留；本步两个专用验收 guest 已释放，文件保留。资源配额、开机自启、专业 siRNA 工具与自进化尚未实现。
 
 安装位置、文件解释和验证记录见 [第 1 步 A：安装与运行 Pi](docs/01-安装与运行Pi.md)。服务器项目目录是 `/home/hanwen/Project/project/siNRA-pi/`，按用户指定拼写保留。
 
@@ -134,6 +135,7 @@ packages/agent-runtime/compose-events.mjs       将底层事件映射为网页�
 packages/agent-runtime/compose-control-token.mjs 仅在服务端安全读取管理令牌
 proto/                                       固定版本的官方协议、许可证与来源
 scripts/verify-compose-web-task.mjs            新容器网页统计练习只读验收
+scripts/verify-compose-lifecycle.mjs           中断、续聊、释放后的状态与文件只读验收
 apps/api/router.mjs         任务接口、SSE 传输与静态页面
 packages/task-core/task-store.mjs           SQLite 任务、消息和运行事件
 packages/task-core/task-message-service.mjs 消息检查、去重、执行协调与保存
@@ -144,6 +146,7 @@ packages/agent-runtime/workspace-files.mjs  read/write 文件范围检查
 public/index.html           任务列表、对话、执行动态三个区域
 public/app.js               创建任务、发消息、切换与恢复历史
 public/sse.mjs              连续读取服务端事件，确认保存完成
+public/lifecycle.mjs        停止/结束按钮、迟到状态和待发送草稿规则
 public/style.css            网页样式
 scripts/verify-first-task.mjs 检查 CLI、SDK 或网页统计任务的轨迹与真实文件
 tests/verify-file-task.test.mjs 不调用模型的验收程序测试
@@ -166,6 +169,7 @@ docs/06-Docker运行环境.md     系统前提、项目 Docker 和真实容器�
 docs/07-AgentCompose与任务环境.md 控制服务、任务环境、挂载与实际验收
 docs/08-容器中的Pi与模型连接.md  镜像、模型转接、凭据范围与真实模型任务
 docs/09-网页接入AgentCompose.md 网页正式 RPC、执行事件、同会话续聊及验收
+docs/10-停止运行与结束任务.md   停止请求、确认终态、保留文件并释放容器
 docs/superpowers/plans/      安装步骤与执行记录
 ```
 

@@ -9,12 +9,20 @@ export class RuntimeRouter {
     return this.legacy;
   }
   async status(id) { return (await this.runtime(id)).status(id); }
-  async run(request, emit) { return (await this.runtime(request.sessionId)).run(request, emit); }
+  async run(request, emit, signal) { return (await this.runtime(request.sessionId)).run(request, emit, signal); }
+  async cancel(id) {
+    if (await this.runtime(id) !== this.compose) throw new Error('Legacy SDK tasks do not support lifecycle operations');
+    return this.compose.cancel(id);
+  }
+  async remove(id) {
+    if (await this.runtime(id) !== this.compose) throw new Error('Legacy SDK tasks do not support lifecycle operations');
+    return this.compose.remove(id);
+  }
   async describe(id) {
     const runtime = await this.runtime(id);
     if (runtime === this.compose) return runtime.describe(id);
     const session = await runtime.status(id);
-    return { backend: 'local-pi', workspacePath: `workspaces/web/${id}`,
+    return { backend: 'local-pi', supportsLifecycle: false, workspacePath: `workspaces/web/${id}`,
       eventLogPath: session.currentRunId ? `runtime/web/${id}.${session.currentRunId}.events.jsonl` : null };
   }
 }

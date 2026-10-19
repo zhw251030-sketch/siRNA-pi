@@ -6,6 +6,29 @@ import { createComposeEventProjector } from './compose-events.mjs';
 
 const safeFailure = '本轮容器执行未完成，已保留记录；请检查运行状态后再试。';
 const now = () => new Date().toISOString();
+const terminalStatuses = new Set(['succeeded', 'canceled', 'failed']);
+const unresolvedBootstrap = session => session.bootstrapRunId && !session.workspaceReady && !terminalStatuses.has(session.bootstrapStatus);
+const unresolvedRun = session => {
+  const run = session.runs.findLast(item => item.accepted);
+  return run && (['pending', 'running'].includes(run.status) || run.stopUnconfirmed || run.outcomeUnconfirmed) ? run : undefined;
+};
+// Acceptance follows an idle-daemon preflight, so newer accepted work supersedes
+// old uncertainty. Keep historical diagnostics, but never stop that older run.
+const hasCurrentUncertainty = session => session.runs.slice(Math.max(0, session.runs.findLastIndex(run => run.accepted)))
+  .some(run => run.stopUnconfirmed || run.outcomeUnconfirmed);
+
+function recordDaemonOutcome(run, snapshot) {
+  run.daemonStatus = snapshot.status;
+  if (snapshot.error !== undefined) run.daemonError = snapshot.error;
+  if (snapshot.resultJson !== undefined) run.daemonResultJson = snapshot.resultJson;
+  if (snapshot.exitCode !== undefined) run.daemonExitCode = snapshot.exitCode;
+  if (snapshot.cleanupError) run.daemonCleanupError = snapshot.cleanupError;
+  // v2609 Docker loses context.Canceled's identity while forwarding its text.
+  // Interpret that exact terminal outcome only with durable user stop intent.
+  return run.accepted && run.userCancelRequested === true && snapshot.status === 'failed' &&
+    snapshot.error === 'context canceled' && !snapshot.cleanupError
+    ? { ...snapshot, status: 'canceled' } : snapshot;
+}
 
 export class AgentComposeRuntime {
   constructor({ root, executor, rpc }) {
@@ -13,11 +36,13 @@ export class AgentComposeRuntime {
     this.store = new ComposeSessionStore(this.root);
     this.executor = executor;
     this.rpc = rpc;
-    this.active = new Set();
+    this.active = new Map();
+    this.releasing = new Map();
+    this.canceling = new Map();
     this.preparing = new Map();
   }
   runtimeInfo() {
-    return { backend: 'agent-compose', structuredToolEvents: true, reasoningExposed: false, taskContainers: true };
+    return { backend: 'agent-compose', structuredToolEvents: true, reasoningExposed: false, taskContainers: true, supportsLifecycle: true };
   }
   owns(id) { return this.store.has(id); }
   async status(id) { return this.store.load(id); }
@@ -28,7 +53,12 @@ export class AgentComposeRuntime {
   }
   async describe(id) {
     const session = await this.status(id);
-    return { backend: session.backend, sandboxId: session.sandboxId,
+    const unresolved = unresolvedRun(session);
+    return { backend: session.backend, sandboxId: session.sandboxId, supportsLifecycle: true,
+      runtimeReleased: Boolean(session.runtimeReleased),
+      stopUnconfirmed: Boolean((unresolved && (!this.active.has(id) || unresolved.stopUnconfirmed || unresolved.outcomeUnconfirmed)) ||
+        hasCurrentUncertainty(session) ||
+        session.bootstrapStopUnconfirmed || (!this.active.has(id) && unresolvedBootstrap(session))),
       workspacePath: session.workspacePath ?? null, eventLogPath: session.eventLogPath ?? null };
   }
   async ensureWorkspace(id) {
@@ -39,6 +69,7 @@ export class AgentComposeRuntime {
   }
   async prepare(id) {
     const session = await this.status(id);
+    if (session.status === 'stopped') throw new Error('Execution session has ended');
     if (!session.projectId) {
       const project = await this.executor.up();
       if (typeof project.project?.id !== 'string') throw new Error('Missing project ID');
@@ -48,6 +79,7 @@ export class AgentComposeRuntime {
     if (!session.workspaceReady) {
       const remember = run => {
         session.bootstrapRunId = run.id;
+        session.bootstrapStatus = run.status;
         if (run.sandbox_id) {
           if (!sandboxIdPattern.test(run.sandbox_id)) throw new Error('Invalid sandbox ID');
           if (session.sandboxId && session.sandboxId !== run.sandbox_id) throw new Error('Sandbox identity changed');
@@ -76,13 +108,161 @@ export class AgentComposeRuntime {
     this.store.save(session);
     return session;
   }
-  async run(request, emit) {
+  async cancel(id) {
+    const active = this.active.get(id);
+    if (active) {
+      active.abort(); // The run owns persistence and keeps the task locked until its final event.
+      return { ...this.store.load(id), status: 'running' };
+    }
+    if (this.canceling.has(id)) return this.canceling.get(id);
+    if (this.releasing.has(id)) throw new Error('Execution session is ending');
+    const operation = Promise.resolve().then(() => this.#cancelDetached(id));
+    this.canceling.set(id, operation);
+    try { return await operation; } finally { this.canceling.delete(id); }
+  }
+  #verifyConversation(session) {
+    try {
+      this.store.recoverConversation(session);
+      this.store.assertConversation(session);
+      delete session.contextUnconfirmed;
+    } catch { session.contextUnconfirmed = true; }
+  }
+  async #waitBootstrap(session) {
+    if (terminalStatuses.has(session.bootstrapStatus)) return session.bootstrapStatus;
+    let terminal = false;
+    try {
+      await this.executor.wait(session.bootstrapRunId, run => {
+        if (run.id !== session.bootstrapRunId || (run.sandbox_id &&
+            (!sandboxIdPattern.test(run.sandbox_id) || (session.sandboxId && session.sandboxId !== run.sandbox_id)))) {
+          throw new Error('Bootstrap release target identity changed');
+        }
+        if (run.sandbox_id) session.sandboxId = run.sandbox_id;
+        session.bootstrapStatus = run.status;
+        terminal = terminalStatuses.has(run.status);
+        this.store.save(session);
+      });
+    } catch (error) {
+      // A confirmed canceled/failed bootstrap can still release its sandbox.
+      if (!terminal) throw error;
+    }
+    if (!terminal) throw new Error('Bootstrap termination was not confirmed');
+    return session.bootstrapStatus;
+  }
+  async #cancelDetached(id) {
+    const session = this.store.load(id);
+    if (session.status === 'stopped') return session;
+    // A blocked preflight attempt has no daemon run and must not replace an
+    // earlier accepted run as the target after a process restart.
+    const run = unresolvedRun(session);
+    const runId = run?.runId ?? (!session.workspaceReady ? session.bootstrapRunId : undefined);
+    if (!runId) {
+      if (hasCurrentUncertainty(session)) {
+        throw new Error('Cancellation is unconfirmed: daemon run identity is unavailable');
+      }
+      return session;
+    }
+    try {
+      if (!run) {
+        // Match cancellation during live initialization: only the already
+        // accepted fixed setup finishes. Never terminate it or submit a prompt.
+        const status = await this.#waitBootstrap(session);
+        delete session.bootstrapStopUnconfirmed;
+        if (status !== 'succeeded') throw new Error('Workspace initialization did not complete');
+        session.status = 'idle';
+        this.store.save(session);
+        return session;
+      }
+      let snapshot = await this.rpc.getRun(runId);
+      if (snapshot.runId !== runId || (session.sandboxId && snapshot.sandboxId !== session.sandboxId)) throw new Error('Unexpected cancellation target');
+      if (['pending', 'running'].includes(snapshot.status)) {
+        run.userCancelRequested = true;
+        this.store.save(session);
+        snapshot = await this.rpc.stopRunAndWait(runId);
+      }
+      if (!['succeeded', 'canceled', 'failed'].includes(snapshot.status) || snapshot.runId !== runId ||
+          (session.sandboxId && snapshot.sandboxId !== session.sandboxId)) throw new Error('Cancellation was not confirmed');
+      if (snapshot.sandboxId && !sandboxIdPattern.test(snapshot.sandboxId)) throw new Error('Unexpected cancellation target');
+      snapshot = recordDaemonOutcome(run, snapshot);
+      if (run) {
+        Object.assign(run, { status: snapshot.status, completedAt: now() });
+        session.currentRunId = runId;
+        delete run.stopUnconfirmed;
+        // A detached successful run has not been projected/saved as an answer here.
+        if (snapshot.status === 'canceled') delete run.outcomeUnconfirmed;
+        else run.outcomeUnconfirmed = true;
+      }
+      if (snapshot.status === 'canceled') this.#verifyConversation(session);
+      session.status = snapshot.status === 'failed' ? 'failed' : 'idle';
+      this.store.save(session);
+      return session;
+    } catch (error) {
+      if (run) {
+        run.stopUnconfirmed = true;
+        run.outcomeUnconfirmed = true;
+        session.currentRunId = runId;
+      } else session.bootstrapStopUnconfirmed = !terminalStatuses.has(session.bootstrapStatus);
+      session.status = 'failed';
+      this.store.save(session);
+      throw error;
+    }
+  }
+  async remove(id) {
+    if (this.releasing.has(id)) return this.releasing.get(id);
+    if (this.active.has(id)) throw new Error('Wait for the active turn to finish saving before ending');
+    const operation = Promise.resolve().then(async () => {
+      // Read after the cancellation has persisted its result, never overwrite
+      // it with an earlier snapshot or let it resurrect this ended session.
+      if (this.canceling.has(id)) await this.canceling.get(id);
+      const session = this.store.load(id);
+      if (session.status === 'stopped') return session;
+      // A restart can leave the fixed bootstrap in flight. Finish it before release.
+      if (unresolvedBootstrap(session)) {
+        await this.#waitBootstrap(session);
+      }
+      if (session.sandboxId) {
+        if (!sandboxIdPattern.test(session.sandboxId)) throw new Error('Invalid release target');
+        const sandbox = await this.executor.release(session.sandboxId);
+        if (sandbox.sandbox_id !== session.sandboxId || sandbox.vm_status !== 'stopped' ||
+            sandbox.stopped_runtime_state !== 'released') throw new Error('Container release was not confirmed');
+        if (session.workspacePath && this.store.workspace(sandbox) !== session.workspacePath) throw new Error('Released workspace changed');
+        session.releaseOutcome = sandbox.releaseOutcome;
+      }
+      session.status = 'stopped';
+      session.runtimeReleased = true;
+      session.endedAt = now();
+      this.store.save(session);
+      return session;
+    });
+    this.releasing.set(id, operation);
+    try { return await operation; } finally { this.releasing.delete(id); }
+  }
+  async run(request, emit, externalSignal) {
     const id = request.sessionId;
     if (this.active.has(id)) throw new Error('Execution session is already running');
-    this.active.add(id);
+    if (this.releasing.has(id)) throw new Error('Execution session is ending');
+    if (this.canceling.has(id)) throw new Error('Execution session cancellation is in progress');
+    if (this.store.load(id).status === 'stopped') throw new Error('Execution session has ended');
+    const controller = new AbortController();
+    const signal = externalSignal ? AbortSignal.any([controller.signal, externalSignal]) : controller.signal;
+    this.active.set(id, controller);
     let session;
     let run;
     let log;
+    let submitted = false;
+    let cancelPersistenceError;
+    const rememberUserCancel = () => {
+      if (!run || !submitted) return;
+      const previous = run.userCancelRequested;
+      run.userCancelRequested = true;
+      try { this.store.save(session); }
+      catch (error) {
+        if (previous === undefined) delete run.userCancelRequested;
+        else run.userCancelRequested = previous;
+        // EventTarget callbacks must not throw outside the owned run promise.
+        // RPC's next listener must still receive abort and terminate the work.
+        cancelPersistenceError = error;
+      }
+    };
     const send = event => {
       if (run && log === undefined) {
         if (!/^[A-Za-z0-9_-]+$/.test(run.runId)) throw new Error('Invalid run ID');
@@ -95,9 +275,20 @@ export class AgentComposeRuntime {
       if (log !== undefined) fs.writeSync(log, JSON.stringify(projected) + '\n');
       emit(projected);
     };
+    const canceled = () => {
+      Object.assign(run, { status: 'canceled', completedAt: now() });
+      session.status = 'idle';
+      this.#verifyConversation(session);
+      this.store.save(session);
+      send({ type: 'run_status', status: 'canceled', piSessionId: session.piSessionId });
+      send({ type: 'done', status: 'canceled', piSessionId: session.piSessionId });
+    };
     try {
+      if (signal.aborted) throw new Error('Canceled before initialization');
       session = await this.ensureWorkspace(id);
+      if (signal.aborted) throw new Error('Canceled during initialization');
       if (await this.rpc.hasActiveRuns(session.sandboxId)) throw new Error('A detached Agent Compose run is still active');
+      if (signal.aborted) throw new Error('Canceled before model submission');
       this.store.recoverConversation(session);
       this.store.assertConversation(session);
       for (const previous of session.runs) {
@@ -109,8 +300,13 @@ export class AgentComposeRuntime {
       session.currentRunId = run.runId;
       this.store.save(session);
       const projector = createComposeEventProjector(send);
-      const snapshot = await this.rpc.run({ projectId: session.projectId, agentName: 'designer', sandboxId: session.sandboxId,
+      submitted = true;
+      // Register before RPC's abort handler so intent is durable before StopRun.
+      signal.addEventListener('abort', rememberUserCancel, { once: true });
+      if (signal.aborted) rememberUserCancel();
+      let snapshot = await this.rpc.run({ projectId: session.projectId, agentName: 'designer', sandboxId: session.sandboxId,
         prompt: '当前任务工作目录是 /workspace。样例在 input/numbers.csv，结果请写入 output/。本阶段仅使用 read/write，保留其他文件。\n\n用户消息：\n' + request.message }, {
+        signal,
         onStarted: task => {
           if (task.sandboxId !== session.sandboxId || !/^[A-Za-z0-9_-]+$/.test(task.runId)) throw new Error('Unexpected RPC run identity');
           run.runId = task.runId;
@@ -124,9 +320,13 @@ export class AgentComposeRuntime {
         onTurnCompleted: raw => projector.onTurnCompleted(raw),
       });
       if (snapshot.runId !== run.runId || snapshot.sandboxId !== session.sandboxId || !run.accepted) throw new Error('Unexpected final run identity');
+      snapshot = recordDaemonOutcome(run, snapshot);
+      if (cancelPersistenceError) throw cancelPersistenceError;
+      if (snapshot.status === 'canceled') { canceled(); return; }
       const result = projector.finish(snapshot);
       if (session.piSessionId && session.piSessionId !== result.piSessionId) throw new Error('Pi conversation unexpectedly replaced');
       session.piSessionId = result.piSessionId;
+      delete session.contextUnconfirmed;
       this.store.assertConversation(session);
       Object.assign(run, { status: 'succeeded', completedAt: now(), outputCharacters: result.answer.length,
         piSessionId: result.piSessionId, modelResponses: result.modelResponses, toolCalls: result.toolCalls });
@@ -141,6 +341,8 @@ export class AgentComposeRuntime {
         run = { runId: randomUUID(), startedAt: now(), outputCharacters: 0 };
         session.runs.push(run);
       }
+      session.currentRunId = run.runId;
+      if (signal.aborted && !submitted) { canceled(); return; }
       Object.assign(run, { status: 'failed', completedAt: now(),
         ...(run.accepted ? { outcomeUnconfirmed: true } : {}),
         ...(error.stopError ? { stopUnconfirmed: true } : {}) });
@@ -150,6 +352,7 @@ export class AgentComposeRuntime {
       send({ type: 'error', error: safeFailure });
       send({ type: 'done', status: 'failed', piSessionId: session.piSessionId });
     } finally {
+      signal.removeEventListener('abort', rememberUserCancel);
       if (log !== undefined) fs.closeSync(log);
       this.active.delete(id);
     }

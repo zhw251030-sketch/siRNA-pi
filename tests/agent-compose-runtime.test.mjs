@@ -28,6 +28,10 @@ function fixture(t) {
     },
     async wait() { throw new Error('unexpected bootstrap retry'); },
     async inspectSandbox(id) { return sandboxes.get(id); },
+    async release(id) {
+      const sandbox = sandboxes.get(id);
+      return { ...sandbox, vm_status: 'stopped', stopped_runtime_state: 'released' };
+    },
   };
   const rpc = {
     async hasActiveRuns() { return false; },
@@ -175,4 +179,383 @@ test('a failed controller status check prevents an uncertain duplicate model run
   await f.runtime.run({ sessionId: s.id, message: 'go' }, e => events.push(e));
   assert.equal(events.at(-1).status, 'failed');
   assert.equal(f.counts.model, 0);
+});
+
+test('canceling an accepted turn saves canceled without a fake successful answer and permits same-context continuation', async t => {
+  const f = fixture(t); const s = await f.runtime.create();
+  await f.runtime.run({ sessionId: s.id, message: 'first' }, () => {});
+  const previous = await f.runtime.status(s.id); const success = f.rpc.run;
+  let started; const ready = new Promise(resolve => { started = resolve; });
+  f.rpc.run = async (request, cb) => {
+    await cb.onStarted({ runId: 'cancel-me', sandboxId: request.sandboxId, status: 'running' });
+    started();
+    await new Promise(resolve => cb.signal.addEventListener('abort', resolve, { once: true }));
+    return { runId: 'cancel-me', sandboxId: request.sandboxId, status: 'canceled' };
+  };
+  const events = []; const running = f.runtime.run({ sessionId: s.id, message: 'long turn' }, e => events.push(e));
+  await ready;
+  assert.equal((await f.runtime.cancel(s.id)).status, 'running');
+  await running;
+  const canceled = await f.runtime.status(s.id);
+  assert.equal(canceled.status, 'idle');
+  assert.equal(canceled.runs.at(-1).status, 'canceled');
+  assert.equal(canceled.piSessionId, previous.piSessionId);
+  assert.equal(events.at(-1).status, 'canceled');
+  assert.ok(!events.some(e => ['error', 'assistant_message'].includes(e.type)));
+  f.rpc.run = success;
+  await f.runtime.run({ sessionId: s.id, message: 'continue' }, () => {});
+  assert.equal((await f.runtime.status(s.id)).piSessionId, previous.piSessionId);
+  assert.equal(f.counts.boot, 1);
+});
+
+test('cancel during initialization finishes only fixed setup and never submits a model prompt', async t => {
+  const f = fixture(t); const s = await f.runtime.create();
+  let unblock; const gate = new Promise(resolve => { unblock = resolve; });
+  let entered; const ready = new Promise(resolve => { entered = resolve; });
+  const boot = f.executor.bootstrap;
+  f.executor.bootstrap = async cb => { entered(); await gate; return boot(cb); };
+  const events = []; const running = f.runtime.run({ sessionId: s.id, message: 'stop before model' }, e => events.push(e));
+  await ready; await f.runtime.cancel(s.id); unblock(); await running;
+  assert.equal(f.counts.model, 0);
+  assert.equal(events.at(-1).status, 'canceled');
+  assert.equal((await f.runtime.status(s.id)).status, 'idle');
+});
+
+test('a cancellation latched before runtime dispatch creates neither a guest nor a model request', async t => {
+  const f = fixture(t); const s = await f.runtime.create(); const c = new AbortController(); c.abort();
+  const events = []; await f.runtime.run({ sessionId: s.id, message: 'stop' }, e => events.push(e), c.signal);
+  assert.deepEqual(f.counts, { boot: 0, model: 0 });
+  assert.equal(events.at(-1).status, 'canceled');
+});
+
+test('ending releases only this sandbox, keeps files and history, and permanently rejects new runs', async t => {
+  const f = fixture(t); const s = await f.runtime.create();
+  await f.runtime.run({ sessionId: s.id, message: 'first' }, () => {});
+  const before = await f.runtime.status(s.id);
+  const file = path.join(f.root, before.workspacePath, 'output/keep.txt'); fs.writeFileSync(file, 'preserve me');
+  const ended = await f.runtime.remove(s.id);
+  assert.equal(ended.status, 'stopped'); assert.equal(ended.runtimeReleased, true);
+  assert.equal(ended.sandboxId, before.sandboxId); assert.equal(ended.piSessionId, before.piSessionId);
+  assert.deepEqual(ended.runs, before.runs); assert.equal(fs.readFileSync(file, 'utf8'), 'preserve me');
+  await assert.rejects(f.runtime.run({ sessionId: s.id, message: 'no' }, () => {}), /ended/);
+  assert.equal((await f.runtime.remove(s.id)).status, 'stopped');
+  assert.equal(f.counts.model, 1);
+});
+
+test('failed or unconfirmed resource release cannot mark a task stopped', async t => {
+  const f = fixture(t); const s = await f.runtime.create(); await f.runtime.ensureWorkspace(s.id);
+  f.executor.release = async id => ({ ...f.sandboxes.get(id), vm_status: 'stopped', stopped_runtime_state: 'release-failed' });
+  await assert.rejects(f.runtime.remove(s.id), /release/);
+  assert.notEqual((await f.runtime.status(s.id)).status, 'stopped');
+});
+
+test('a release in flight blocks a new turn before any model request', async t => {
+  const f = fixture(t); const s = await f.runtime.create(); await f.runtime.ensureWorkspace(s.id);
+  let unblock; const gate = new Promise(resolve => { unblock = resolve; });
+  let entered; const ready = new Promise(resolve => { entered = resolve; });
+  const release = f.executor.release;
+  f.executor.release = async id => { entered(); await gate; return release(id); };
+  const ending = f.runtime.remove(s.id); await ready;
+  await assert.rejects(f.runtime.run({ sessionId: s.id, message: 'race' }, () => {}), /ending/);
+  unblock(); await ending; assert.equal(f.counts.model, 0);
+});
+
+test('ending an unused task requires no container and remains idempotent', async t => {
+  const f = fixture(t); const s = await f.runtime.create();
+  assert.equal((await f.runtime.remove(s.id)).status, 'stopped');
+  assert.equal((await f.runtime.remove(s.id)).status, 'stopped');
+  assert.deepEqual(f.counts, { boot: 0, model: 0 });
+});
+
+async function detached(f, id) {
+  const session = await f.runtime.ensureWorkspace(id);
+  session.status = 'running';
+  session.currentRunId = 'detached-run';
+  session.runs.push({ runId: 'detached-run', status: 'running', accepted: true });
+  f.runtime.store.save(session);
+  return session;
+}
+
+test('restart exposes an accepted running turn as unconfirmed before a failed retry', async t => {
+  const f = fixture(t); const s = await f.runtime.create(); await detached(f, s.id);
+  assert.equal((await f.make().describe(s.id)).stopUnconfirmed, true);
+});
+
+test('an unconfirmed stop before daemon identity was saved remains visible after restart', async t => {
+  const f = fixture(t); const s = await f.runtime.create();
+  s.status = 'failed'; s.runs.push({ runId: 'local-request', status: 'failed', stopUnconfirmed: true });
+  f.runtime.store.save(s);
+  assert.equal((await f.make().describe(s.id)).stopUnconfirmed, true);
+  await assert.rejects(f.make().cancel(s.id), /unconfirmed|identity|run id/i);
+});
+
+test('a blocked retry cannot hide the older accepted detached cancellation target', async t => {
+  const f = fixture(t); const s = await f.runtime.create(); const saved = await detached(f, s.id);
+  f.rpc.hasActiveRuns = async () => true;
+  const runtime = f.make();
+  await runtime.run({ sessionId: s.id, message: 'blocked retry' }, () => {});
+  const before = await runtime.status(s.id);
+  assert.equal(before.runs.at(-1).accepted, undefined);
+  assert.equal((await runtime.describe(s.id)).stopUnconfirmed, true);
+  const targets = [];
+  f.rpc.getRun = async id => { targets.push(id); return { runId: id, sandboxId: saved.sandboxId, status: 'running' }; };
+  f.rpc.stopRunAndWait = async id => { targets.push(id); return { runId: id, sandboxId: saved.sandboxId, status: 'canceled' }; };
+  const canceled = await runtime.cancel(s.id);
+  assert.deepEqual(targets, ['detached-run', 'detached-run']);
+  assert.equal(canceled.runs[0].status, 'canceled');
+  assert.equal(canceled.runs.at(-1).status, 'failed');
+  assert.equal(f.counts.model, 0);
+});
+
+test('cancel on a normally completed idle turn is a no-op without querying or changing history', async t => {
+  const f = fixture(t); const s = await f.runtime.create();
+  await f.runtime.run({ sessionId: s.id, message: 'complete' }, () => {});
+  const before = await f.runtime.status(s.id);
+  f.rpc.getRun = async () => { throw new Error('must not query a completed turn'); };
+  const after = await f.make().cancel(s.id);
+  assert.deepEqual(after, before);
+  assert.equal((await f.make().describe(s.id)).stopUnconfirmed, false);
+});
+
+test('a newer accepted completed turn supersedes historical stop uncertainty without changing history', async t => {
+  const f = fixture(t); const s = await f.runtime.create();
+  await f.runtime.run({ sessionId: s.id, message: 'create native context' }, () => {});
+  const saved = await detached(f, s.id);
+  Object.assign(saved.runs.at(-1), { status: 'failed', stopUnconfirmed: true, outcomeUnconfirmed: true });
+  saved.runs.push({ runId: 'local-unknown', status: 'failed', stopUnconfirmed: true });
+  f.runtime.store.save(saved);
+  await f.make().run({ sessionId: s.id, message: 'new accepted turn after confirmed idle preflight' }, () => {});
+  const before = await f.runtime.status(s.id);
+  assert.equal(before.runs.at(-1).status, 'succeeded');
+  f.rpc.getRun = async () => { throw new Error('must not query a superseded historical turn'); };
+  assert.equal((await f.make().describe(s.id)).stopUnconfirmed, false);
+  assert.deepEqual(await f.make().cancel(s.id), before);
+  assert.equal(before.runs[1].stopUnconfirmed, true);
+});
+
+for (const failure of ['get', 'stop', 'identity']) {
+  test(`detached cancellation ${failure} failure persists uncertainty for another attempt`, async t => {
+    const f = fixture(t); const s = await f.runtime.create(); const saved = await detached(f, s.id);
+    f.rpc.getRun = async id => {
+      if (failure === 'get') throw new Error('controller offline');
+      return { runId: failure === 'identity' ? 'wrong-run' : id, sandboxId: saved.sandboxId, status: 'running' };
+    };
+    f.rpc.stopRunAndWait = async () => { throw new Error('stop offline'); };
+    await assert.rejects(f.make().cancel(s.id));
+    const after = await f.runtime.status(s.id);
+    assert.equal(after.runs[0].stopUnconfirmed, true);
+    assert.notEqual(after.runs[0].status, 'canceled');
+    assert.equal((await f.make().describe(s.id)).stopUnconfirmed, true);
+  });
+}
+
+test('detached confirmed cancellation recovers native context and clears a stale context warning', async t => {
+  const f = fixture(t); const s = await f.runtime.create();
+  await f.runtime.run({ sessionId: s.id, message: 'context' }, () => {});
+  const saved = await detached(f, s.id); const threadId = saved.piSessionId;
+  delete saved.piSessionId; saved.contextUnconfirmed = true; f.runtime.store.save(saved);
+  f.rpc.getRun = async id => ({ runId: id, sandboxId: saved.sandboxId, status: 'canceled' });
+  const after = await f.make().cancel(s.id);
+  assert.equal(after.piSessionId, threadId);
+  assert.equal(after.contextUnconfirmed, undefined);
+});
+
+test('detached canceled first turn with missing native context records uncertainty instead of starting again', async t => {
+  const f = fixture(t); const s = await f.runtime.create(); const saved = await detached(f, s.id);
+  f.rpc.getRun = async id => ({ runId: id, sandboxId: saved.sandboxId, status: 'canceled' });
+  const after = await f.make().cancel(s.id);
+  assert.equal(after.contextUnconfirmed, true);
+  assert.equal(after.runs[0].status, 'canceled');
+  assert.equal(f.counts.model, 0);
+});
+
+test('detached cancellation is shared, blocks a new turn, and cannot resurrect a released task', async t => {
+  const f = fixture(t); const s = await f.runtime.create(); const saved = await detached(f, s.id);
+  let resolveGet; let entered; const ready = new Promise(resolve => { entered = resolve; });
+  const gate = new Promise(resolve => { resolveGet = resolve; }); let queries = 0;
+  f.rpc.getRun = async id => { queries++; entered(); await gate; return { runId: id, sandboxId: saved.sandboxId, status: 'canceled' }; };
+  const runtime = f.make(); const first = runtime.cancel(s.id); await ready;
+  const second = runtime.cancel(s.id);
+  const ending = runtime.remove(s.id);
+  const blocked = assert.rejects(runtime.run({ sessionId: s.id, message: 'race' }, () => {}), /cancel|ending/i);
+  resolveGet(); await Promise.all([first, second, ending, blocked]);
+  assert.equal(queries, 1);
+  const after = await f.make().status(s.id);
+  assert.equal(after.status, 'stopped');
+  assert.equal(after.runtimeReleased, true);
+  assert.equal(f.counts.model, 0);
+});
+
+test('restart exposes unfinished bootstrap and confirmation clears its stop uncertainty', async t => {
+  const f = fixture(t); const s = await f.runtime.create(); const saved = await f.runtime.ensureWorkspace(s.id);
+  saved.workspaceReady = false; delete saved.bootstrapStatus; f.runtime.store.save(saved);
+  const runtime = f.make();
+  assert.equal((await runtime.describe(s.id)).stopUnconfirmed, true);
+  f.executor.wait = async (id, cb) => cb({ id, sandbox_id: saved.sandboxId, status: 'succeeded', exit_code: 0 });
+  const canceled = await runtime.cancel(s.id);
+  assert.equal(canceled.bootstrapStatus, 'succeeded');
+  assert.equal((await runtime.describe(s.id)).stopUnconfirmed, false);
+  assert.equal(f.counts.model, 0);
+});
+
+test('cancel after restart lets only fixed bootstrap finish and the next turn reuses that workspace', async t => {
+  const f = fixture(t); const s = await f.runtime.create(); const saved = await f.runtime.ensureWorkspace(s.id);
+  saved.workspaceReady = false; saved.bootstrapStatus = 'running'; f.runtime.store.save(saved);
+  let waits = 0;
+  f.executor.wait = async (id, cb) => { waits++; await cb({ id, sandbox_id: saved.sandboxId, status: 'succeeded', exit_code: 0 }); };
+  f.rpc.getRun = async () => { throw new Error('fixed bootstrap must not use model cancellation'); };
+  f.rpc.stopRunAndWait = async () => { throw new Error('fixed bootstrap must not be stopped'); };
+  const runtime = f.make();
+  const canceled = await runtime.cancel(s.id);
+  assert.equal(canceled.status, 'idle');
+  assert.equal(waits, 1);
+  assert.equal(f.counts.model, 0);
+  await runtime.run({ sessionId: s.id, message: 'continue' }, () => {});
+  const after = await runtime.status(s.id);
+  assert.equal(after.sandboxId, saved.sandboxId);
+  assert.equal(after.runs.at(-1).status, 'succeeded');
+  assert.deepEqual(f.counts, { boot: 1, model: 1 });
+});
+
+test('release waits for a persisted bootstrap even when its sandbox id is already known', async t => {
+  const f = fixture(t); const s = await f.runtime.create(); const saved = await f.runtime.ensureWorkspace(s.id);
+  saved.workspaceReady = false; saved.bootstrapStatus = 'running'; f.runtime.store.save(saved);
+  let finishSetup; let entered; const gate = new Promise(resolve => { finishSetup = resolve; });
+  const ready = new Promise(resolve => { entered = resolve; }); const sequence = [];
+  f.executor.wait = async (id, cb) => {
+    sequence.push('wait'); entered(); await gate;
+    await cb({ id, sandbox_id: saved.sandboxId, status: 'succeeded', exit_code: 0 });
+  };
+  const release = f.executor.release;
+  f.executor.release = async id => { sequence.push('release'); return release(id); };
+  const runtime = f.make(); const ending = runtime.remove(s.id);
+  await Promise.race([ready, ending.then(() => assert.fail('release finished before waiting for bootstrap'))]);
+  assert.deepEqual(sequence, ['wait']);
+  await assert.rejects(runtime.run({ sessionId: s.id, message: 'race' }, () => {}), /ending/);
+  finishSetup(); await ending;
+  assert.deepEqual(sequence, ['wait', 'release']);
+  assert.equal(f.counts.boot, 1);
+  assert.equal(f.counts.model, 0);
+});
+
+test('a bootstrap snapshot with a different sandbox cannot redirect resource release', async t => {
+  const f = fixture(t); const s = await f.runtime.create(); const saved = await f.runtime.ensureWorkspace(s.id);
+  saved.workspaceReady = false; saved.bootstrapStatus = 'running'; f.runtime.store.save(saved); let releases = 0;
+  f.executor.wait = async (id, cb) => cb({ id, sandbox_id: 'f'.repeat(64), status: 'succeeded', exit_code: 0 });
+  f.executor.release = async () => { releases++; throw new Error('wrong target released'); };
+  await assert.rejects(f.make().remove(s.id), /identity|target/i);
+  assert.equal(releases, 0);
+  assert.equal((await f.runtime.status(s.id)).sandboxId, saved.sandboxId);
+});
+
+test('release still proceeds when the existing bootstrap is confirmed canceled by wait', async t => {
+  const f = fixture(t); const s = await f.runtime.create(); const saved = await f.runtime.ensureWorkspace(s.id);
+  saved.workspaceReady = false; delete saved.bootstrapStatus; f.runtime.store.save(saved);
+  f.executor.wait = async (id, cb) => {
+    await cb({ id, sandbox_id: saved.sandboxId, status: 'canceled', exit_code: 1 });
+    throw new Error('Workspace initialization failed');
+  };
+  const after = await f.make().remove(s.id);
+  assert.equal(after.status, 'stopped');
+  assert.equal(after.runtimeReleased, true);
+  assert.equal(after.bootstrapStatus, 'canceled');
+  assert.equal(f.counts.boot, 1);
+  assert.equal(f.counts.model, 0);
+});
+
+for (const external of [false, true]) {
+  test(`explicit ${external ? 'external' : 'runtime'} abort recognizes v2609 context-canceled failure and preserves daemon evidence`, async t => {
+    const f = fixture(t); const s = await f.runtime.create(); const controller = new AbortController();
+    let ready; const started = new Promise(resolve => { ready = resolve; });
+    f.rpc.run = async (request, cb) => {
+      await cb.onStarted({ runId: 'cancel-context', sandboxId: request.sandboxId, status: 'running' }); ready();
+      await new Promise(resolve => cb.signal.addEventListener('abort', () => {
+        assert.equal(f.runtime.store.load(s.id).runs.at(-1).userCancelRequested, true);
+        resolve();
+      }, { once: true }));
+      return { runId: 'cancel-context', sandboxId: request.sandboxId, status: 'failed', exitCode: 1, error: 'context canceled', resultJson: '{}' };
+    };
+    const events = []; const running = f.runtime.run({ sessionId: s.id, message: 'go' }, e => events.push(e), external ? controller.signal : undefined);
+    await started;
+    if (external) controller.abort(); else await f.runtime.cancel(s.id);
+    await running;
+    const saved = await f.runtime.status(s.id); const run = saved.runs.at(-1);
+    assert.equal(run.status, 'canceled');
+    assert.equal(run.daemonStatus, 'failed');
+    assert.equal(run.daemonError, 'context canceled');
+    assert.equal(run.daemonResultJson, '{}');
+    assert.equal(run.daemonExitCode, 1);
+    assert.equal(run.userCancelRequested, true);
+    assert.equal(events.at(-1).status, 'canceled');
+    assert.ok(!events.some(event => ['assistant_message', 'error'].includes(event.type)));
+  });
+}
+
+for (const failure of [{ error: 'Provider failed' }, { error: 'context canceled', cleanupError: 'Termination not confirmed' }]) {
+  test(`explicit abort never hides a distinct daemon failure (${failure.cleanupError || failure.error})`, async t => {
+    const f = fixture(t); const s = await f.runtime.create(); let ready; const started = new Promise(resolve => { ready = resolve; });
+    f.rpc.run = async (request, cb) => {
+      await cb.onStarted({ runId: 'failed-after-stop', sandboxId: request.sandboxId, status: 'running' }); ready();
+      await new Promise(resolve => cb.signal.addEventListener('abort', resolve, { once: true }));
+      return { runId: 'failed-after-stop', sandboxId: request.sandboxId, status: 'failed', ...failure };
+    };
+    const events = []; const running = f.runtime.run({ sessionId: s.id, message: 'go' }, e => events.push(e));
+    await started; await f.runtime.cancel(s.id); await running;
+    const run = (await f.runtime.status(s.id)).runs.at(-1);
+    assert.equal(run.status, 'failed');
+    assert.equal(run.userCancelRequested, true);
+    assert.equal(events.at(-1).status, 'failed');
+  });
+}
+
+test('a detached failed context-canceled snapshot without prior stop intent remains failed', async t => {
+  const f = fixture(t); const s = await f.runtime.create(); const saved = await detached(f, s.id);
+  f.rpc.getRun = async id => ({ runId: id, sandboxId: saved.sandboxId, status: 'failed', error: 'context canceled', resultJson: '{}' });
+  const after = await f.make().cancel(s.id);
+  assert.equal(after.runs.at(-1).status, 'failed');
+  assert.equal(after.runs.at(-1).userCancelRequested, undefined);
+});
+
+test('detached running cancellation persists intent before StopRun and records the daemon failed outcome as canceled', async t => {
+  const f = fixture(t); const s = await f.runtime.create(); const saved = await detached(f, s.id);
+  f.rpc.getRun = async id => ({ runId: id, sandboxId: saved.sandboxId, status: 'running' });
+  f.rpc.stopRunAndWait = async id => {
+    assert.equal(f.runtime.store.load(s.id).runs.at(-1).userCancelRequested, true);
+    return { runId: id, sandboxId: saved.sandboxId, status: 'failed', error: 'context canceled', resultJson: '{}' };
+  };
+  const after = await f.make().cancel(s.id); const run = after.runs.at(-1);
+  assert.equal(run.status, 'canceled'); assert.equal(run.daemonStatus, 'failed');
+  assert.equal(run.outcomeUnconfirmed, undefined);
+});
+
+test('restart recognizes the exact canceled daemon failure only with an earlier persisted stop request', async t => {
+  const f = fixture(t); const s = await f.runtime.create(); const saved = await detached(f, s.id);
+  saved.runs.at(-1).userCancelRequested = true; f.runtime.store.save(saved);
+  f.rpc.getRun = async id => ({ runId: id, sandboxId: saved.sandboxId, status: 'failed', error: 'context canceled' });
+  const after = await f.make().cancel(s.id);
+  assert.equal(after.runs.at(-1).status, 'canceled');
+  assert.equal(after.runs.at(-1).daemonStatus, 'failed');
+});
+
+test('failure to persist stop intent remains owned by the run while RPC still receives abort', async t => {
+  const f = fixture(t); const s = await f.runtime.create(); let ready; const started = new Promise(resolve => { ready = resolve; });
+  let abortReachedRpc = false;
+  f.rpc.run = async (request, cb) => {
+    await cb.onStarted({ runId: 'stop-save-failure', sandboxId: request.sandboxId, status: 'running' }); ready();
+    await new Promise(resolve => cb.signal.addEventListener('abort', () => { abortReachedRpc = true; resolve(); }, { once: true }));
+    return { runId: 'stop-save-failure', sandboxId: request.sandboxId, status: 'canceled' };
+  };
+  const save = f.runtime.store.save.bind(f.runtime.store); let failures = 0;
+  f.runtime.store.save = session => {
+    if (session.runs.at(-1)?.userCancelRequested && failures++ === 0) throw new Error('injected stop-intent storage failure');
+    return save(session);
+  };
+  const events = []; const running = f.runtime.run({ sessionId: s.id, message: 'go' }, e => events.push(e));
+  await started; await f.runtime.cancel(s.id); await running;
+  const run = (await f.runtime.status(s.id)).runs.at(-1);
+  assert.equal(abortReachedRpc, true);
+  assert.equal(run.userCancelRequested, undefined);
+  assert.equal(run.status, 'failed');
+  assert.equal(events.at(-1).status, 'failed');
+  assert.ok(!events.some(event => event.status === 'canceled' || event.type === 'assistant_message'));
 });

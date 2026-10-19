@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { setImmediate } from 'node:timers/promises';
+import { setImmediate, setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import * as grpc from '@grpc/grpc-js';
 import { loadSync } from '@grpc/proto-loader';
@@ -16,7 +16,7 @@ const callbacks = { onStarted() {}, onAgentEvent() {}, onTurnCompleted() {} };
 async function fixture(t, handlers, options = {}) {
   const { AgentComposeRpcClient } = await import('../packages/agent-runtime/agent-compose-rpc.mjs');
   const server = new grpc.Server();
-  const received = { starts: 0, stops: [], lists: [] };
+  const received = { starts: 0, stops: [], lists: [], gets: [] };
   server.addService(RunService.service, {
     attachAgentRun(call) {
       received.starts++;
@@ -26,6 +26,11 @@ async function fixture(t, handlers, options = {}) {
       received.stops.push({ request: call.request, auth: call.metadata.get('authorization'), deadline: call.getDeadline() });
       if (handlers.stop) return handlers.stop(call, reply);
       reply(null, { run: { summary: { ...run, status: 'RUN_STATUS_CANCELED' }, output: 'Stopped.' }, stopRequested: true });
+    },
+    getRun(call, reply) {
+      received.gets.push({ request: call.request, auth: call.metadata.get('authorization'), deadline: call.getDeadline() });
+      if (handlers.get) return handlers.get(call, reply);
+      reply(null, { run: { summary: { ...run, status: 'RUN_STATUS_CANCELED' } } });
     },
     listRuns(call, reply) {
       received.lists.push({ request: call.request, auth: call.metadata.get('authorization'), deadline: call.getDeadline() });
@@ -255,4 +260,187 @@ test('pending snapshot completes before running query to avoid the transition ra
     }
   } });
   assert.equal(await client.hasActiveRuns('sandbox-test'), true);
+});
+
+test('preaborted request never starts an attachment', async t => {
+  const { client, received } = await fixture(t, { attach(call) { call.end(); } });
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(client.run(request, { signal: controller.signal }), error => error.name === 'AbortError');
+  assert.equal(received.starts, 0);
+  assert.equal(received.stops.length, 0);
+});
+
+test('abort before delayed started waits for the real run id and stops exactly once', { timeout: 5000 }, async t => {
+  const controller = new AbortController();
+  const sequence = [];
+  const { client, received } = await fixture(t, { attach(call) {
+    call.on('data', async frame => {
+      if (!frame.start) return;
+      controller.abort();
+      await delay(30);
+      call.write({ started: { run } });
+    });
+  } });
+  const result = await client.run(request, { signal: controller.signal, async onStarted() {
+    sequence.push('started'); await delay(30); sequence.push('saved');
+  } });
+  sequence.push('returned');
+  assert.equal(result.status, 'canceled');
+  assert.deepEqual(sequence, ['started', 'saved', 'returned']);
+  assert.equal(received.stops.length, 1);
+  assert.equal(received.stops[0].request.runId, 'run-test');
+});
+
+test('stop acknowledgement running is polled until canceled after the attach transport closes', { timeout: 5000 }, async t => {
+  const controller = new AbortController();
+  let attachment;
+  let queries = 0;
+  const { client, received } = await fixture(t, {
+    attach(call) { attachment = call; call.on('data', frame => { if (frame.start) call.write({ started: { run } }); }); },
+    stop(_call, reply) { reply(null, { run: { summary: run }, stopRequested: true }); attachment.end(); },
+    get(_call, reply) { queries++; reply(null, { run: { summary: { ...run, status: queries < 2 ? 'RUN_STATUS_RUNNING' : 'RUN_STATUS_CANCELED' } } }); },
+  });
+  const result = await client.run(request, { signal: controller.signal, onStarted() { controller.abort(); } });
+  assert.equal(result.status, 'canceled');
+  assert.equal(received.stops.length, 1);
+  assert.equal(received.gets.length, 2);
+  assert.deepEqual(received.gets[0].auth, ['Bearer local-test-token']);
+  assert.ok(Number(received.gets[0].deadline) > Date.now() - 10000);
+});
+
+test('requested stop failure preserves run identity and does not retry', { timeout: 5000 }, async t => {
+  const controller = new AbortController();
+  const { client, received } = await fixture(t, {
+    attach(call) { call.on('data', frame => { if (frame.start) call.write({ started: { run } }); }); },
+    stop(_call, reply) { reply({ code: grpc.status.UNAVAILABLE, details: 'Stop unavailable' }); },
+  });
+  await assert.rejects(client.run(request, { signal: controller.signal, onStarted() { controller.abort(); } }), error => {
+    assert.equal(error.runId, 'run-test');
+    assert.equal(error.sandboxId, 'sandbox-test');
+    assert.match(error.stopError, /Stop unavailable/);
+    return true;
+  });
+  assert.equal(received.stops.length, 1);
+  assert.equal(received.starts, 1);
+});
+
+test('natural successful completion racing abort keeps the actual success and drains callbacks', { timeout: 5000 }, async t => {
+  const controller = new AbortController();
+  const sequence = [];
+  const { client, received } = await fixture(t, {
+    attach(call) {
+      call.on('data', frame => {
+        if (frame.start) {
+          call.write({ started: { run } });
+          call.write({ agentEvent: { name: 'event', text: 'complete' } });
+          call.write({ agentTurnCompleted: { resultJson: '{"finalText":"Done"}' } });
+        } else if (frame.stdinEof) {
+          call.write({ result: { run: { ...run, status: 'RUN_STATUS_SUCCEEDED' }, success: true, output: 'Done' } });
+          call.end();
+        }
+      });
+    },
+    stop(_call, reply) { setTimeout(() => reply(null, { run: { summary: { ...run, status: 'RUN_STATUS_SUCCEEDED' }, output: 'Done' } }), 60); },
+  });
+  const result = await client.run(request, { signal: controller.signal,
+    onStarted() { controller.abort(); sequence.push('started'); },
+    async onAgentEvent() { await delay(15); sequence.push('event'); },
+    onTurnCompleted() { sequence.push('turn'); },
+  });
+  assert.equal(result.status, 'succeeded');
+  assert.equal(result.output, 'Done');
+  assert.deepEqual(sequence, ['started', 'event', 'turn']);
+  assert.equal(received.stops.length, 1);
+});
+
+test('GetRun normalizes details, authenticates and keeps only nonempty cleanup errors', async t => {
+  const { client, received } = await fixture(t, { attach() {}, get(_call, reply) {
+    reply(null, { run: { summary: { ...run, status: 'RUN_STATUS_FAILED', exitCode: 1 }, cleanupError: 'Release failed', error: 'Failed' } });
+  } });
+  const result = await client.getRun('run-test');
+  assert.equal(result.status, 'failed');
+  assert.equal(result.cleanupError, 'Release failed');
+  assert.equal(result.exitCode, 1);
+  assert.deepEqual(received.gets[0].request, { runId: 'run-test' });
+  assert.deepEqual(received.gets[0].auth, ['Bearer local-test-token']);
+});
+
+test('detached stop waits for terminal state with a bounded timeout and never sends a second stop', { timeout: 5000 }, async t => {
+  const { client, received } = await fixture(t, { attach() {},
+    stop(_call, reply) { reply(null, { run: { summary: run }, stopRequested: true }); },
+    get(_call, reply) { reply(null, { run: { summary: run } }); },
+  });
+  await assert.rejects(client.stopRunAndWait('run-test', { timeoutMs: 40 }), error => {
+    assert.equal(error.runId, 'run-test');
+    assert.match(error.stopError, /terminal|timed out/i);
+    return true;
+  });
+  assert.equal(received.stops.length, 1);
+});
+
+test('a success stop acknowledgement does not truncate later normal stream callbacks', { timeout: 5000 }, async t => {
+  const controller = new AbortController();
+  const sequence = [];
+  const { client } = await fixture(t, {
+    attach(call) {
+      call.on('data', async frame => {
+        if (frame.start) {
+          call.write({ started: { run } });
+          await delay(60);
+          call.write({ agentEvent: { name: 'event' } });
+          call.write({ agentTurnCompleted: { resultJson: '{"finalText":"Done"}' } });
+        } else if (frame.stdinEof) {
+          call.write({ result: { run: { ...run, status: 'RUN_STATUS_SUCCEEDED' }, output: 'Done', success: true } });
+          call.end();
+        }
+      });
+    },
+    stop(_call, reply) { reply(null, { run: { summary: { ...run, status: 'RUN_STATUS_SUCCEEDED' } } }); },
+  });
+  const result = await client.run(request, { signal: controller.signal,
+    onStarted() { controller.abort(); }, onAgentEvent() { sequence.push('event'); }, onTurnCompleted() { sequence.push('turn'); },
+  });
+  assert.equal(result.output, 'Done');
+  assert.deepEqual(sequence, ['event', 'turn']);
+});
+
+test('requested stop without a received daemon run id reports unconfirmed cancellation', { timeout: 5000 }, async t => {
+  const controller = new AbortController();
+  const { client, received } = await fixture(t, { attach(call) {
+    call.on('data', () => { controller.abort(); call.end(); });
+  } });
+  await assert.rejects(client.run(request, { signal: controller.signal }), error => {
+    assert.equal(error.sandboxId, 'sandbox-test');
+    assert.match(error.stopError, /run id|identity/i);
+    return true;
+  });
+  assert.equal(received.stops.length, 0);
+});
+
+test('GetRun refuses a different run identity instead of confirming the wrong cancellation', async t => {
+  const { client } = await fixture(t, { attach() {}, get(_call, reply) {
+    reply(null, { run: { summary: { ...run, runId: 'another-run', status: 'RUN_STATUS_CANCELED' } } });
+  } });
+  await assert.rejects(client.getRun('run-test'), /identity|run id/i);
+});
+
+test('terminal stream cancellation wins over an unfinished stop RPC and cancels its request', { timeout: 5000 }, async t => {
+  const controller = new AbortController();
+  let attachment;
+  let stopCanceled;
+  const canceled = new Promise(resolve => { stopCanceled = resolve; });
+  const { client, received } = await fixture(t, {
+    attach(call) { attachment = call; call.on('data', frame => { if (frame.start) call.write({ started: { run } }); }); },
+    stop(call) {
+      call.on('cancelled', stopCanceled);
+      attachment.write({ result: { run: { ...run, status: 'RUN_STATUS_CANCELED' } } });
+      attachment.end();
+    },
+  });
+  const result = await client.run(request, { signal: controller.signal, onStarted() { controller.abort(); } });
+  assert.equal(result.status, 'canceled');
+  await canceled;
+  assert.equal(received.stops.length, 1);
+  assert.equal(received.gets.length, 0);
 });
