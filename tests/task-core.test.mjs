@@ -180,7 +180,8 @@ test("startup recovery marks unfinished tasks failed once and keeps interruption
   const messages = store.listMessages(task.id);
   assert.equal(messages.length, 2);
   assert.equal(messages[1].status, "failed");
-  assert.match(messages[1].content, /中断/);
+  assert.match(messages[1].content, /结果尚未确认/);
+  assert.doesNotMatch(messages[1].content, /运行已中断/);
   assert.equal(store.listRunEvents(task.id).at(-1).payload.status, "failed");
   assert.equal(store.listRunEvents(task.id).at(-1).userMessageId, turn.message.id);
   assert.equal(store.recoverInterruptedTasks().length, 0);

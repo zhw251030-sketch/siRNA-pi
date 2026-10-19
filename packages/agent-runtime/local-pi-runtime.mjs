@@ -82,7 +82,8 @@ export class LocalPiRuntime {
           session.piSessionId = sessionId;
           session.sessionFile = sessionFile;
           this.save(session);
-          emit({ type: "session", sessionId: session.id, piSessionId: sessionId, mode: "model", backend: "local-pi", runId });
+          emit({ type: "session", sessionId: session.id, piSessionId: sessionId, mode: "model", backend: "local-pi", runId,
+            workspacePath: `workspaces/web/${session.id}`, eventLogPath: `runtime/web/${session.id}.${runId}.events.jsonl` });
           emit({ type: "run_status", sessionId: session.id, backend: "local-pi", runId, status: "running" });
         },
         onEvent: (event) => { const projected = projectPiEvent(event); if (projected) emit(projected); },

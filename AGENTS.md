@@ -46,9 +46,10 @@
 - SDK 入口为 npm run pi:sdk；--check 只创建并检查会话，不调用模型。SDK 状态位于 runtime/pi-sdk，任务事件位于 runtime/sdk-task.events.jsonl，结果位于 workspaces/sdk-task/result.json，保留原 CLI 练习证据。
 - 本阶段仅开放原生 read/write，关闭扩展、MCP 和自动资源发现；CLI/SDK 命令行练习仍用内存会话，网页使用项目内 Pi 持久化会话。这不是操作系统级沙箱。
 - 网页入口为 npm run web → apps/api/bootstrap.mjs，只监听 127.0.0.1:3000，经 SSH 隧道访问。先 POST /v1/tasks 创建，再 POST /v1/tasks/:id/messages 发送；不要恢复成旧的一次性合并接口。
-- 网页历史保存在 runtime/tasks/tasks.sqlite；Pi 上下文位于 runtime/pi-web/sessions；执行元数据位于 runtime/task-sessions。每项任务沿用 workspaces/web/<executionSessionId>，日志按 runtime/web/<executionSessionId>.<runId>.events.jsonl 分开。网页 read/write 不能越过任务目录，不称为容器沙箱。
+- 网页历史保存在 runtime/tasks/tasks.sqlite。旧 SDK 任务的 Pi 上下文位于 runtime/pi-web/sessions，执行元数据 runtime/task-sessions，目录 workspaces/web/<executionSessionId>，日志 runtime/web/<executionSessionId>.<runId>.events.jsonl；该旧路径有任务目录读写限制。
+- 新任务默认 Agent Compose：元数据 runtime/compose-sessions，投影日志 runtime/compose-web，实际文件/原生 Pi 会话在 runtime/agent-compose/data/sandboxes/<日期>/<sandboxId> 下。日期路径必须读取 inspect.workspace_path；guest 中 read/write 允许清单不等于严格路径限制。通过 RuntimeRouter 保留旧 SDK 任务，不将故障新任务静默改走 SDK。
 - 通用 SDK 调用位于 packages/agent-runtime/pi-sdk.mjs；scripts/pi-sdk.mjs 保留命令行入口。网页支持多轮、SSE、历史恢复，尚无停止按钮。SSE 的 done 后还要保存消息并发出 task_saved；连接断开不能取消已接受任务，正常关闭服务也须等待后台任务落盘。
-- 当前网页统计检查：npm run verify:web-task -- <executionSessionId> --run <runId>；旧命令 --web <UUID> 仅用于原第 3 步历史样例。
+- 容器网页统计检查：node scripts/verify-compose-web-task.mjs <taskId>；旧 SDK 网页检查仍为 npm run verify:web-task -- <executionSessionId> --run <runId>；--web <UUID> 仅用于原第3步历史样例。
 
 ## 当前阶段
 
@@ -72,4 +73,12 @@ controller 通过只读单文件挂载读取既有 docs/auth.json，Python 入�
 
 真实验收入口 scripts/verify-agent-compose-model.mjs 会调用模型并产生额度消耗。证据 runtime/agent-compose/model-verify-IT2dgw：第一轮4次响应、3次成功工具，count4/sum100/mean25；第二轮同Pi会话回忆随机口令，1次响应、0工具；停止后 released 且文件保留。96 项 Node 测试和4项目标Linux凭据测试通过。命令工作区回归证据 verify-oKmfDl。详见 docs/08-容器中的Pi与模型连接.md。
 
-最新下一步：将网页运行时接入正式 Agent Compose RPC，沿用已有任务和消息接口。网页目前仍 local-pi / taskContainers=false；本轮只验证 CLI detached 与它共用的 PiRunner，不能声称网页 RPC/事件链已经完成。无新增系统安装或权限变更，不修改 RSI 研究项目或其阶段。
+以上是第5步C结束时的状态；网页RPC的后续完成证据见下。
+
+2026-10-20：第5步D完成，bootstrap默认新任务走AgentComposeRuntime，通过官方AttachAgentRun双向RPC，Bearer管理认证、顺序回调、显式stdinEof、最终result验证后收尾。proto/LICENSE原样固定到官方493af1c16a7c84ac8ab3bdfdaf1419ed19d0a9d8。保留旧SDK任务，未知/损坏记录拒绝静默新建上下文。
+
+真实网页任务52d8672c-f320-4543-bd56-0729389b70d1完成统计（4响应/3工具/count4sum100mean25）；重启网页服务后同Pi会话01a155ae-b9d2-734b-99dc-1d348210cc98续问成功（1响应/0工具），JSONL原8833字节未变且追加新记录。第二任务52072665-52fb-4f0e-b93c-167ada3950e4的sandbox、Pi会话、目录均独立。证据runtime/compose-web/acceptance-{first,isolation,resume}.json；两项网页guest保留运行。完整说明docs/09-网页接入AgentCompose.md。170项Node测试、4项Linux凭据测试通过；网页health现在backend=agent-compose/taskContainers=true。
+
+DETACH任务可能在网页进程意外退出后继续：重启提示只能说结果未确认。新一轮先依序查pending/running，失败不认作空闲；已知运行的RPC异常尝试StopRun，停止未确认保留标志，不自动重试付费任务。单网页进程，不声称跨副本原子锁或自动重新附着。凭据清理不保证识别任意文本秘密，原始记录仍私有。
+
+最新下一步：对照参考仓库完成停止本轮、结束任务和容器释放，再进入专业工具学习。本轮无新系统安装、权限或服务配置修改；没有新增Git分支、不修改RSI研究项目及其阶段。

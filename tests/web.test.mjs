@@ -6,7 +6,7 @@ import { once } from "node:events";
 import { request } from "node:http";
 import test from "node:test";
 
-async function serve(t, run, configured = true) {
+async function serve(t, run, configured = true, describe) {
   const { createAppServer } = await import("../apps/api/router.mjs");
   const { TaskStore } = await import("../packages/task-core/task-store.mjs");
   const parent = path.resolve("runtime", "http-tests");
@@ -24,6 +24,7 @@ async function serve(t, run, configured = true) {
       emit({ type: "done", status: "succeeded", runId: "run-1" });
     },
     runtimeInfo() { return { backend: "test" }; },
+    ...(describe ? { describe } : {}),
   } : undefined;
   const server = createAppServer({ taskStore, agentRuntime });
   server.listen(0, "127.0.0.1");
@@ -60,10 +61,47 @@ test("create is separate from execution; messages use SSE and finish with persis
   const history = await (await fetch(`${url}/v1/tasks/${task.id}/messages`)).json();
   assert.deepEqual(history.messages.map((m) => [m.role, m.content]), [["user", "计算平均值"], ["assistant", "平均值25"]]);
   assert.equal(history.task.status, "idle");
+  assert.equal(history.execution, null);
   assert.equal((await (await fetch(url + "/v1/tasks")).json()).tasks.length, 1);
   const repeated = await post(`/v1/tasks/${task.id}/messages`, '{"message":"计算平均值","requestId":"message:1234567890123456"}');
   assert.match(await repeated.text(), /request_deduplicated/);
   assert.deepEqual(counts(), { created: 1, executed: 1 });
+});
+
+test("history includes task-specific runtime paths without guessing the workspace", async (t) => {
+  const execution = {
+    backend: "agent-compose", sandboxId: "a".repeat(64),
+    workspacePath: "runtime/agent-compose/data/sandboxes/2026/10/20/sandbox/workspace",
+    eventLogPath: "runtime/web/session.run.events.jsonl",
+  };
+  let describedId;
+  const { url, post } = await serve(t, undefined, true, async (id) => {
+    describedId = id;
+    return execution;
+  });
+  const { task } = await (await post("/v1/tasks")).json();
+  await (await post(`/v1/tasks/${task.id}/messages`, '{"message":"保留历史"}')).text();
+  const response = await fetch(`${url}/v1/tasks/${task.id}/messages`);
+  assert.equal(response.status, 200);
+  const history = await response.json();
+  assert.equal(describedId, task.executionSessionId);
+  assert.deepEqual(history.execution, execution);
+  assert.deepEqual(history.messages.map((message) => message.content), ["保留历史", "平均值25"]);
+});
+
+test("unavailable runtime metadata cannot hide saved history or reveal the failure detail", async (t) => {
+  const { url, post } = await serve(t, undefined, true, async () => {
+    throw new Error("PRIVATE_RUNTIME_DETAIL");
+  });
+  const { task } = await (await post("/v1/tasks")).json();
+  await (await post(`/v1/tasks/${task.id}/messages`, '{"message":"保留历史"}')).text();
+  const response = await fetch(`${url}/v1/tasks/${task.id}/messages`);
+  assert.equal(response.status, 200);
+  const history = await response.json();
+  assert.deepEqual(history.execution, { unavailable: true });
+  assert.deepEqual(history.messages.map((message) => message.content), ["保留历史", "平均值25"]);
+  assert.ok(history.runEvents.some((event) => event.type === "done"));
+  assert.ok(!JSON.stringify(history).includes("PRIVATE_RUNTIME_DETAIL"));
 });
 
 test("the first SSE event arrives before the runtime finishes", async (t) => {

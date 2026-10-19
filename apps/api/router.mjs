@@ -84,7 +84,12 @@ export function createAppServer({ taskStore, agentRuntime } = {}) {
       if (match && request.method === "GET") {
         const task = taskStore.getTask(match[1]);
         if (!task) return reply(response, 404, { error: "没有找到这个任务。" });
-        return reply(response, 200, { task, messages: taskStore.listMessages(task.id), runEvents: taskStore.listRunEvents(task.id), goal: null });
+        let execution = null;
+        if (typeof agentRuntime?.describe === "function") {
+          try { execution = await agentRuntime.describe(task.executionSessionId) ?? null; }
+          catch { execution = { unavailable: true }; }
+        }
+        return reply(response, 200, { task, messages: taskStore.listMessages(task.id), runEvents: taskStore.listRunEvents(task.id), execution, goal: null });
       }
       if (match && request.method === "POST") {
         const body = await readBody(request);

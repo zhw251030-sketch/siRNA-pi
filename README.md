@@ -2,7 +2,7 @@
 
 通过亲手逐步重建一个 Pi Agent 应用，理解参考项目中每一层为什么存在、如何连接，以及怎样验证它确实工作。
 
-这是独立的学习仓库。以原仓库当前正式架构为重建目标，每次实现一段可以解释、运行和检查的流程，并用 Git 提交保存学习过程。目标包含 Agent Compose 和独立任务容器；当前执行器仍是 Pi SDK 过渡实现。
+这是独立的学习仓库。以原仓库当前正式架构为重建目标，每次实现一段可以解释、运行和检查的流程，并用 Git 提交保存学习过程。新网页任务已经通过 Agent Compose 正式 RPC 驱动独立容器中的 Pi；旧 SDK 任务保留原有上下文。
 
 ## 当前进度
 
@@ -16,7 +16,8 @@
 - 2026-10-17：经确认安装 uidmap，启动项目 rootless Docker，固定摘要的官方 hello-world 容器运行成功、退出码 0。全部项目数据位于指定目录；已核对重启和客户端连接范围。见 [第 5 步 A：Docker 运行环境](docs/06-Docker运行环境.md)。
 - 2026-10-18：启动正式 Agent Compose v2609.3.0，由其创建命令任务容器，验证执行、文件挂载、管理接口鉴权和停止释放；文件及运行记录保留，49 项离线测试通过。见 [第 5 步 B：Agent Compose 与任务环境](docs/07-AgentCompose与任务环境.md)。
 - 2026-10-20：构建锁定依赖的 Pi 1.2.0 guest，经 Agent Compose 模型转接接通 MiniMax-M3；真实文件任务和同会话续问通过，停止后容器释放且文件保留。96 项 Node 测试与 4 项 Linux 凭据测试通过。见 [第 5 步 C：容器中的 Pi 与模型连接](docs/08-容器中的Pi与模型连接.md)。
-- 下一步将网页接入 Agent Compose 运行时。网页仍使用 local-pi；guest 资源配额、开机自启、网页停止操作、专业 siRNA 工具与自进化尚未实现。
+- 2026-10-20：网页接入正式 Agent Compose RPC，真实统计、不同任务独立环境、网页服务重启后同 Pi 会话续聊通过；170 项 Node 测试与 4 项 Linux 凭据测试通过。详见 [第 5 步 D：网页接入 Agent Compose](docs/09-网页接入AgentCompose.md)。
+- 下一步补齐停止本轮与释放任务容器。测试后的两个网页 guest 保留运行；资源配额、开机自启、专业 siRNA 工具与自进化尚未实现。
 
 安装位置、文件解释和验证记录见 [第 1 步 A：安装与运行 Pi](docs/01-安装与运行Pi.md)。服务器项目目录是 `/home/hanwen/Project/project/siNRA-pi/`，按用户指定拼写保留。
 
@@ -46,7 +47,8 @@ SDK 示例、逐段代码解释和实际结果见 [第 2 步：调用 Pi SDK 创
 | `npm run pi:sdk` | 再做第 2 步固定文件练习，替换该练习原有输出 | 是 |
 | `npm run verify:first-task` | 验证已有 CLI 样例产物 | 否 |
 | `npm run verify:sdk-task` | 验证已有 SDK 样例产物 | 否 |
-| `npm run verify:web-task -- <executionSessionId> --run <runId>` | 验证当前网页统计示例的一次具体执行 | 否 |
+| `node scripts/verify-compose-web-task.mjs <taskId>` | 验证新容器网页统计任务的记录、原生会话和真实文件 | 否 |
+| `npm run verify:web-task -- <executionSessionId> --run <runId>` | 验证旧 SDK 网页统计示例的一次具体执行 | 否 |
 | `npm run verify:web-task -- <旧任务编号>` | 兼容第 3 步原有网页样例 | 否 |
 
 `executionSessionId` 标识任务使用的执行环境，`runId` 标识其中某次发送引发的运行。两者均可从任务 API 记录和网页“任务记录与文件位置”中核对；不能把网页任务 `id` 直接当作执行会话编号。
@@ -123,11 +125,20 @@ scripts/build-project-guest.sh            用项目 Docker 构建 guest
 scripts/verify-agent-compose-model.mjs    真实容器模型任务及上下文续接验收
 scripts/lib/verify-compose-file-task.mjs  按原生会话与真实文件独立验收
 apps/api/bootstrap.mjs      组合数据库、运行时与 HTTP 服务，启动网页
+packages/agent-runtime/runtime-router.mjs       新任务走 Compose，旧 SDK 任务继续原上下文
+packages/agent-runtime/agent-compose-runtime.mjs 组织任务容器、模型运行与结果保存
+packages/agent-runtime/agent-compose-rpc.mjs     使用正式双向 RPC、认证、截止时间和 EOF
+packages/agent-runtime/compose-executor.mjs     通过官方 CLI 初始化并检查任务环境
+packages/agent-runtime/compose-session-store.mjs 保存执行关系、检查目录与 Pi 会话
+packages/agent-runtime/compose-events.mjs       将底层事件映射为网页合同并验证结束状态
+packages/agent-runtime/compose-control-token.mjs 仅在服务端安全读取管理令牌
+proto/                                       固定版本的官方协议、许可证与来源
+scripts/verify-compose-web-task.mjs            新容器网页统计练习只读验收
 apps/api/router.mjs         任务接口、SSE 传输与静态页面
 packages/task-core/task-store.mjs           SQLite 任务、消息和运行事件
 packages/task-core/task-message-service.mjs 消息检查、去重、执行协调与保存
 packages/agent-runtime/runtime-port.mjs     上层调用执行器的边界说明
-packages/agent-runtime/local-pi-runtime.mjs 当前 SDK 执行器、执行会话与事件转换
+packages/agent-runtime/local-pi-runtime.mjs 旧 SDK 任务的执行会话与事件转换
 packages/agent-runtime/pi-sdk.mjs           CLI/网页共用的 SDK 创建与运行
 packages/agent-runtime/workspace-files.mjs  read/write 文件范围检查
 public/index.html           任务列表、对话、执行动态三个区域
@@ -154,7 +165,10 @@ docs/05-对齐原仓库任务架构.md 当前任务流程、职责分层和正�
 docs/06-Docker运行环境.md     系统前提、项目 Docker 和真实容器验证
 docs/07-AgentCompose与任务环境.md 控制服务、任务环境、挂载与实际验收
 docs/08-容器中的Pi与模型连接.md  镜像、模型转接、凭据范围与真实模型任务
+docs/09-网页接入AgentCompose.md 网页正式 RPC、执行事件、同会话续聊及验收
 docs/superpowers/plans/      安装步骤与执行记录
 ```
 
-服务器的 `node_modules/` 保存依赖，`runtime/` 保存运行状态，`workspaces/` 保存练习产物；这些都不进入 Git。网页任务历史位于 `runtime/tasks/tasks.sqlite`；Pi 上下文会话位于 `runtime/pi-web/sessions/`；同一执行会话沿用 `workspaces/web/<executionSessionId>/`，每次运行另有 `runtime/web/<executionSessionId>.<runId>.events.jsonl`。网页的文件范围检查仍是应用层限制，尚未切换到任务容器。新管理服务的数据位于 `runtime/agent-compose/data/`，本轮命令环境的目录由其按日期与 sandboxId 组织，独立于现有网页工作区。
+服务器的 `node_modules/` 保存依赖，`runtime/` 保存运行状态，`workspaces/` 保存旧练习产物；这些都不进入 Git。所有网页任务历史仍在 `runtime/tasks/tasks.sqlite`。新任务使用 `runtime/compose-sessions/` 保存执行关系，`runtime/compose-web/` 保存投影事件，真实工作文件和 Pi 原生会话位于 `runtime/agent-compose/data/sandboxes/<日期>/<sandboxId>/`。旧 SDK 任务继续使用 `runtime/pi-web/sessions/`、`workspaces/web/<executionSessionId>/` 及 `runtime/web/`。
+
+网页后端只读管理令牌；控制服务读取模型 key，且官方会把它保存到管理数据库。因此整个 `runtime/agent-compose/data/` 应作为敏感状态保护，只把每项任务自己的 sandbox 子目录挂给它的 guest。

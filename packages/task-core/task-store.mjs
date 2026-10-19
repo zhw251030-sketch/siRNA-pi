@@ -177,7 +177,7 @@ export class TaskStore {
     for (const task of interrupted) {
       this.#transaction(() => {
         const userMessage = this.listMessages(task.id).findLast((message) => message.role === "user");
-        const error = "服务重启，上一轮运行已中断；可以重新发送要求。";
+        const error = "网页服务重启，上一轮结果尚未确认；容器任务可能仍在运行。再次发送前，后台会核对执行状态。";
         const runId = task.currentRunId ?? randomUUID();
         if (userMessage) {
           this.#insertRunEvent(task.id, userMessage.id, runId, "error", { type: "error", error, runId });

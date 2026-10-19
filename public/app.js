@@ -3,10 +3,13 @@ import { consumeSse } from "./sse.mjs";
 const elements = Object.fromEntries([
   "new-session", "refresh-tasks", "task-list", "chat-panel", "chat-title", "task-status",
   "messages", "composer", "message-input", "send-button", "example-button", "recover-message",
-  "tool-activity", "run-log", "task-id", "task-workspace", "task-event-log",
+  "tool-activity", "run-log", "task-id", "task-workspace", "task-event-log", "composer-help",
 ].map((id) => [id, document.getElementById(id)]));
-const exampleMessage = "请使用 read 工具读取当前目录的 numbers.csv，计算其中数值的数量 count、总和 sum 和平均值 mean。使用 write 工具将结果保存为当前目录的 result.json，内容只包含 count、sum、mean 三个字段。最后再次使用 read 工具读取 result.json，核对保存的结果，并用中文简要说明。";
-const state = { tasks: [], task: null, busy: false, messages: new Map(), tools: new Map(), assistant: null, pendingUser: null };
+const exampleMessages = {
+  "local-pi": "请使用 read 工具读取当前目录的 numbers.csv，计算其中数值的数量 count、总和 sum 和平均值 mean。使用 write 工具将结果保存为当前目录的 result.json，内容只包含 count、sum、mean 三个字段。最后再次使用 read 工具读取 result.json，核对保存的结果，并用中文简要说明。",
+  "agent-compose": "请使用 read 工具读取 /workspace/input/numbers.csv，计算其中数值的数量 count、总和 sum 和平均值 mean。使用 write 工具将结果保存为 /workspace/output/result.json，内容只包含 count、sum、mean 三个字段。最后再次使用 read 工具读取 /workspace/output/result.json，核对保存的结果，并用中文简要说明。",
+};
+const state = { tasks: [], task: null, execution: null, busy: false, messages: new Map(), tools: new Map(), assistant: null, pendingUser: null };
 const pendingKey = "sirna-pi.pending-message";
 const selectedKey = "sirna-pi.selected-task";
 const creationKey = "sirna-pi.pending-creation";
@@ -39,7 +42,7 @@ function syncControls() {
   const recovering = Boolean(pending && pending.taskId === state.task?.id);
   const blocked = state.busy || state.task?.status === "running" || state.task?.status === "stopped" || Boolean(pending) || !state.task;
   elements["send-button"].disabled = blocked;
-  elements["example-button"].disabled = blocked;
+  elements["example-button"].disabled = blocked || !exampleMessages[state.execution?.backend];
   elements["message-input"].disabled = !state.task;
   elements["message-input"].readOnly = blocked;
   elements["new-session"].disabled = state.busy;
@@ -80,10 +83,16 @@ function renderTaskList() {
 }
 function renderIdentity() {
   const task = state.task;
+  const execution = state.execution;
+  const known = Boolean(exampleMessages[execution?.backend]);
+  const waiting = execution?.unavailable ? "暂时无法读取，请刷新记录" : "等待任务文件信息";
   elements["chat-title"].textContent = task?.title || "选择或创建一个任务";
   elements["task-id"].textContent = task?.id || "尚未创建";
-  elements["task-workspace"].textContent = task?.executionSessionId ? `workspaces/web/${task.executionSessionId}` : "任务开始后生成";
-  elements["task-event-log"].textContent = task?.executionSessionId && task?.currentRunId ? `runtime/web/${task.executionSessionId}.${task.currentRunId}.events.jsonl` : "尚未运行";
+  elements["task-workspace"].textContent = execution?.workspacePath || (known ? "任务开始后生成" : waiting);
+  elements["task-event-log"].textContent = execution?.eventLogPath || (known ? "尚未运行" : waiting);
+  elements["composer-help"].textContent = known
+    ? "当前练习可以读取、写入本任务目录中的文件。"
+    : task ? "正在等待任务文件信息；请刷新记录后再填入统计示例。" : "选择或创建任务后，可以填入统计示例。";
 }
 function appendMessage(role, content, id) {
   if (id && state.messages.has(id)) {
@@ -169,6 +178,12 @@ function handleStreamEvent(event) {
     upsertTask(event.task);
     if (event.message) saveMessage(event.message, state.pendingUser);
   } else if (event.type === "session") {
+    state.execution = exampleMessages[event.backend] ? {
+      backend: event.backend,
+      ...(typeof event.sandboxId === "string" ? { sandboxId: event.sandboxId } : {}),
+      workspacePath: typeof event.workspacePath === "string" ? event.workspacePath : null,
+      eventLogPath: typeof event.eventLogPath === "string" ? event.eventLogPath : null,
+    } : null;
     upsertTask({ ...state.task, executionSessionId: event.sessionId, currentRunId: event.runId, piSessionId: event.piSessionId, status: "running" });
     setStatus("Pi 正在执行任务，可以在右侧查看进展。", "running");
   } else if (event.type === "text_delta" || event.type === "assistant_message") {
@@ -201,6 +216,7 @@ async function refreshTaskList() {
 async function selectTask(id) {
   const data = await readJson(`/v1/tasks/${encodeURIComponent(id)}/messages`);
   state.task = data.task;
+  state.execution = data.execution ?? null;
   store(localStorage, selectedKey, id);
   upsertTask(data.task);
   renderMessages(data.messages || []);
@@ -261,7 +277,12 @@ elements["refresh-tasks"].addEventListener("click", () => void withBusy(async ()
   await refreshTaskList();
   if (state.task) await selectTask(state.task.id);
 }));
-elements["example-button"].addEventListener("click", () => { elements["message-input"].value = exampleMessage; elements["message-input"].focus(); });
+elements["example-button"].addEventListener("click", () => {
+  const message = exampleMessages[state.execution?.backend];
+  if (!message) { setStatus("请先刷新记录，等待任务文件信息后再填入统计示例。", "error"); return; }
+  elements["message-input"].value = message;
+  elements["message-input"].focus();
+});
 elements["recover-message"].addEventListener("click", () => void withBusy(sendPending));
 elements.composer.addEventListener("submit", (event) => {
   event.preventDefault();
