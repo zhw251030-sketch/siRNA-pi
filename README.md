@@ -24,7 +24,8 @@
 - 2026-10-20：第9步接入首个固定MCP工具 `enumerate_sirna_candidates`。真实网页7响应/6工具，完成MCP业务调用、保存和重读4条候选；结束后下载字节一致。Linux406项测试通过，旧任务保留。详细实现、真实验收和部署问题见 [第一个MCP工具](docs/13-第一个MCP工具.md)。
 - 2026-10-20：第10A步完成工具提案合同预检：离线检查草稿字段、权限和测试约定，明确区分预检、实际验证和发布。Linux533项全通过；实际草稿通过、正式入口检查只缺真实运行产物。0模型请求，原10份会话元数据和3个容器保持。详见 [工具提案合同预检](docs/14-工具提案合同预检.md)。
 - 2026-10-20：第10B步完成真实工具产物构建：可信CLI将教学源码写入专用容器、冒烟、保存镜像，再在两个新容器复测，输出均为length4/gcFraction0.5；篡改拒绝及真实语法失败验收通过，临时容器已清理。详见 [构建真实工具运行产物](docs/15-构建真实工具运行产物.md)。
-- 当前从“网页封装”进入“工具封装”。已有固定工具、提案预检及工具构建/执行内核；登记数据库、完整验证器、审批发布和自进化尚未实现。新工具运行容器声明内存/进程限制，CPU配额仍不可用；旧任务环境与配额不变，开机自启未配置。构建CLI尚未接到网页或MCP。
+- 2026-10-20：第10C步完成提案材料快照、SQLite登记与完整性读回。真实成品已登记为submitted；独立进程重开、材料摘要、事务回滚与篡改拒绝验收通过。Linux730通过/2项Windows专属跳过，0模型调用。详见 [工具提案登记与完整性](docs/16-工具提案登记与完整性.md)。
+- 当前从“网页封装”进入“工具封装”。已有固定工具、合同预检、构建/执行内核和提案登记；完整验证器、审批发布和自进化尚未实现。新工具运行容器声明内存/进程限制，CPU配额仍不可用；旧任务环境与配额不变，开机自启未配置。构建和登记CLI尚未接到网页或MCP。
 
 安装位置、文件解释和验证记录见 [第 1 步 A：安装与运行 Pi](docs/01-安装与运行Pi.md)。服务器项目目录是 `/home/hanwen/Project/project/siNRA-pi/`，按用户指定拼写保留。
 
@@ -44,6 +45,8 @@ SDK 示例、逐段代码解释和实际结果见 [第 2 步：调用 Pi SDK 创
 | `npm test` | 运行离线行为测试 | 否 |
 | `npm run check:tool-contract -- examples/04-tool-contract/proposal.draft.json --draft` | 检查教学草稿；去掉`--draft`会指出尚缺真实运行产物 | 否，也不执行提案代码 |
 | `npm run build:tool -- examples/04-tool-contract/proposal.draft.json` | 构建工具镜像、真实运行教学案例，保存带artifact的提案副本 | 否；会执行提案源码并创建容器/镜像 |
+| `npm run tools:proposals -- submit <项目内完整提案.json>` | 保存独立材料并新增submitted登记；重复提交会新增提案编号 | 否，也不执行候选/基线 |
+| `npm run tools:proposals -- list` / `show <提案UUID>` | 列出最近100条登记 / 重新核对一份材料并查看详情 | 否 |
 | `npm run pi:sdk -- --check` | 检查 Pi SDK 会话配置 | 否 |
 | `sh scripts/check-docker-rootless.sh` | 服务器上的 Docker 前提检查，不启动或安装服务 | 否 |
 | `sh scripts/project-docker.sh info` | 检查项目 Docker 的实际模式、目录和能力 | 否 |
@@ -149,6 +152,10 @@ packages/capability-platform/docker-engine-client.mjs  显式连接项目Docker�
 packages/capability-platform/tool-build-service.mjs    构建镜像、绑定源码、按成品执行案例
 scripts/build-tool-artifact.mjs                       可信宿主构建命令，尚未接入Agent
 scripts/lib/tool-build-files.mjs                      有界读取提案及保存私有构建证据
+packages/capability-platform/tool-proposals.mjs        独立材料快照、manifest、源文件与包摘要
+packages/capability-platform/tool-registry.mjs         SQLite提案与提交事件事务
+packages/capability-platform/tool-lifecycle.mjs        提交、列表与按ID完整性读回
+scripts/manage-tool-proposals.mjs                     可信提交/查询CLI，不运行候选源码
 packages/agent-runtime/runtime-router.mjs       新任务走 Compose，旧 SDK 任务继续原上下文
 packages/agent-runtime/agent-compose-runtime.mjs 组织任务容器、模型运行与结果保存
 packages/agent-runtime/agent-compose-rpc.mjs     使用正式双向 RPC、认证、截止时间和 EOF
@@ -205,6 +212,7 @@ docs/12-上传资料与任务文件归档.md 上传、独立资料区和执行�
 docs/13-第一个MCP工具.md       固定候选枚举工具、MCP与真实网页验收
 docs/14-工具提案合同预检.md   工具提交材料、字段与结果判据
 docs/15-构建真实工具运行产物.md 源码、构建容器、成品镜像与执行证据
+docs/16-工具提案登记与完整性.md 材料快照、数据库、状态和篡改检测
 docs/superpowers/plans/      安装步骤与执行记录
 ```
 

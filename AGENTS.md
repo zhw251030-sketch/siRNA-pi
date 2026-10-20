@@ -146,3 +146,17 @@ Linux 用目录描述符锚定逐层读取，拒绝符号链接、硬链接、�
 新增74项测试，最终Linux607通过/0跳过，Windows603通过/4项Linux专属跳过；独立审查与范围限定复审通过。私有证据runtime/tool-artifact-{acceptance,state-before,linux-tests,sync}及runtime/tool-builds，逐文件解释docs/15-构建真实工具运行产物.md。现有服务无须重启，继续main提交/GitHub推送/bundle服务器同步，不修改参考库或上级RSI。
 
 当前下一步：对照tool-lifecycle学习提案登记、完整独立验证与状态流转，再接批准版本和Agent发现/调用。当前只有构建/执行内核与教学案例证据，基线净增益、双次重复性完整门禁、审批、发布及自进化仍未实现。
+
+以上为第10B步结束状态；以下为最新进度。
+
+2026-10-20：第10C步完成工具提案持久登记。packages/capability-platform/tool-proposals.mjs独立实现sirna-tool-proposal/v1材料：manifest.status=draft/version=0.1.0-draft、候选与baseline文件、两源SHA及整包摘要；runtime/tool-artifacts/proposals/<UUID>下Linux文件0400/目录0500。read重新核对平面文件集合、链接/硬链接、大小/UTF-8、前后文件状态、合同与摘要。拒绝无法无损UTF-8往返的源码；损坏manifest的JSON/解码错误固定提示，不回显原文，仍保留ID/路径。
+
+tool-registry.mjs使用显式runtime/tool-registry/registry.sqlite，独立application_id/user_version，普通单链接与sidecar检查、0600新库，未知库只读探测后拒绝，无迁移；readonly不存在不建库。tool_proposals及proposal_submitted事件用BEGIN IMMEDIATE同事务；初始仅submitted，actor=local-cli。正式发布版本/验证记录尚未建立；同材料重提会新UUID，无内容去重。parent更新提案本步明确拒绝，不能擅自移除parent。
+
+tool-lifecycle.mjs连接完整合同→材料→SQLite；list最多100条元数据，show按固定根读回材料并核对DB工具名/权限/镜像。npm run tools:proposals -- submit <项目内JSON>|list|show <UUID>仅Linux/hanwen/唯一项目根；提交不执行候选/基线、不核验镜像、不接HTTP自动化/MCP/审批。文件和DB非共同事务，DB失败可能留未登记包，错误附定位；无自动清理、恢复或请求幂等。
+
+真实提交ID f742eea2-b025-4474-ae47-d6eab267c408，材料包SHA c434888a9acf31d8143c3df19c9fec126cf5c3cfe7bf996a5b2b574e0cda4a49；沿用10B构建7e0aa187…及e800a6bd…镜像，原提案未变。4独立CLI进程空list→submit→list→show，正式库1提案/1事件、submitted/draft；独立摘要和Linux权限实测。runtime/registration-negative-pdvrVY单独负例验证源码不执行/篡改拒绝/损坏manifest不回显，正式材料未改。旧10会话哈希/3容器/凭据元数据保持，镜像仍存在，模型0。
+
+新增125项：材料61、SQLite54、集成10。最终Linux732项=730通过/2项Windows专属跳过；Windows722通过/10平台或符号链接权限跳过。独立审查P2已修复且范围复审通过。本机中间一次旧HTTP测试fetch bad port：OS临时端口1024..15000与fetch禁用端口相交，单测及全套复跑通过；记录registration-local-bad-port.log/registration-port-diagnosis.md，未称已修复也未改系统端口设置。
+
+证据runtime/registration-{submitted,acceptance,linux-tests,sync}，详细解释docs/16-工具提案登记与完整性.md。继续main提交/GitHub/bundle同步，不更改参考或上级RSI。下一步从已登记提案ID出发建立独立验证报告及状态变化，逐步完成静态、语法/依赖、双次重复性、领域案例与基线净增益；审批、版本发布、自动封装和自进化仍未完成。
