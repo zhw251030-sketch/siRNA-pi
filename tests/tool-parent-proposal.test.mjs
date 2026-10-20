@@ -93,15 +93,17 @@ for(const stage of ['submission','preflight'])test(`corrupt formal parent is rej
   else assert.throws(()=>lifecycle.submitRegisteredToolProposal(f.input,{root:f.root}),/digest|parent/i);
   assert.deepEqual(snapshot(f.root),before);
 });
-test('validated child stores the full parent binding and approval refuses before writes',async t=>{
+test('validated child stores the full parent binding and approval preserves that binding in the release',async t=>{
   const f=await parentFixture(t);const saved=lifecycle.submitRegisteredToolProposal(f.input,{root:f.root});
   const report=await validateRegisteredToolProposal(saved.proposal.id,{root:f.root,runner:runner(f.input)});
   assert.equal(report.passed,true);assert.deepEqual(report.parentComparison,f.binding);
   assert.deepEqual(getLatestToolValidationReport(saved.proposal.id,{root:f.root}).report.parentComparison,f.binding);
   const shown=lifecycle.getRegisteredToolProposal(saved.proposal.id,{root:f.root});assert.equal(shown.verified,true);assert.equal(shown.activated,false);
-  const before=snapshot(f.root);assert.throws(()=>approveRegisteredToolProposal(saved.proposal.id,'operator',{root:f.root}),/parent/i);
-  assert.deepEqual(snapshot(f.root),before);
-  assert.equal(getRegisteredToolVersion(f.input.toolName,'1.0.0',{root:f.root}).version.proposalId,f.id);
+  const approved=approveRegisteredToolProposal(saved.proposal.id,'operator',{root:f.root});
+  assert.equal(approved.version.version,'1.0.1');assert.equal(approved.version.parentVersion,'1.0.0');
+  assert.deepEqual(getRegisteredToolVersion(f.input.toolName,'1.0.1',{root:f.root}).package.verification.parentComparison,f.binding);
+  const parent=getRegisteredToolVersion(f.input.toolName,'1.0.0',{root:f.root}).version;
+  assert.equal(parent.proposalId,f.id);assert.equal(parent.state,'inactive');
 });
 test('a fully valid replacement parent identity during execution cannot substitute the original comparison',async t=>{
   const f=await parentFixture(t);const child=lifecycle.submitRegisteredToolProposal(f.input,{root:f.root});

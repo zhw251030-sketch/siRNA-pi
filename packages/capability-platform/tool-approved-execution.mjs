@@ -37,6 +37,7 @@ function readBound(root,expected){
   const catalog=getRegisteredToolCatalog({root});const current=catalog.tools.find(entry=>entry.toolName===expected.toolName);
   must(current&&isDeepStrictEqual(binding(current),expected),'Approved tool descriptor is stale');
   const registered=getRegisteredToolVersion(expected.toolName,expected.version,{root});const version=registered.version;
+  must(version.state==='active','Approved tool version is no longer active');
   must(version.toolId===expected.toolId&&version.packageSha256===expected.packageSha256&&version.imageDigest===expected.imageDigest,'Approved tool version changed');
   const saved=readToolProposal(version.proposalId,{proposalsRoot:resolveToolLearningPaths(root).proposalsRoot,expectedArtifactSha256:registered.package.verification.artifactSha256});
   return {registered,saved};

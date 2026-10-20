@@ -30,7 +30,8 @@
 - 2026-10-21：第10F步完成正式工具发现、受控调用、持久审计和宿主stdio MCP。真实两次新输入得到10/0.4及6/(2/3)，摘要/版本/实际策略/清理通过；三个错误参数在执行前拒绝。Linux940通过/2跳过，0模型请求，旧任务保持。详见 [正式工具发现调用与审计](docs/19-正式工具发现调用与审计.md)。
 - 2026-10-21：第10G步接通新网页guest→远程MCP→后端正式工具，逐轮凭证绑定任务/Compose运行/调用审计，真实适配器动态刷新通过。网页6模型响应/6次Pi操作，其中1次正式调用，输出11及5/11；结束后归档和下载一致，旧10会话/2guest保持。Pi自由解释另有碱基计数错误，原记录保留；链路验收不认证整段解释。详见 [网页调用正式工具与任务审计](docs/20-网页调用正式工具与任务审计.md)。
 - 2026-10-21：第10H步完成parent改进提案与真实父版本源码绑定。新增归一化碱基计数候选，真实独立基准候选3/3、父源码1/3、净增2，已成为verified；这衡量新增字段合同，不是泛化或生物预测效果。正式1.0.0仍active，尚无1.0.1；0模型调用。详见 [父版本提案与真实基线比较](docs/21-父版本提案与真实基线比较.md)。
-- 当前hostMcpCallable=true，新网页任务webAgentCallable=true；旧guest保留原版本并明确不支持新正式工具。995测试：Linux993通过/2跳过，Windows982通过/13跳过。下一步学习多版本批准、切换/回退；尚无自动自进化。正式调用与审计已接网页，工具提交/审批仍用可信CLI。CPU配额仍不可用，开机自启未配置。
+- 2026-10-21：第10I步完成1.0.1正式发布、1.0.0人工回退及恢复1.0.1。旧包/报告/镜像保留；同一MCP客户端三次真实调用及版本审计通过。schema4保存版本历史及父关系；0模型/构建/重新验证。1023测试：Linux1021通过/2跳过，Windows1010通过/13跳过。初次Linux测试隔离问题提前迁移数据库，影响核查、修复和复审完整记录见 [工具版本发布与人工回退](docs/22-工具版本发布与人工回退.md)。
+- 当前hostMcpCallable=true，新网页任务webAgentCallable=true；旧guest保留原镜像并明确不支持新正式工具。当前正式工具为1.0.1，本轮没有新网页模型对话。下一步学习Agent如何发起工具构建/提案协调流程；尚无自动自进化。工具提交/审批仍用可信CLI。CPU配额仍不可用，开机自启未配置。
 
 安装位置、文件解释和验证记录见 [第 1 步 A：安装与运行 Pi](docs/01-安装与运行Pi.md)。服务器项目目录是 `/home/hanwen/Project/project/siNRA-pi/`，按用户指定拼写保留。
 
@@ -54,9 +55,10 @@ SDK 示例、逐段代码解释和实际结果见 [第 2 步：调用 Pi SDK 创
 | `npm run tools:proposals -- list` / `show <提案UUID>` | 列出最近100条登记 / 重新核对一份材料并查看详情 | 否 |
 | `npm run validate:tool -- <提案UUID>` | 从登记材料重新执行验证，保存报告并更新verified/verification_failed；不是批准 | 否；会真实执行候选和基线并创建临时容器 |
 | `npm run tools:proposals -- report <提案UUID>` | 只读查看最新验证报告，核对报告摘要与登记关系 | 否 |
-| `node scripts/verify-parent-tool-proposal.mjs 4530af22-d8d7-42f0-ac75-fec6ce851466` | 只读复核第10H步真实候选、父源码字节、比较报告及业务容器清理 | 否，也不重新执行工具 |
-| `npm run tools:proposals -- approve <提案UUID> "<批准人>"` | 显式批准已验证提案、生成首个1.0.0并写版本目录；重复批准核对原版本 | 否，也不执行候选 |
-| `npm run tools:proposals -- versions` / `version <工具名> 1.0.0` | 只读版本列表 / 核对正式包与来源证据 | 否 |
+| `node scripts/verify-tool-version-release.mjs` | 只读复核第10I步发布、回退、恢复的固定完成状态及原始证据 | 否，也不重新执行工具 |
+| `npm run tools:proposals -- approve <提案UUID> "<批准人>"` | 显式批准已验证提案；首版1.0.0，后续分配新patch并启用；重复批准不重新激活历史版本 | 否，也不执行候选 |
+| `npm run tools:proposals -- rollback <工具名> <版本> "<操作人>" "<原因>"` | 人工切换到已批准且保留的版本，核对证据、记事件并刷新目录 | 否，也不重新验证或执行工具 |
+| `npm run tools:proposals -- versions` / `version <工具名> <版本>` | 只读版本列表 / 核对正式包与来源证据 | 否 |
 | `npm run tools:proposals -- catalog` / `catalog-rebuild` | 核对当前目录 / 显式从登记和正式包重建目录 | 否 |
 | `npm run tools:mcp` | 启动可信宿主stdio MCP；自动客户端直接以Node启动scripts/approved-tools-mcp.mjs，避免npm横幅混入协议 | 否；收到正式工具call会创建临时容器执行 |
 | `npm run pi:sdk -- --check` | 检查 Pi SDK 会话配置 | 否 |

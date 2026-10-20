@@ -240,3 +240,15 @@ examples/05-parent-tool-proposal增加baseCounts A/C/G/T，沿用FASTA/空白清
 新增21测试，总995：Windows982通过/13跳过，Linux993通过/2跳过，0失败。第一次错误裸node --test误扫ignored runtime历史/供应商测试，45失败日志保留；按package.json tests/*.test.mjs范围重跑通过，不为调用范围错误改产品代码/装依赖。Task1独立spec/quality审查通过。只读scripts/verify-parent-tool-proposal.mjs <提案UUID>可重复验收；runtime/parent-tool-ops.mjs的build/submit/validate为一次性实际写入，不重跑。私有parent-tool-{state-before,build,submit,validate,acceptance,local-tests,linux-tests,sync}保存证据，详细教学docs/21-父版本提案与真实基线比较.md。
 
 下一步按原仓库实现多版本批准及切换/回退：保存parent版本关系、分配1.0.1、旧active转inactive并保留，完善事务及历史完整性读回后再切换目录。尚未完成自动提出/改写候选、自动批准、降级自动回退或自进化有效性验证。继续main同步，仅siRNA-pi；不要改上级agent_RSI_demo研究摘要或旧失败轨迹。
+
+以上为第10H步历史；以下为当前状态。
+
+2026-10-21：第10I步完成正式多版本发布、人工回退及恢复。schema4的tool_versions用toolId/version复合身份、同名唯一active，保留inactive/retained和parentToolId/parentVersion。显式迁移前VACUUM INTO一致备份，严格识别旧DDL；历史读回认证完整父链，限制64层（不是总共只能有64个版本）。新manifest.parent及版本父列为学习版额外追溯，不冒称原仓库完全一样。发布分配同toolId/major/minor的历史最大patch+1；重复批准inactive不激活。rollback可信CLI核对目标材料、事务切换、记录actor/reason/from/to、刷新目录，同active检查后不新增事件；未实现disabled/degraded/自动回退/镜像退休。
+
+提案4530af22-d8d7-42f0-ac75-fec6ce851466已approved，工具977b9593-091a-4624-a4ba-b0c8f12b62df的1.0.1当前active，包SHAec49bc242af211202f21fa216c6576d7595bb315cabe0955aac07428082937ec，镜像仍c2a82b28…；旧1.0.0 inactive/retained，五文件包SHA4e259ca6…及镜像e800a6bd…未变。验证仍d998793a…/报告SHA6c643791…，源码/报告原字节保留。真实同一MCP客户端执行1.0.1→1.0.0→1.0.1三次：AACCGGGUUUA，新版11/5/11及A3C2G3T3、旧版无counts；审计版本/包/镜像/输出/实际隔离策略及容器移除通过。恰好三条新增发布/回退/回退事件；0模型、0构建、0重新验证，没有新网页Pi对话。网页后端在空闲时重启一次，11会话、4运行容器、旧任务和13材料保持。
+
+初次Linux1021测试1018通过/1失败/2跳过：CLI守卫测试继承正式cwd，对当前1.0.0同版本rollback提前迁移schema4并重写catalog。原四表所有字段值保持、新增父列null、0事件/0业务，schema3备份registry.sqlite.v3-backup-7e636199-8bcd-491f-888e-89d7ef26ddb4.sqlite与原行一致；影响核查runtime/version-release-early-migration-check.json。测试现固定临时cwd，禁止重新引入部署目录继承。独立审查修复历史reader允许inactive后执行边界漏检active、prospective孩子未计入64层预算两问题；发布前和事务内重查深度，零执行/零写入负例通过。最终1023测试：Windows1010通过/13跳过、Linux1021通过/2跳过，0失败，Task1独立复审3/3通过。原失败日志保留。
+
+当前只读验收node scripts/verify-tool-version-release.mjs，检查本轮固定最终状态；未来发布后旧固定状态验收可能不再适用。第10H验收要求旧verified/active1.0.0，发布后不可继续要求它通过，不重写旧证据。私有runtime/version-release-{state-before,exercise,acceptance,restart,early-migration-check}及三个call文件保存本轮证据；新学习说明docs/22-工具版本发布与人工回退.md。文件系统/SQLite/catalog不是全局原子事务，已提交后catalog失败要显式catalog-rebuild；维护仍要求空闲，执行前后检查不等于所有进程共享原子锁。
+
+下一步对照原仓库tool-curation协调器与tool-builder，学习由Agent发起工具构建/候选提交，并保留人的批准边界。尚无自动提出/修改/循环改进、自动降级或科研有效性证明。继续个人main同步，唯一远端目录不变，不改上级RSI项目。

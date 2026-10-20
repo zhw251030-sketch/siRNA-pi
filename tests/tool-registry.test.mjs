@@ -191,7 +191,7 @@ test('read-only mode can query existing data but cannot register, and never crea
 test('new databases use the dedicated identity, schema, state constraint, foreign keys, and WAL', t => {
   const f = fixture(t); f.open(); const db = f.raw();
   assert.equal(db.prepare('PRAGMA application_id').get().application_id, 1397903433);
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 3);
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 4);
   assert.equal(db.prepare('PRAGMA journal_mode').get().journal_mode, 'wal');
   assert.throws(() => db.prepare(`INSERT INTO tool_proposals
     (id, tool_name, state, artifact_path, artifact_sha256, permission_profile, image_digest, created_at, updated_at)

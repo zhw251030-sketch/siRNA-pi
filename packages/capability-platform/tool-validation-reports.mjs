@@ -56,7 +56,7 @@ export function readValidationReportBytes(file){
     must(bytes.length===Number(before.size)&&bytes.length<=limit,'Report size changed or exceeds size limit');return bytes;
   }finally{fs.closeSync(fd);}
 }
-export function readLatestValidationReport(proposalId,{root,registry}){
+export function readLatestValidationReport(proposalId,{root,registry,context}){
   const proposal=registry.getProposal(proposalId);must(proposal,'Unknown proposal');
   const index=registry.latestValidation(proposalId);
   if(!index){must(!proposal.latestValidationId&&!['verified','verification_failed','approved'].includes(proposal.state),'Validation state has no matching report');return undefined;}
@@ -73,7 +73,7 @@ export function readLatestValidationReport(proposalId,{root,registry}){
     const paths=resolveToolLearningPaths(root);
     must(proposal.artifactPath===path.join(paths.proposalsRoot,proposalId),'Registered artifact path is outside its fixed proposal root');
     const saved=readToolProposal(proposalId,{proposalsRoot:paths.proposalsRoot,expectedArtifactSha256:proposal.artifactSha256});
-    const parentComparison=assertRegisteredToolParent(saved.input,{root,registry});
+    const parentComparison=assertRegisteredToolParent(saved.input,{root,registry,context});
     must(parentComparison?isDeepStrictEqual(report.parentComparison,parentComparison):!Object.hasOwn(report,'parentComparison'),
       'Validation report parent binding differs from the registered parent');
   }

@@ -1,4 +1,4 @@
-// Immutable first-version packages. Source and reports are data only: this
+// Immutable version packages. Source and reports are data only: this
 // module never imports candidate code, starts a process or invokes a model.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -6,10 +6,11 @@ import {createHash, randomUUID} from 'node:crypto';
 import {TextDecoder, types} from 'node:util';
 import {validateToolProposalInput} from './tool-contract.mjs';
 import {assertValidationSupported} from './tool-validation-static.mjs';
+import {toolVersion,earlierParent,maintenanceText} from './tool-version.mjs';
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SHA=/^[0-9a-f]{64}$/;
-const DIRECTORY=/^([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})-1\.0\.0$/;
+const DIRECTORY=/^([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})-(.+)$/;
 const NAMES=['approval.json','integrity.json','manifest.json','tool.mjs','verification.json'];
 const PROTECTED=['approval.json','manifest.json','tool.mjs','verification.json'];
 const JSON_LIMIT=1024*1024;
@@ -39,7 +40,7 @@ function exact(value,fields,label){
   must(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).length===fields.length&&fields.every(key=>Object.hasOwn(value,key)),`${label} must contain the exact protocol fields`);
 }
 function timestamp(value,label){must(typeof value==='string'&&Number.isFinite(Date.parse(value))&&new Date(value).toISOString()===value,`${label} must be a canonical ISO timestamp`);}
-function actor(value){must(typeof value==='string'&&value.trim().length>0&&value.length<=120,'approvedBy must contain 1 to 120 characters');}
+function actor(value){maintenanceText(value,'approvedBy');}
 function utf8(bytes){return new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(bytes);}
 function parse(bytes,label){try{return JSON.parse(utf8(bytes));}catch{throw new Error(`${label} must be valid UTF-8 JSON`);}}
 function packageDigest(files){return hash(PROTECTED.map(name=>`${name}\0${files[name]}\n`).join(''));}
@@ -68,10 +69,15 @@ function read(file,limit){
   }finally{fs.closeSync(fd);}
 }
 function manifestValid(manifest,source){
-  exact(manifest,MANIFEST_FIELDS,'Approved manifest');
+  exact(manifest,Object.hasOwn(manifest,'parent')?[...MANIFEST_FIELDS,'parent']:MANIFEST_FIELDS,'Approved manifest');
   must(manifest.protocolVersion==='sirna-approved-tool/v1'&&typeof manifest.id==='string'&&UUID.test(manifest.id)&&
     typeof manifest.proposalId==='string'&&UUID.test(manifest.proposalId)&&
-    manifest.id!==manifest.proposalId&&manifest.version==='1.0.0'&&manifest.status==='approved','Invalid approved manifest identity, version or status');
+    manifest.id!==manifest.proposalId&&manifest.status==='approved','Invalid approved manifest identity, version or status');
+  toolVersion(manifest.version);
+  if(Object.hasOwn(manifest,'parent')){
+    exact(manifest.parent,['toolName','version'],'Approved parent');
+    must(manifest.parent.toolName===manifest.toolName&&earlierParent(manifest.parent.version,manifest.version),'Invalid approved parent identity or version order');
+  }else must(manifest.version==='1.0.0','A child approved manifest requires a parent');
   must(manifest.runtime==='node'&&manifest.scriptFile==='tool.mjs'&&manifest.repeatabilityMode==='exact'&&
     Array.isArray(manifest.dependencies)&&manifest.dependencies.length===0&&manifest.permissions?.profile==='no_external_access'&&manifest.runtimeArtifact,
     'Approved manifest supports only node, no dependencies, no_external_access and exact');
@@ -103,7 +109,8 @@ function context(error,packagePath,temporaryPath){
 
 /** Load real bounded files; the optional registry digest is the trust anchor. */
 export function loadApprovedToolPackage(directoryName,{approvedRoot,expectedPackageSha256}={}){
-  must(typeof directoryName==='string'&&DIRECTORY.test(directoryName),'Approved directoryName must be a tool UUID and first version basename');
+  must(typeof directoryName==='string'&&DIRECTORY.test(directoryName),'Approved directoryName must be a tool UUID and version basename');
+  toolVersion(DIRECTORY.exec(directoryName)[2]);
   const root=rootDirectory(approvedRoot);const target=path.join(root,directoryName);
   try{
     must(expectedPackageSha256===undefined||typeof expectedPackageSha256==='string'&&SHA.test(expectedPackageSha256),'expectedPackageSha256 must be a lowercase SHA-256 hex digest');
@@ -115,7 +122,7 @@ export function loadApprovedToolPackage(directoryName,{approvedRoot,expectedPack
       files[name]=result.bytes;snapshots.set(file,result.stat);
     }
     const manifest=parse(files['manifest.json'],'Approved manifest');manifestValid(manifest,files['tool.mjs']);
-    must(directoryName===`${manifest.id}-1.0.0`,'Approved package directory identity mismatch');
+    must(directoryName===`${manifest.id}-${manifest.version}`,'Approved package directory identity mismatch');
     const integrity=parse(files['integrity.json'],'Package integrity');
     exact(integrity,['protocolVersion','packageSha256','files'],'Package integrity');
     must(integrity.protocolVersion==='sirna-approved-tool-integrity/v1','Invalid package integrity protocol');
@@ -138,9 +145,10 @@ export function loadApprovedToolPackage(directoryName,{approvedRoot,expectedPack
 }
 
 /** Publish one new immutable package. Failures retain any temporary evidence. */
-export function publishApprovedToolPackage({saved,verificationBytes,verificationSha256,toolId,approvedBy,approvedAt},{approvedRoot}={}){
+export function publishApprovedToolPackage({saved,verificationBytes,verificationSha256,toolId,version='1.0.0',approvedBy,approvedAt},{approvedRoot}={}){
   plainData(saved);validateToolProposalInput(saved.input);assertValidationSupported(saved.input);
-  must(!Object.hasOwn(saved.input,'parent')&&!Object.hasOwn(saved.manifest,'parent'),'Parent proposals are not supported');
+  toolVersion(version);
+  must(JSON.stringify(saved.input.parent)===JSON.stringify(saved.manifest.parent),'Saved proposal parent differs from manifest');
   must(typeof toolId==='string'&&UUID.test(toolId)&&typeof saved.manifest.id==='string'&&UUID.test(saved.manifest.id)&&toolId!==saved.manifest.id,'New toolId must be a distinct lowercase UUID v4');
   actor(approvedBy);timestamp(approvedAt,'approvedAt');
   must(Buffer.isBuffer(verificationBytes)&&verificationBytes.length<=16*1024*1024&&typeof verificationSha256==='string'&&SHA.test(verificationSha256)&&
@@ -149,21 +157,22 @@ export function publishApprovedToolPackage({saved,verificationBytes,verification
   must(typeof saved.artifactSha256==='string'&&SHA.test(saved.artifactSha256),'Invalid saved proposal material digest');
   const source=Buffer.from(saved.input.script,'utf8');
   must(utf8(source)===saved.input.script&&source.length<=200000,'Source must round-trip through UTF-8 within its byte limit');
-  const manifest={protocolVersion:'sirna-approved-tool/v1',id:toolId,proposalId:saved.manifest.id,version:'1.0.0',status:'approved',
+  const manifest={protocolVersion:'sirna-approved-tool/v1',id:toolId,proposalId:saved.manifest.id,version,status:'approved',
     ...Object.fromEntries(['toolName','name','description','runtime','repeatabilityMode','dependencies','permissions','runtimeArtifact','scriptFile','scriptSha256','createdAt']
-      .map(key=>[key,saved.manifest[key]])),verifiedAt:verification.verifiedAt};
+      .map(key=>[key,saved.manifest[key]])),verifiedAt:verification.verifiedAt,
+    ...(saved.manifest.parent?{parent:saved.manifest.parent}:{})};
   manifestValid(manifest,source);
   for(const key of ['toolName','name','description','runtime','repeatabilityMode','dependencies','permissions','runtimeArtifact'])
     must(JSON.stringify(saved.input[key])===JSON.stringify(saved.manifest[key]),'Saved proposal input differs from manifest');
   const manifestBytes=json(manifest);
-  const approval={protocolVersion:'sirna-tool-approval/v1',proposalId:manifest.proposalId,version:'1.0.0',approvedBy:approvedBy.trim(),approvedAt,
+  const approval={protocolVersion:'sirna-tool-approval/v1',proposalId:manifest.proposalId,version,approvedBy:approvedBy.trim(),approvedAt,
     approvedManifestSha256:hash(manifestBytes),verificationSha256};
   const bytes={'manifest.json':manifestBytes,'tool.mjs':source,'verification.json':Buffer.from(verificationBytes),'approval.json':json(approval)};
   const fileDigests=Object.fromEntries(PROTECTED.map(name=>[name,hash(bytes[name])]));
   const packageSha256=packageDigest(fileDigests);
   bytes['integrity.json']=json({protocolVersion:'sirna-approved-tool-integrity/v1',packageSha256,files:fileDigests});
   for(const name of ['manifest.json','approval.json','integrity.json'])must(bytes[name].length<=JSON_LIMIT,'Approved JSON exceeds byte limit');
-  const root=rootDirectory(approvedRoot);const directoryName=`${toolId}-1.0.0`;const target=path.join(root,directoryName);
+  const root=rootDirectory(approvedRoot);const directoryName=`${toolId}-${version}`;const target=path.join(root,directoryName);
   const temporary=path.join(root,`.${directoryName}.${randomUUID()}.tmp`);
   try{
     must(!fs.existsSync(target),'Approved destination already exists');

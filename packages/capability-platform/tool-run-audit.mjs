@@ -1,6 +1,7 @@
 // Durable, exclusive execution evidence. Business data is represented by hashes.
 import fs from 'node:fs';
 import path from 'node:path';
+import {toolVersion} from './tool-version.mjs';
 import {createHash,randomUUID} from 'node:crypto';
 import {types} from 'node:util';
 
@@ -40,7 +41,8 @@ export function startToolRunAudit({root,identity,toolCallId,inputSha256,taskCont
   must(typeof root==='string'&&path.isAbsolute(root),'Audit requires an absolute root');root=path.resolve(root);directory(root);
   must(identity&&/^[a-z][a-z0-9_]{0,63}$/.test(identity.toolName),'Invalid audit tool name');
   must(UUID.test(toolCallId)&&UUID.test(identity.toolId)&&UUID.test(identity.proposalId),'Invalid audit UUID v4 identity');
-  must(identity.toolVersion==='1.0.0'&&SHA.test(identity.packageSha256)&&SHA.test(inputSha256)&&/^sha256:[a-f0-9]{64}$/.test(identity.imageDigest),'Invalid audit version or digest');
+  toolVersion(identity.toolVersion);
+  must(SHA.test(identity.packageSha256)&&SHA.test(inputSha256)&&/^sha256:[a-f0-9]{64}$/.test(identity.imageDigest),'Invalid audit version or digest');
   const parents=[root,path.join(root,'runtime'),path.join(root,'runtime/approved-tool-runs'),path.join(root,'runtime/approved-tool-runs',identity.toolName)];
   const snapshots=[];
   for(const dir of parents){

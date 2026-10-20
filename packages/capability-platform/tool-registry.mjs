@@ -3,9 +3,10 @@ import { closeSync, fchmodSync, fsyncSync, lstatSync, openSync, realpathSync } f
 import { randomUUID } from 'node:crypto';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { types } from 'node:util';
+import {toolVersion,versionParts,earlierParent,maintenanceText} from './tool-version.mjs';
 
 const APPLICATION_ID = 1397903433;
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const TOOL_NAME = /^[a-z][a-z0-9_]{0,63}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -15,13 +16,15 @@ const INPUT_FIELDS = ['id', 'toolName', 'artifactPath', 'artifactSha256', 'permi
 const VALIDATION_FIELDS = ['id', 'proposalId', 'passed', 'reportPath', 'reportSha256'];
 const VERSION_FIELDS = ['toolId', 'toolName', 'version', 'proposalId', 'packageDirectory',
   'packageSha256', 'imageDigest', 'approvedBy', 'approvedAt', 'validationId', 'reportSha256', 'artifactSha256'];
+const PARENT_FIELDS = ['parentToolId','parentVersion','parentPackageSha256'];
 const VERSION_COLUMNS = ['tool_id', 'tool_name', 'version', 'state', 'proposal_id', 'package_directory',
   'package_sha256', 'image_digest', 'runtime_state', 'approved_by', 'approved_at', 'updated_at'];
+const VERSION4_COLUMNS = [...VERSION_COLUMNS,'parent_tool_id','parent_version'];
 const VERSION_SCHEMA = `CREATE TABLE tool_versions (
-  tool_id TEXT PRIMARY KEY NOT NULL,
+  tool_id TEXT NOT NULL,
   tool_name TEXT NOT NULL,
-  version TEXT NOT NULL CHECK (version = '1.0.0'),
-  state TEXT NOT NULL CHECK (state = 'active'),
+  version TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('active', 'inactive')),
   proposal_id TEXT NOT NULL REFERENCES tool_proposals(id),
   package_directory TEXT NOT NULL,
   package_sha256 TEXT NOT NULL,
@@ -29,11 +32,28 @@ const VERSION_SCHEMA = `CREATE TABLE tool_versions (
   runtime_state TEXT NOT NULL CHECK (runtime_state = 'retained'),
   approved_by TEXT NOT NULL,
   approved_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  parent_tool_id TEXT,
+  parent_version TEXT,
+  PRIMARY KEY (tool_id, version),
+  CHECK ((parent_tool_id IS NULL AND parent_version IS NULL) OR (parent_tool_id IS NOT NULL AND parent_version IS NOT NULL)),
+  FOREIGN KEY (parent_tool_id, parent_version) REFERENCES tool_versions(tool_id, version)
 );
-CREATE UNIQUE INDEX tool_versions_name ON tool_versions(tool_name);
+CREATE UNIQUE INDEX tool_versions_name ON tool_versions(tool_name) WHERE state = 'active';
 CREATE UNIQUE INDEX tool_versions_name_version ON tool_versions(tool_name, version);
 CREATE UNIQUE INDEX tool_versions_proposal ON tool_versions(proposal_id);`;
+// The original released v3 table, independent of the v4 DDL. Recognition must
+// reject weakened foreign keys, checks and collations before writable opening.
+const VERSION3_TABLE = `CREATE TABLE tool_versions (
+  tool_id TEXT PRIMARY KEY NOT NULL, tool_name TEXT NOT NULL,
+  version TEXT NOT NULL CHECK (version = '1.0.0'),
+  state TEXT NOT NULL CHECK (state = 'active'),
+  proposal_id TEXT NOT NULL REFERENCES tool_proposals(id),
+  package_directory TEXT NOT NULL, package_sha256 TEXT NOT NULL, image_digest TEXT NOT NULL,
+  runtime_state TEXT NOT NULL CHECK (runtime_state = 'retained'),
+  approved_by TEXT NOT NULL, approved_at TEXT NOT NULL, updated_at TEXT NOT NULL
+)`;
+const schemaSQL=value=>value.replace(/'(?:''|[^'])*'|[^']+/g,part=>part.startsWith("'")?part:part.replace(/\s+/g,'').toLowerCase()).replace(/;$/,'');
 const VALIDATION_SCHEMA = `CREATE TABLE tool_validations (
   id TEXT PRIMARY KEY NOT NULL,
   proposal_id TEXT NOT NULL REFERENCES tool_proposals(id),
@@ -103,17 +123,19 @@ function toolName(value) {
   return value;
 }
 
-function firstVersion(value) {
-  must(value === '1.0.0', 'Only first version 1.0.0 is supported');
-  return value;
-}
-
 function activationInput(value) {
-  const input = plainData(value, VERSION_FIELDS, VERSION_FIELDS, 'version activation');
+  const input = plainData(value, [...VERSION_FIELDS,...PARENT_FIELDS], VERSION_FIELDS, 'version activation');
   proposalId(input.toolId); proposalId(input.proposalId); proposalId(input.validationId);
   must(input.toolId !== input.proposalId, 'First toolId must differ from proposalId');
-  toolName(input.toolName); firstVersion(input.version);
-  must(input.packageDirectory === `${input.toolId}-1.0.0`, 'packageDirectory must be the toolId-1.0.0 basename');
+  toolName(input.toolName); toolVersion(input.version);
+  must(input.packageDirectory === `${input.toolId}-${input.version}`, 'packageDirectory must be the toolId-version basename');
+  const hasParent=PARENT_FIELDS.some(field=>Object.hasOwn(input,field));
+  if(hasParent){
+    must(PARENT_FIELDS.every(field=>Object.hasOwn(input,field)),'Complete parent binding required');
+    proposalId(input.parentToolId);toolVersion(input.parentVersion);
+    must(input.parentToolId===input.toolId&&earlierParent(input.parentVersion,input.version),'Invalid parent tool identity or version order');
+    must(typeof input.parentPackageSha256==='string'&&SHA256.test(input.parentPackageSha256),'Invalid parent package digest');
+  }else must(input.version==='1.0.0','First version must be 1.0.0 without a parent');
   for (const field of ['packageSha256', 'reportSha256', 'artifactSha256']) {
     must(typeof input[field] === 'string' && SHA256.test(input[field]), `Invalid ${field}`);
   }
@@ -159,7 +181,7 @@ function inspectPaths(path) {
 function recognize(db) {
   const applicationId = db.prepare('PRAGMA application_id').get().application_id;
   const version = db.prepare('PRAGMA user_version').get().user_version;
-  must(applicationId === APPLICATION_ID && [1, 2, SCHEMA_VERSION].includes(version),
+  must(applicationId === APPLICATION_ID && [1, 2, 3, SCHEMA_VERSION].includes(version),
     'Unrecognized tool registry database identity or schema version; no migration performed');
   const layouts = {
     tool_proposals: ['id', 'tool_name', 'state', 'artifact_path', 'artifact_sha256',
@@ -167,7 +189,7 @@ function recognize(db) {
       ...(version >= 2 ? ['latest_validation_id'] : [])],
     tool_events: ['id', 'proposal_id', 'event_type', 'actor', 'tool_name', 'details_json', 'created_at'],
     ...(version >= 2 ? { tool_validations: ['id', 'proposal_id', 'passed', 'report_path', 'report_sha256', 'created_at'] } : {}),
-    ...(version === 3 ? { tool_versions: VERSION_COLUMNS } : {}),
+    ...(version >= 3 ? { tool_versions: version===3?VERSION_COLUMNS:VERSION4_COLUMNS } : {}),
   };
   for (const [table, names] of Object.entries(layouts)) {
     // Table names are fixed above, never caller-controlled SQL identifiers.
@@ -176,11 +198,15 @@ function recognize(db) {
       column.name === names[index] &&
       column.type === ((table === 'tool_events' && column.name === 'id') ||
         (table === 'tool_validations' && column.name === 'passed') ? 'INTEGER' : 'TEXT') &&
-      column.pk === (index === 0 ? 1 : 0) &&
-      column.notnull === ((table === 'tool_events' && index === 0) || column.name === 'latest_validation_id' ? 0 : 1)),
+      column.pk === (table==='tool_versions'&&version===4?(index===0?1:index===2?2:0):index === 0 ? 1 : 0) &&
+      column.notnull === ((table === 'tool_events' && index === 0) || column.name === 'latest_validation_id' ||
+        table==='tool_versions'&&['parent_tool_id','parent_version'].includes(column.name) ? 0 : 1)),
     'Unrecognized tool registry schema table layout; no migration performed');
   }
-  if (version === 3) {
+  if (version >= 3) {
+    const sql=db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='tool_versions'").get().sql;
+    must(schemaSQL(sql)===schemaSQL(version===3?VERSION3_TABLE:VERSION_SCHEMA.slice(0,VERSION_SCHEMA.indexOf(';'))),
+      'Unrecognized tool registry schema constraints; no migration performed');
     const indexes = db.prepare('PRAGMA index_list(tool_versions)').all();
     for (const [indexName, names] of [
       ['tool_versions_name', ['tool_name']],
@@ -189,9 +215,12 @@ function recognize(db) {
     ]) {
       const index = indexes.find(entry => entry.name === indexName);
       const columns = db.prepare(`PRAGMA index_info(${indexName})`).all();
-      must(index?.unique === 1 && index.partial === 0 && columns.length === names.length &&
+      must(index?.unique === 1 && index.partial === (version===4&&indexName==='tool_versions_name'?1:0) && columns.length === names.length &&
         columns.every((column, offset) => column.name === names[offset]),
       'Unrecognized tool registry schema unique index layout; no migration performed');
+      const indexSQL=db.prepare('SELECT sql FROM sqlite_master WHERE name=?').get(indexName).sql;
+      const expected=`CREATE UNIQUE INDEX ${indexName} ON tool_versions(${names.join(',')})${version===4&&indexName==='tool_versions_name'?" WHERE state = 'active'":''}`;
+      must(schemaSQL(indexSQL)===schemaSQL(expected),'Unrecognized tool registry schema index constraints; no migration performed');
     }
   }
   return version;
@@ -217,9 +246,17 @@ function migrateSchema(db, path, originalVersion) {
       db.exec(`ALTER TABLE tool_proposals ADD COLUMN latest_validation_id TEXT REFERENCES tool_validations(id);
         ${VALIDATION_SCHEMA}`);
     }
-    if (version < SCHEMA_VERSION) {
-      db.exec(`${VERSION_SCHEMA} PRAGMA user_version = ${SCHEMA_VERSION};`);
+    if(version===3){
+      db.exec(`DROP INDEX tool_versions_name; DROP INDEX tool_versions_name_version; DROP INDEX tool_versions_proposal;
+        ALTER TABLE tool_versions RENAME TO tool_versions_v3;
+        ${VERSION_SCHEMA}
+        INSERT INTO tool_versions (${VERSION_COLUMNS.join(',')}) SELECT ${VERSION_COLUMNS.join(',')} FROM tool_versions_v3;
+        DROP TABLE tool_versions_v3;`);
+    }else if (version < 3) {
+      db.exec(VERSION_SCHEMA);
     }
+    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION};`);
+    recognize(db);
     db.exec('COMMIT');
   } catch (error) {
     try { db.exec('ROLLBACK'); }
@@ -284,7 +321,8 @@ function versionRow(row) {
   return { toolId: row.tool_id, toolName: row.tool_name, version: row.version, state: row.state,
     proposalId: row.proposal_id, packageDirectory: row.package_directory, packageSha256: row.package_sha256,
     imageDigest: row.image_digest, runtimeState: row.runtime_state, approvedBy: row.approved_by,
-    approvedAt: row.approved_at, updatedAt: row.updated_at };
+    approvedAt: row.approved_at, updatedAt: row.updated_at,
+    ...(row.parent_tool_id!==undefined&&row.parent_tool_id!==null?{parentToolId:row.parent_tool_id,parentVersion:row.parent_version}:{}) };
 }
 
 /** Stores proposal metadata and independent validation indexes; registration performs no verification. */
@@ -437,11 +475,29 @@ export class ToolRegistry {
       ON v.id = p.latest_validation_id AND v.proposal_id = p.id WHERE p.id = ?`).get(id));
   }
 
-  activateVersion(value) {
+  nextVersion(name,parentVersion) {
+    const db=this.#connection();toolName(name);
+    const versions=this.listToolVersions(name);
+    if(parentVersion===undefined){
+      must(versions.length===0,'Existing tool name requires a parent version');
+      return {toolId:randomUUID(),version:'1.0.0'};
+    }
+    toolVersion(parentVersion);
+    const parent=this.getToolVersion(name,parentVersion);
+    must(parent&&['active','inactive'].includes(parent.state)&&parent.runtimeState==='retained','Unknown retained parent version');
+    const [major,minor]=versionParts(parentVersion);
+    const patches=versions.filter(item=>{const p=versionParts(item.version);return p[0]===major&&p[1]===minor;}).map(item=>versionParts(item.version)[2]);
+    const patch=Math.max(...patches)+1;
+    must(Number.isSafeInteger(patch),'Tool patch version exhausted');
+    return {toolId:parent.toolId,version:`${major}.${minor}.${patch}`};
+  }
+
+  activateVersion(value,{verifyEvidence}={}) {
     const db = this.#connection();
     must(!this.#readOnly, 'Tool registry is read-only');
-    must(this.#version === SCHEMA_VERSION, 'Version activation requires schema v3; reopen with migrate: true');
+    must(this.#version === SCHEMA_VERSION, 'Version activation requires schema v4; reopen with migrate: true');
     const input = activationInput(value);
+    must(verifyEvidence===undefined||typeof verifyEvidence==='function','verifyEvidence must be a synchronous function');
     db.exec('BEGIN IMMEDIATE');
     try {
       // Evidence and conflicts are checked under the same write lock as all three writes.
@@ -457,13 +513,25 @@ export class ToolRegistry {
       must(proposal.tool_name === input.toolName, 'Proposal tool name mismatch');
       must(proposal.image_digest === input.imageDigest, 'Proposal image digest mismatch');
       must(proposal.permission_profile === 'no_external_access', 'Activation requires no_external_access');
-      const existing = db.prepare('SELECT tool_id FROM tool_versions WHERE tool_name = ? OR proposal_id = ? OR tool_id = ?')
-        .get(input.toolName, input.proposalId, input.toolId);
-      must(existing === undefined, 'First version already exists for this tool name, proposal or toolId');
-      db.prepare(`INSERT INTO tool_versions (${VERSION_COLUMNS.join(', ')})
-        VALUES (?, ?, ?, 'active', ?, ?, ?, ?, 'retained', ?, ?, ?)`)
+      const existing = db.prepare('SELECT tool_id FROM tool_versions WHERE proposal_id = ?').get(input.proposalId);
+      must(existing === undefined, 'Proposal already has a tool version');
+      if(input.parentVersion!==undefined){
+        const parent=this.getToolVersion(input.toolName,input.parentVersion);
+        must(parent&&parent.toolId===input.parentToolId&&parent.packageSha256===input.parentPackageSha256&&
+          parent.runtimeState==='retained'&&['active','inactive'].includes(parent.state),'Parent identity or package changed');
+        const next=this.nextVersion(input.toolName,input.parentVersion);
+        must(next.toolId===input.toolId&&next.version===input.version,'Allocated child version changed');
+        must(!this.listToolVersions().some(v=>v.toolId===input.toolId&&v.toolName!==input.toolName),'Tool identity belongs to a different name');
+      }else{
+        must(this.listToolVersions(input.toolName).length===0&&!this.listToolVersions().some(v=>v.toolId===input.toolId),
+          'First version already exists for this tool name or toolId');
+      }
+      if(verifyEvidence){const result=verifyEvidence();must(!result||typeof result.then!=='function','Evidence verification must be synchronous');}
+      db.prepare("UPDATE tool_versions SET state='inactive',updated_at=? WHERE tool_name=? AND state='active'").run(input.approvedAt,input.toolName);
+      db.prepare(`INSERT INTO tool_versions (${VERSION4_COLUMNS.join(', ')})
+        VALUES (?, ?, ?, 'active', ?, ?, ?, ?, 'retained', ?, ?, ?, ?, ?)`)
         .run(input.toolId, input.toolName, input.version, input.proposalId, input.packageDirectory,
-          input.packageSha256, input.imageDigest, input.approvedBy, input.approvedAt, input.approvedAt);
+          input.packageSha256, input.imageDigest, input.approvedBy, input.approvedAt, input.approvedAt,input.parentToolId??null,input.parentVersion??null);
       db.prepare("UPDATE tool_proposals SET state = 'approved', updated_at = ? WHERE id = ?")
         .run(input.approvedAt, input.proposalId);
       const details = JSON.stringify({ proposalId: input.proposalId, toolId: input.toolId,
@@ -486,9 +554,39 @@ export class ToolRegistry {
   }
 
   getToolVersion(name, version) {
-    const db = this.#connection(); toolName(name); firstVersion(version);
+    const db = this.#connection(); toolName(name); toolVersion(version);
     if (this.#version < 3) return undefined;
     return versionRow(db.prepare('SELECT * FROM tool_versions WHERE tool_name = ? AND version = ?').get(name, version));
+  }
+
+  rollbackTool(name,version,actor,reason,{verifyEvidence}={}) {
+    const db=this.#connection();toolName(name);toolVersion(version);
+    actor=maintenanceText(actor,'actor');reason=maintenanceText(reason,'reason',1000);
+    must(!this.#readOnly,'Tool registry is read-only');
+    must(this.#version===SCHEMA_VERSION,'Rollback requires schema v4; reopen with migrate: true');
+    must(verifyEvidence===undefined||typeof verifyEvidence==='function','verifyEvidence must be a synchronous function');
+    db.exec('BEGIN IMMEDIATE');
+    try{
+      const target=this.getToolVersion(name,version),source=this.getActiveTool(name);
+      must(target&&['active','inactive'].includes(target.state)&&target.runtimeState==='retained','Unknown retained rollback target');
+      must(source&&source.toolId===target.toolId,'Rollback tool identity differs from current active version');
+      if(verifyEvidence){const result=verifyEvidence();must(!result||typeof result.then!=='function','Evidence verification must be synchronous');}
+      if(source.version!==version){
+        const now=new Date().toISOString();
+        db.prepare("UPDATE tool_versions SET state='inactive',updated_at=? WHERE tool_name=? AND state='active'").run(now,name);
+        db.prepare("UPDATE tool_versions SET state='active',updated_at=? WHERE tool_name=? AND version=?").run(now,name,version);
+        db.prepare(`INSERT INTO tool_events (proposal_id,event_type,actor,tool_name,details_json,created_at)
+          VALUES (?,'tool_rolled_back',?,?,?,?)`).run(target.proposalId,actor,name,
+            JSON.stringify({toolId:target.toolId,fromVersion:source.version,toVersion:version,reason}),now);
+      }
+      db.exec('COMMIT');
+    }catch(error){
+      try{db.exec('ROLLBACK');}catch(rollbackError){
+        if(!rollbackError.message.includes('no transaction is active')){this.close();throw new AggregateError([error,rollbackError],'Tool rollback transaction failed; registry closed',{cause:error});}
+      }
+      throw error;
+    }
+    return this.getToolVersion(name,version);
   }
 
   getActiveTool(name) {

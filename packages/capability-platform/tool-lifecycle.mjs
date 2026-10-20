@@ -9,6 +9,7 @@ import { createToolProposal, readToolProposal } from './tool-proposals.mjs';
 import { ToolRegistry } from './tool-registry.mjs';
 import { readLatestValidationReport } from './tool-validation-reports.mjs';
 import {loadApprovedToolPackage} from './tool-approved-packages.mjs';
+import {toolVersion,earlierParent} from './tool-version.mjs';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 function checkedId(id) {
@@ -88,18 +89,29 @@ export function listRegisteredToolProposals({root}={}) {
 }
 
 /** Bind a published package back to its registered proposal and latest evidence. */
-export function readRegisteredToolVersion(version,{root,registry}) {
-  if(!version||version.version!=='1.0.0'||version.state!=='active'||version.runtimeState!=='retained')throw new Error('No active retained first tool version');
+export function readRegisteredToolVersion(version,{root,registry,context={visiting:new Set(),packages:new Map()}}) {
+  if(!version||!['active','inactive'].includes(version.state)||version.runtimeState!=='retained')throw new Error('No retained tool version');
+  toolVersion(version.version);
+  const key=`${version.toolName}@${version.version}`;
+  if(context.visiting.has(key)||context.visiting.size>=64)throw new Error('Malformed or cyclic tool parent lineage exceeds safe depth');
+  if(context.packages.has(key))return context.packages.get(key);
+  context.visiting.add(key);
+  try{
   const paths=resolveToolLearningPaths(root);
   const proposal=registry.getProposal(version.proposalId);
   if(!proposal||proposal.state!=='approved'||proposal.toolName!==version.toolName||proposal.imageDigest!==version.imageDigest||
     proposal.artifactPath!==path.join(paths.proposalsRoot,proposal.id))throw new Error('Published version differs from its approved proposal');
   const saved=readToolProposal(proposal.id,{proposalsRoot:paths.proposalsRoot,expectedArtifactSha256:proposal.artifactSha256});
-  // Only original first-version packages can be formal parents in this step.
-  if(Object.hasOwn(saved.input,'parent'))throw new Error('A formal first-version proposal cannot itself have a parent');
-  const validation=readLatestValidationReport(proposal.id,{root,registry});
+  if(saved.input.parent){
+    if(saved.input.parent.toolName!==version.toolName||version.parentToolId!==version.toolId||
+      version.parentVersion!==saved.input.parent.version||!earlierParent(version.parentVersion,version.version))throw new Error('Malformed parent identity or version lineage order');
+    const parent=registry.getToolVersion(version.toolName,version.parentVersion);
+    if(!parent||parent.toolId!==version.toolId)throw new Error('Parent tool identity differs from child');
+  }else if(version.version!=='1.0.0'||version.parentToolId!==undefined||version.parentVersion!==undefined)throw new Error('Initial version has invalid parent lineage');
+  const validation=readLatestValidationReport(proposal.id,{root,registry,context});
   const pkg=loadApprovedToolPackage(version.packageDirectory,{approvedRoot:paths.approvedRoot,expectedPackageSha256:version.packageSha256});
   const manifest=pkg.manifest;
+  if(!isDeepStrictEqual(manifest.parent,saved.manifest.parent))throw new Error('Published parent differs from submitted material');
   if(manifest.id!==version.toolId||manifest.proposalId!==proposal.id||manifest.toolName!==version.toolName||manifest.version!==version.version||
     pkg.approval.approvedBy!==version.approvedBy||pkg.approval.approvedAt!==version.approvedAt||
     pkg.approval.verificationSha256!==validation.reportSha256||pkg.verification.validationId!==validation.id||
@@ -107,18 +119,19 @@ export function readRegisteredToolVersion(version,{root,registry}) {
   for(const field of ['name','description','runtime','repeatabilityMode','dependencies','permissions','runtimeArtifact','scriptFile','scriptSha256','createdAt']){
     if(!isDeepStrictEqual(manifest[field],saved.manifest[field]))throw new Error('Published manifest differs from submitted material');
   }
-  return pkg;
+  context.packages.set(key,pkg);return pkg;
+  }finally{context.visiting.delete(key);}
 }
 
-/** Resolve the complete formal first-version evidence without executing source. */
-export function assertRegisteredToolParent(input,{root,registry}={}) {
+/** Resolve complete retained parent evidence without executing source. */
+export function assertRegisteredToolParent(input,{root,registry,context}={}) {
   if(!Object.hasOwn(input,'parent'))return undefined;
   const parent=input.parent;
   if(!parent||parent.toolName!==input.toolName)throw new Error('parent must have the same toolName as the proposal');
-  if(parent.version!=='1.0.0')throw new Error('Only a registered parent version 1.0.0 is supported');
+  toolVersion(parent.version);
   const version=registry?.getToolVersion(parent.toolName,parent.version);
   if(!version)throw new Error('Unknown registered parent version');
-  const pkg=readRegisteredToolVersion(version,{root,registry});
+  const pkg=readRegisteredToolVersion(version,{root,registry,context});
   if(input.baseline?.runtime!==pkg.manifest.runtime)throw new Error('Baseline runtime differs from the registered parent');
   const baselineScriptSha256=createHash('sha256').update(input.baseline.script,'utf8').digest('hex');
   if(baselineScriptSha256!==pkg.manifest.scriptSha256)throw new Error('Baseline source differs from the registered parent');

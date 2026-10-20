@@ -142,7 +142,8 @@ test('activation rejects accessors/proxies without invoking them and bounds name
     assert.throws(() => r.getActiveTool(name)); assert.throws(() => r.listToolVersions(name));
     assert.throws(() => r.getToolVersion(name, '1.0.0'));
   }
-  assert.throws(() => r.getToolVersion('sequence_summary', '2.0.0'));
+  assert.equal(r.getToolVersion('sequence_summary', '2.0.0'),undefined);
+  assert.throws(() => r.getToolVersion('sequence_summary', '2.00.0'));
   assert.deepEqual(r.listActiveTools(), []);
 });
 
@@ -182,7 +183,7 @@ for (const version of [1, 2]) test(`v${version} reads stay unmigrated and explic
   assert.equal(readdirSync(f.root).filter(n => n.includes('-backup-')).length, 0);
   old.close();
   const upgraded = f.open({ migrate: true });
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 3);
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 4);
   const backups = readdirSync(f.root).filter(n => n.includes(`.v${version}-backup-`));
   assert.equal(backups.length, 1);
   const backupPath = join(f.root, backups[0]);
@@ -218,7 +219,7 @@ test('unknown v3 layout is rejected before writes or backups', t => {
   assert.equal(readdirSync(f.root).filter(n => n.includes('-backup-')).length, 0);
 });
 
-test('v3 registry missing a first-version unique constraint is rejected without adopting its layout', t => {
+test('v4 registry missing the active-name unique constraint is rejected without adopting its layout', t => {
   const f = fixture(t), r = f.verified(); r.close();
   const db = f.raw(); db.exec('DROP INDEX tool_versions_name'); db.close();
   const before = readFileSync(f.path);
