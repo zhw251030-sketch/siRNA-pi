@@ -53,3 +53,18 @@ test('relay converts upstream diagnostics, redirects, excess response and timeou
     assert.deepEqual(await result.json(),{error:'Approved tool relay unavailable'});assert.equal(result.headers.get('x-private'),null);
   }
 });
+test('builder reference routes retain method/body/status and larger bounds without widening approved calls',async t=>{
+  const seen=[];const id='11111111-1111-4111-8111-111111111111';
+  const f=await fixture(t,async(req,res)=>{let body='';for await(const chunk of req)body+=chunk;seen.push({method:req.method,url:req.url,body});res.writeHead(req.url==='/v1/build-sessions'||req.url==='/v1/tool-proposals'?201:200);res.end('{"ok":true}');});
+  for(const [method,route,body,want]of [['POST','/v1/build-sessions','{}',201],['PUT',`/v1/build-sessions/${id}/files`,JSON.stringify({content:'x'.repeat(300000)}),200],['POST',`/v1/build-sessions/${id}/exec`,'{"command":"true"}',200],['POST',`/v1/build-sessions/${id}/finalize`,'{"command":[]}',200],['DELETE',`/v1/build-sessions/${id}`,undefined,200],['POST','/v1/tool-proposals','{}',201]]){
+    const result=await fetch(f.baseUrl+route,{method,headers:{...headers,'content-type':'application/json'},body});assert.equal(result.status,want);assert.deepEqual(await result.json(),{ok:true});assert.equal(seen.at(-1).method,method);assert.equal(seen.at(-1).url,route);assert.equal(seen.at(-1).body,body??'');
+  }
+  const before=seen.length;assert.equal((await fetch(f.baseUrl+'/v1/build-sessions',{method:'POST',headers,body:'x'.repeat(1048577)})).status,413);
+  assert.equal((await fetch(f.baseUrl+'/v1/agent-tools/a/call',{method:'POST',headers,body:'x'.repeat(300000)})).status,413);assert.equal(seen.length,before);
+  for(const route of [`/v1/build-sessions/${id}/exec?x=1`,`/v1/build-sessions/${id}/unknown`,'/v1/tool-proposals/other'])assert.equal((await fetch(f.baseUrl+route,{method:'POST',headers,body:'{}'})).status,404);
+});
+test('builder relay has its own deadline and forwards bounded public error status only',async t=>{
+  let mode='slow';const f=await fixture(t,(_req,res)=>{if(mode==='slow'){setTimeout(()=>{res.writeHead(201);res.end('{}');},100);return;}res.writeHead(409);res.end('private /host/error');},{timeoutMs:20,builderTimeoutMs:500});
+  const build=await fetch(f.baseUrl+'/v1/build-sessions',{method:'POST',headers,body:'{}'});assert.equal(build.status,201);
+  mode='error';const result=await fetch(f.baseUrl+'/v1/build-sessions',{method:'POST',headers,body:'{}'});assert.equal(result.status,409);assert.doesNotMatch(await result.text(),/private|host/);
+});

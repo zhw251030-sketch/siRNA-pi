@@ -264,3 +264,15 @@ finalize要求写入后成功调试，但不等于独立验证。先停止移除
 新增18测试，Windows全套1041：1028pass/13skip；Linux初次1037pass/2fail/2skip，两新测试after hook删除只读临时材料EACCES，正文已通过。仅测试夹具增加限定os.tmpdir直接子根、前缀/realpath检查、不跟随链接及解锁清理；产品权限未改。修正后Windows18定向全通过、Linux47相关全通过；最终Linux1041项1039pass/2skip，0fail。初次日志与两失败临时目录保留。聚焦检查后私有spawnSync收尾复用过期HTTP连接失败，独立只读重查确认服务/旧状态正常，健康请求改Connection:close，最终回归及保留检查通过。Task1独立审查通过，Task2操作复审通过；异常诊断落盘、stderr受控处理、同步tar覆盖前核对均修正。只读scripts/verify-agent-tool-builder.mjs验收已通过。
 
 最新教学docs/23-Agent构建工具与提交候选.md，例子examples/06-agent-tool-build是人为样例，故意mean=0基线未执行，不称强基线或性能结果。私有runtime/agent-builder-{state-before,exercise,acceptance,fresh-run,inspection,linux-tests,linux-final}及runtime/tool-builds/<sessionId>保存证据；一次性exercise不可当只读检查重跑。10I固定旧proposal数量的检查不再适用，不修改旧历史证据。当前正式工具网页链路仍可用，但新构建MCP尚未接Pi/网页/Curator。下一步按原远程控制端接任务归属/凭证与构建会话，真实Pi验收后再接Curator；无自动提议/改写/独立验证/批准/自进化有效性。继续个人main同步，唯一远端目录不变，只改siRNA-pi。
+
+以上为第10J步历史；以下为当前状态。
+
+2026-10-21：第10K步接通网页Pi六构建工具。保留原build-sessions与tool-proposals路径/参数分工，个人版由既有UDS后台及relay承接控制职责，尚未拆原独立controller；原代码没有的每轮owner认证是个人增强。tool-builder-client只固定请求、不重放；tool-build-api读body前后认证，拒绝模型owner；task-tool-builders通过lease.ownResource每轮懒建service。关闭先撤销/排空再清理，确认后释放单网页owner槽，未知清理占用；身份文件finally移除。每service4live/32total，CLI实例不共享此全局槽；会话不跨轮，进程崩溃恢复未做。Node单源码、无依赖/网络、非root调试/洁净打包及人工批准仍保持。builderHTTP请求1MiB/响应300000B/client300s/relay310s，实际pi-mcp-adapter2.11.0显式builder配置320s；MCP最终262144B上限仍在，转义膨胀可被末层拒绝。正式工具HTTP合同/30s保持。
+
+新guest sirna-pi-guest:pi1.2.0-mcp3，image sha256:e1132518f9a32c36ead10668419adb8399f5cf9a1885c096290f8ee7fa6f4ca0，project sirna-pi-learning-tool-builder；真实导入通过，无凭据/宿主builder代码。空闲重建项目controller/relay并重启后台，两旧guest/镜像保留，无系统/root操作。Linux全套1057：1055通过/2平台跳过；Windows主实现1056：1043通过/13跳过，公开错误说明修正后29相关全通过。最初SSH PATH引用错误在测试前导致sh ENOENT，修正后才运行Linux全套；Windows夹具RPC事件/DB收尾问题诊断后修正，三临时目录受限清理，正常测试通过。独立Task1审查无Critical/Important，Minor公开错误修正后部署。
+
+真实网页task506ee4db-d6c6-4a8c-b1ab-d9bd5b26cb52、execution25c3e1e1-c18e-49f4-a8a4-11d708bf9e29、run08850a24695c4c625a4f360d28686c95c411f603b7e3fd7f6978fac73a3e3742。16模型响应/19Pi工具，8构建业务全部成功；另2次describe对象而非字符串失败后自行纠正，最终文字“无失败”不准确。usage总82081tokens，SDKcost0不当免费，实际账单未知。人为提供examples/07源码，debug[6,2,4]→3/2/6/4；A4022b31c-bc5a-45da-ac15-909a72445ee1冻结，B6a9350df-ca95-4f37-9d51-3a658ff70491取消，C9d7857a4-709c-4e4b-bd4b-afede80c0767自动close_cleanup。4临时容器已移除；网页结束后新guest释放，文件工作区/归档/下载字节一致。
+
+候选26883ce8-5c2e-4a0e-90fb-d96e53270b9c summarize_numeric_range仅submitted，image45b87208b560b36d8424cba95bebf0a4e3f1981c49efbf1d659aba02354bccf1、source e91e65dcea8747c0b3698faaec9223c6871585f3386e5c99fde344b8a8f405af、package b57eb4bd612e32f26a7287d3867feeb99fb4835823b831a3350364f0bbc18729。所有构建事件/冻结/提交关联有5项可信owner，登记actor web-agent。+1proposal/+1event、0validation/versions；旧21材料/12审计/11会话/2guest、旧任务/登记行、catalog/凭据元数据保持，原active1.0.1。两份数值候选都未独立验证/批准；本次未单独执行成品基准，不声称自进化或自主发现。
+
+最新docs/24-网页Agent构建工具与任务归属.md；只读复核node scripts/verify-web-tool-builder.mjs 506ee4db-d6c6-4a8c-b1ab-d9bd5b26cb52 ended，依赖私有runtime/web-builder-state-before.json且固定当前总数。10J旧总数检查不再适用，保留历史。runtime/web-builder-{completed,ended,linux-01-result,build,recreate,restart}保存证据；同步提交回执留runtime，勿提交敏感/生成目录。下一步按原tool-curation/Curator协调候选、独立验证、失败反馈及人工批准，暂不自动发布或无限循环。个人main持续同步，唯一远端目录不变，不改父级RSI项目。

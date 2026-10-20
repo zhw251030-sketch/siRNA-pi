@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 
 // Follows the reference service's task-scoped turn and event contracts, without
 // its revisions or capability-coordinator features.
-const persistedEventTypes = new Set(["progress_message", "tool_start", "tool_end", "run_status", "done", "error", "workspace_synced", "workspace_warning", "approved_tool_call"]);
-const storedType = type => type.startsWith('workspace_') || type === 'approved_tool_call' ? 'progress_message' : type;
+const persistedEventTypes = new Set(["progress_message", "tool_start", "tool_end", "run_status", "done", "error", "workspace_synced", "workspace_warning", "approved_tool_call", "builder_tool_call"]);
+const storedType = type => type.startsWith('workspace_') || ['approved_tool_call','builder_tool_call'].includes(type) ? 'progress_message' : type;
 const safeFailure = "本轮执行失败，请稍后重试；服务端已保留任务记录。";
 
 export class TaskMessageSubmissionError extends Error {

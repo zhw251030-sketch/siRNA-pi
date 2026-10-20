@@ -16,6 +16,7 @@ import { createDockerValidationRunner } from "../../packages/capability-platform
 import { DockerEngineClient } from "../../packages/capability-platform/docker-engine-client.mjs";
 import { createAgentToolsServer } from "./agent-tools.mjs";
 import { listenToolSocket } from "./tool-api-socket.mjs";
+import { createTaskToolBuilders } from "../../packages/capability-platform/task-tool-builders.mjs";
 
 process.umask(0o077);
 const directory = path.join(projectRoot, "runtime", "tasks");
@@ -27,12 +28,14 @@ for (const file of [database, `${database}-wal`, `${database}-shm`]) {
 const rpc = new AgentComposeRpcClient({ token: readComposeControlToken(projectRoot) });
 const dockerSocket = path.join(projectRoot, 'runtime/docker/run/docker.sock');
 if (fs.realpathSync(dockerSocket) !== dockerSocket || !fs.lstatSync(dockerSocket).isSocket()) throw new Error('Expected project Docker socket');
-const runner = createDockerValidationRunner({ docker: new DockerEngineClient(dockerSocket), purpose: 'approved-call' });
+const docker = new DockerEngineClient(dockerSocket);
+const runner = createDockerValidationRunner({ docker, purpose: 'approved-call' });
 const toolCallLeases = createToolCallLeases();
-const toolsServer = createAgentToolsServer({ leases: toolCallLeases,
+const builders = createTaskToolBuilders({root: projectRoot,docker});
+const toolsServer = createAgentToolsServer({ leases: toolCallLeases, builders,
   discover: ({taskContext}) => discoverApprovedTools({ root: projectRoot, runner, taskContext }) });
 await listenToolSocket(toolsServer, {root: projectRoot});
-const compose = new AgentComposeRuntime({ root: projectRoot, executor: createComposeExecutor(projectRoot), rpc, toolCallLeases });
+const compose = new AgentComposeRuntime({ root: projectRoot, executor: createComposeExecutor(projectRoot), rpc, toolCallLeases, toolBuildersAvailable:true });
 const agentRuntime = new RuntimeRouter({ compose, legacy: new LocalPiRuntime() });
 const taskStore = new TaskStore(database);
 const recovered = taskStore.recoverInterruptedTasks();

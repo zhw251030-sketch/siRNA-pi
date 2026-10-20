@@ -74,6 +74,7 @@ test('tool failures and invalid results return errors without host diagnostics',
   for(const value of ['throw','invalid']){
     mode=value;const result=await client.callTool({name:'summarize_target_sequence',arguments:{input:{}}});
     assert.equal(result.isError,true);assert.doesNotMatch(JSON.stringify(result),/private|secret/);
+    assert.equal(result.content[0].text,'Approved tool call failed. Check arguments and inspect the host audit records.');
   }
   assert.equal((await client.callTool({name:'unknown',arguments:{}})).isError,true);
   assert.equal((await client.callTool({name:'enumerate_sirna_candidates',arguments:{targetSequence:'AC'}})).isError,true);

@@ -51,7 +51,8 @@ function integrity(artifactSha256) {
   return {packageMatchesRegistration:true,sourceHashesMatch:true,artifactSha256};
 }
 
-export function submitRegisteredToolProposal(input,{root}={}) {
+export function submitRegisteredToolProposal(input,{root,actor='local-cli'}={}) {
+  if(!['local-cli','web-agent'].includes(actor))throw new TypeError('Invalid proposal actor');
   const preflight=checkToolProposal(input);
   if(!preflight.ok) throw new Error(`${preflight.code}: ${preflight.error}`);
   // Parent evidence must be resolved without creating even the registry roots.
@@ -72,7 +73,7 @@ export function submitRegisteredToolProposal(input,{root}={}) {
     const row=registry.registerProposal({id:saved.manifest.id,toolName:saved.manifest.toolName,
       artifactPath:saved.artifactPath,artifactSha256:saved.artifactSha256,
       permissionProfile:saved.manifest.permissions.profile,imageDigest:saved.manifest.runtimeArtifact.imageDigest},
-    {actor:'local-cli'});
+    {actor});
     return {proposal:saved.manifest,registry:row,integrity:integrity(saved.artifactSha256),...flags()};
   } catch(error) {
     const failure=new Error(`Proposal material saved but registration failed: ${error.message}`,{cause:error});

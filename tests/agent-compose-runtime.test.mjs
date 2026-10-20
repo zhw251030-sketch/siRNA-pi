@@ -87,6 +87,13 @@ test('web tool lease is activated with daemon identity, drained before done and 
   assert.equal(JSON.stringify(events).includes(token), false);
   assert.equal(JSON.stringify(await runtime.status(session.id)).includes(token), false);
 });
+test('builder availability is recorded for new workspaces and cleanup failure still removes capability context',async t=>{
+  const f=fixture(t);const taskId=randomUUID();let context;
+  const leases={begin(binding){context={protocolVersion:'sirna-task-context/v1',taskId,agentTurnId:binding.agentTurnId,token:'a'.repeat(64)};return {context,activate(){},async close(){throw new Error('cleanup unknown');}};}};
+  const runtime=f.make({toolCallLeases:leases,toolBuildersAvailable:true});const created=await runtime.create();const events=[];
+  assert.equal((await runtime.describe(created.id)).builderToolsAvailable,true);await runtime.run({taskId,sessionId:created.id,message:'build'},event=>events.push(event));
+  const saved=await runtime.status(created.id);assert.equal(saved.remoteBuilderTools,true);assert.equal(events.at(-1).status,'failed');assert.equal(fs.existsSync(path.join(f.root,saved.workspacePath,'.sirna-task-context.json')),false);
+});
 
 test('failed submission still closes its pending capability before emitting failure', async t => {
   const f = fixture(t); const taskId = randomUUID(); let closed = false; let file;

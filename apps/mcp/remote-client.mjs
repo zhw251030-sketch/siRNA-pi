@@ -6,7 +6,7 @@ const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]
 const namePattern=/^[a-z][a-z0-9_]{0,63}$/;
 const object=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
 const keys=(value,allowed)=>object(value)&&Object.keys(value).every(key=>allowed.includes(key));
-async function readContext(filename){
+export async function readContext(filename){
   const before=await fs.lstat(filename);
   if(!before.isFile()||before.nlink!==1||before.size>4096)throw unavailable();
   const file=await fs.open(filename,constants.O_RDONLY|(constants.O_NOFOLLOW??0)|(constants.O_NONBLOCK??0));

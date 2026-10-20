@@ -32,12 +32,13 @@ function recordDaemonOutcome(run, snapshot) {
 }
 
 export class AgentComposeRuntime {
-  constructor({ root, executor, rpc, toolCallLeases }) {
+  constructor({ root, executor, rpc, toolCallLeases, toolBuildersAvailable=false }) {
     this.root = path.resolve(root);
     this.store = new ComposeSessionStore(this.root);
     this.executor = executor;
     this.rpc = rpc;
     this.toolCallLeases = toolCallLeases;
+    this.toolBuildersAvailable = toolBuildersAvailable===true;
     this.active = new Map();
     this.releasing = new Map();
     this.canceling = new Map();
@@ -58,6 +59,7 @@ export class AgentComposeRuntime {
     const unresolved = unresolvedRun(session);
     return { backend: session.backend, sandboxId: session.sandboxId, supportsLifecycle: true,
       approvedToolsAvailable: session.remoteApprovedTools === true || (!session.projectId && Boolean(this.toolCallLeases)),
+      builderToolsAvailable: session.remoteBuilderTools === true || (!session.projectId && Boolean(this.toolCallLeases) && this.toolBuildersAvailable),
       runtimeReleased: Boolean(session.runtimeReleased),
       stopUnconfirmed: Boolean((unresolved && (!this.active.has(id) || unresolved.stopUnconfirmed || unresolved.outcomeUnconfirmed)) ||
         hasCurrentUncertainty(session) ||
@@ -106,6 +108,7 @@ export class AgentComposeRuntime {
       if (typeof project.project?.id !== 'string') throw new Error('Missing project ID');
       session.projectId = project.project.id;
       session.remoteApprovedTools = Boolean(this.toolCallLeases);
+      session.remoteBuilderTools = Boolean(this.toolCallLeases) && this.toolBuildersAvailable;
       this.store.save(session);
     }
     if (!session.workspaceReady) {
@@ -285,8 +288,8 @@ export class AgentComposeRuntime {
     let removeToolContext;
     let closingTools;
     const closeTools = () => closingTools ??= (async () => {
-      await toolLease?.close();
-      removeToolContext?.();
+      try { await toolLease?.close(); }
+      finally { removeToolContext?.(); }
     })();
     let cancelPersistenceError;
     const rememberUserCancel = () => {

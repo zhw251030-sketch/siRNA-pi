@@ -12,16 +12,17 @@ function publicResult(result){
     Buffer.byteLength(JSON.stringify(result.content))>262144)throw new Error('Invalid public tool result');
   return {content:result.content.map(({text})=>({type:'text',text}))};
 }
-export function createApprovedMcpServer({discover,pollIntervalMs}={}){
+export function createApprovedMcpServer({discover,pollIntervalMs,builderTools=[]}={}){
   if(typeof discover!=='function')throw new TypeError('An explicit approved-tool discovery callback is required');
   if(pollIntervalMs!==undefined&&(!Number.isInteger(pollIntervalMs)||pollIntervalMs<10||pollIntervalMs>30000))throw new TypeError('Invalid discovery poll interval');
-  const fixed=new Map(createSirnaTools().map(tool=>[tool.name,tool]));let busy=false;
+  const fixed=new Map(createSirnaTools().map(tool=>[tool.name,tool]));const builders=new Map(builderTools.map(tool=>[tool.name,tool]));let busy=false;
+  if(builders.size!==builderTools.length||[...builders.keys()].some(name=>fixed.has(name)))throw new TypeError('Invalid builder tools');
   const server=new Server({name:'sirna-approved-tools',version:'0.1.0'},{capabilities:{tools:pollIntervalMs?{listChanged:true}:{}},
     instructions:'Use registered tools for calculations. Approved means adopted after the recorded checks; outputs do not establish biological efficacy. Approved tools take {"input":{...business arguments...}}. File transfers are not supported by this learning step.'});
   async function load(signal){
     let result;try{result=await discover(signal?{signal}:undefined);}catch{throw new Error('Approved tool discovery unavailable');}
     if(!result||!Array.isArray(result.tools)||!Array.isArray(result.rejected)||result.rejected.length)throw new Error('Approved tool discovery unavailable');
-    const tools=new Map(fixed);
+    const tools=new Map([...fixed,...builders]);
     for(const tool of result.tools){
       if(!tool||typeof tool.name!=='string'||!/^[a-z][a-z0-9_]{0,63}$/.test(tool.name)||typeof tool.execute!=='function'||
         typeof tool.description!=='string'||!tool.parameters)throw new Error('Approved tool descriptor unavailable');
@@ -59,7 +60,9 @@ export function createApprovedMcpServer({discover,pollIntervalMs}={}){
     if(busy)return failure('Approved tool executor is busy; wait for the accepted call to finish.');
     busy=true;
     try{return publicResult(await tool.execute(randomUUID(),args,extra.signal));}
-    catch{return failure('Approved tool call failed. Check arguments and inspect the host audit records.');}
+    catch{return failure(builders.has(tool.name)
+      ?'Tool builder call failed; an accepted operation may have completed. Inspect the host records before retrying.'
+      :'Approved tool call failed. Check arguments and inspect the host audit records.');}
     finally{busy=false;}
   });
   return server;

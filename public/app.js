@@ -290,6 +290,8 @@ function showActivity(event) {
   } else if (event.type === "progress_message") addRunEntry("执行说明", event.text || "");
   else if (event.type === "approved_tool_call") addRunEntry(event.success ? "正式工具调用完成" : "正式工具调用失败",
     `${event.toolName} · 调用编号 ${event.toolCallId}`, event.success ? "" : "error");
+  else if (event.type === "builder_tool_call") addRunEntry(event.success ? "构建操作完成" : "构建操作失败",
+    `${event.toolName} · 调用编号 ${event.toolCallId}`, event.success ? "" : "error");
   else if (event.type === "workspace_synced") addRunEntry("任务文件已同步", "本轮文件同步已完成，可刷新文件查看。");
   else if (event.type === "workspace_warning") addRunEntry("文件同步尚未确认", event.warning || event.error || event.message || "请刷新文件核对已归档的内容。", "error");
   else if (event.type === "run_status") addRunEntry("运行状态", statusLabel(event.status), event.status === "failed" ? "error" : "");

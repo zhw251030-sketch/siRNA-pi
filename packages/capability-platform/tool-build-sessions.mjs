@@ -7,6 +7,7 @@ import {checkToolProposal} from './tool-contract.mjs';
 import {submitRegisteredToolProposal,resolveToolLearningPaths} from './tool-lifecycle.mjs';
 import {ToolRegistry} from './tool-registry.mjs';
 import {readToolProposal} from './tool-proposals.mjs';
+import {validateToolTaskContext} from './tool-run-audit.mjs';
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const KEEPALIVE=['/bin/sh','-c','while :; do sleep 3600; done'];
@@ -16,11 +17,13 @@ export function copyToolBuilderArguments(value){const copy=r.jsonCopy(value);mus
 function fields(value,required,optional=[]){const v=copyToolBuilderArguments(value);must(required.every(k=>Object.hasOwn(v,k))&&Object.keys(v).every(k=>[...required,...optional].includes(k)),'Invalid builder argument fields');return v;}
 function commandVector(command){must(isDeepStrictEqual(command,TOOL_COMMAND),'Unsupported runtime command');}
 function publicSession(s){return {id:s.id,state:s.state,createdAt:s.createdAt};}
-export function createToolBuildSessionService({root,docker,ttlMs=300000,maxLiveSessions=4,maxSessions=32}={}){
+export function createToolBuildSessionService({root,docker,taskContext,ttlMs=300000,maxLiveSessions=4,maxSessions=32}={}){
   must(typeof root==='string'&&path.isAbsolute(root)&&docker,'Explicit root and Docker are required');
+  taskContext=validateToolTaskContext(taskContext);
+  const association=taskContext?{taskContext}:{};
   for(const [value,max]of [[ttlMs,86400000],[maxLiveSessions,4],[maxSessions,32]])must(Number.isInteger(value)&&value>=1&&value<=max,'Invalid session limits');
   const sessions=new Map();let busy=false,closing=false,accepted=Promise.resolve(),closePromise;
-  const journal=(s,event)=>s.evidence.appendEvent({...event,sessionId:s.id,recordedAt:new Date().toISOString()});
+  const journal=(s,event)=>s.evidence.appendEvent({...event,...association,sessionId:s.id,recordedAt:new Date().toISOString()});
   const intent=(s,type,details={})=>journal(s,{type,...details});
   async function effect(s,type,operation,details={}){intent(s,`${type}_requested`,details);return operation();}
   async function remove(s,owned=s.owned){
@@ -73,13 +76,13 @@ export function createToolBuildSessionService({root,docker,ttlMs=300000,maxLiveS
         const createdAt=new Date().toISOString();const config={Entrypoint:[],Cmd:[...TOOL_COMMAND],User:'65534:65534',WorkingDir:'/tmp',Env:[],Labels:{...r.labels(s.id,'runtime'),'sirna.tool.runtime':'true','sirna.tool.source-sha256':s.sourceSha256,'sirna.tool.base-image':TOOL_BASE_IMAGE,'sirna.tool.created-at':createdAt}};
         const imageDigest=await effect(s,'image_commit',()=>docker.commitContainer(s.owned.containerId,'sirna-learning-tool-runtime',s.id,config));
         const artifact=r.artifactData({protocolVersion:'sirna-tool-runtime-artifact/v1',imageDigest,command:[...TOOL_COMMAND],platform:'linux/amd64',createdAt,buildSessionId:s.id});r.verifyImage(await docker.inspectImage(imageDigest),artifact);await remove(s);
-        s.artifact=JSON.parse(JSON.stringify(artifact));s.result={sessionId:s.id,artifact:s.artifact,sourceSha256:s.sourceSha256,...flags};s.evidence.write('finalized.json',{...s.result,script:s.source});journal(s,{type:'finalized',artifact:s.artifact,sourceSha256:s.sourceSha256,...flags});s.state='finalized';return structuredClone(s.result);
+        s.artifact=JSON.parse(JSON.stringify(artifact));s.result={sessionId:s.id,artifact:s.artifact,sourceSha256:s.sourceSha256,...flags};s.evidence.write('finalized.json',{...s.result,script:s.source,...association});journal(s,{type:'finalized',artifact:s.artifact,sourceSha256:s.sourceSha256,...flags});s.state='finalized';return structuredClone(s.result);
       }catch(e){return fail(s,e);}
     });},
     cancel(args){const v=fields(args,['sessionId']);const s=lookup(v.sessionId);must(['running','cancelled'].includes(s.state),'Session cannot be cancelled');return sessionOperation(s,async()=>{if(s.state==='cancelled')return {sessionId:s.id,state:s.state,cleanupConfirmed:s.cleanupConfirmed};try{intent(s,'cancel');await remove(s);s.state='cancelled';journal(s,{type:'cancelled',cleanupConfirmed:true});return {sessionId:s.id,state:s.state,cleanupConfirmed:true};}catch(e){return fail(s,e);}});},
     propose(input){const v=copyToolBuilderArguments(input);const check=checkToolProposal(v);must(check.ok,'Invalid tool proposal');must(v.runtime==='node'&&v.dependencies.length===0&&v.repeatabilityMode==='exact'&&v.permissions.profile==='no_external_access','Unsupported proposal configuration');const s=lookup(v.runtimeArtifact.buildSessionId);must(s.state==='finalized'&&isDeepStrictEqual(v.runtimeArtifact,s.artifact)&&v.script===s.source,'Proposal differs from finalized source or artifact');
       return sessionOperation(s,async()=>{if(s.proposal){must(isDeepStrictEqual(v,s.proposalInput),'Conflicting proposal repeat');return readback(s);}must(!s.proposalAttempted,'Proposal submission uncertain; inspect private evidence');
-        intent(s,'proposal_submit',{proposal:v});s.proposalAttempted=true;try{const saved=submitRegisteredToolProposal(v,{root});s.proposalInput=v;s.proposal={proposalId:saved.proposal.id,toolName:saved.proposal.toolName,state:saved.registry.state,registered:true,...flags};const result=readback(s);journal(s,{type:'proposal_registered',...result});s.evidence.write('proposal-result.json',result);return result;}catch(error){try{journal(s,{type:'proposal_submission_failed',error:error.message,proposalId:error.proposalId});}catch{}throw new Error('Proposal submission failed; inspect private evidence');}
+        intent(s,'proposal_submit',{proposal:v});s.proposalAttempted=true;try{const saved=submitRegisteredToolProposal(v,{root,...(taskContext?{actor:'web-agent'}:{})});s.proposalInput=v;s.proposal={proposalId:saved.proposal.id,toolName:saved.proposal.toolName,state:saved.registry.state,registered:true,...flags};const result=readback(s);journal(s,{type:'proposal_registered',...result});s.evidence.write('proposal-result.json',{...result,...association});return result;}catch(error){try{journal(s,{type:'proposal_submission_failed',error:error.message,proposalId:error.proposalId});}catch{}throw new Error('Proposal submission failed; inspect private evidence');}
       });},
     close(){if(closePromise)return closePromise;closing=true;for(const s of sessions.values())clearTimeout(s.timer);closePromise=(async()=>{await accepted;let failed=false;for(const s of sessions.values()){if(s.creatingUnknown)failed=true;if(s.owned.containerId){try{intent(s,'close_cleanup');await remove(s);if(s.state==='running')s.state='cancelled';}catch(error){failed=true;s.state='failed';s.cleanupConfirmed=false;try{journal(s,{type:'close_cleanup_failed',error:error.message,cleanupConfirmed:false});}catch{}}} }if(failed)throw new Error('Tool builder close cleanup unknown');})();return closePromise;},
   };

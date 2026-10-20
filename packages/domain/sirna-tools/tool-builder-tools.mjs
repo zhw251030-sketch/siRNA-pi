@@ -14,5 +14,5 @@ export function createToolBuilderTools({service}={}){
   ['finalize_tool_build','Package only declared source into a clean fixed-base immutable image. Requires successful debug since write. Command must be /usr/bin/node /opt/tool/main.mjs. No verification or approval.',schema({sessionId,command:{type:'array',items:string,minItems:2,maxItems:2}}),'finalize'],
   ['propose_exploration_tool','Submit a complete flat proposal with this service’s exact finalized source and artifact. Submission never validates, approves or activates.',proposalSchema,'propose'],
  ].map(([name,description,parameters,method])=>({name,label:name,description,parameters,executionMode:'sequential',
-   execute:async(_id,args)=>{const result=await service[method](args);return {content:[{type:'text',text:JSON.stringify(result)}]};}}));
+   execute:async(_id,args,signal)=>{const result=await service[method](args,signal);return {content:[{type:'text',text:JSON.stringify(result)}]};}}));
 }

@@ -18,14 +18,17 @@ function readBounded(stream,limit,signal){
     stream.on('data',data);stream.once('end',end);stream.once('error',fail);stream.once('aborted',fail);signal.addEventListener('abort',abort,{once:true});
   });
 }
-export function createToolRelay({socketPath,timeoutMs=30000}={}){
-  if(typeof socketPath!=='string'||!socketPath||!Number.isInteger(timeoutMs)||timeoutMs<1||timeoutMs>30000)throw new TypeError('A fixed tool socket and finite timeout are required');
+export function createToolRelay({socketPath,timeoutMs=30000,builderTimeoutMs=310000}={}){
+  if(typeof socketPath!=='string'||!socketPath||!Number.isInteger(timeoutMs)||timeoutMs<1||timeoutMs>30000||!Number.isInteger(builderTimeoutMs)||builderTimeoutMs<1||builderTimeoutMs>310000)throw new TypeError('A fixed tool socket and finite timeout are required');
   const server=http.createServer({maxHeaderSize:8192},async(req,res)=>{
-    const signal=AbortSignal.timeout(timeoutMs);
     try{
       const list=req.method==='GET'&&req.url==='/v1/agent-tools';
       const call=req.method==='POST'&&/^\/v1\/agent-tools\/[a-z][a-z0-9_]{0,63}\/call$/.test(req.url);
-      if(!list&&!call){req.resume();reply(res,404);return;}
+      const id='[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
+      const create=req.method==='POST'&&(req.url==='/v1/build-sessions'||req.url==='/v1/tool-proposals');
+      const build=create||req.method==='DELETE'&&new RegExp(`^/v1/build-sessions/${id}$`).test(req.url)||req.method==='PUT'&&new RegExp(`^/v1/build-sessions/${id}/files$`).test(req.url)||req.method==='POST'&&new RegExp(`^/v1/build-sessions/${id}/(?:exec|finalize)$`).test(req.url);
+      if(!list&&!call&&!build){req.resume();reply(res,404);return;}
+      const signal=AbortSignal.timeout(build?builderTimeoutMs:timeoutMs);const requestLimit=build?1048576:262144;
       const headers={};
       for(const name of ['authorization','x-sirna-task-id','x-sirna-agent-turn-id']){
         let count=0;for(let i=0;i<req.rawHeaders.length;i+=2)if(req.rawHeaders[i].toLowerCase()===name)count++;
@@ -34,27 +37,29 @@ export function createToolRelay({socketPath,timeoutMs=30000}={}){
         headers[name]=req.headers[name];
       }
       if(!/^Bearer [0-9a-f]{64}$/.test(headers.authorization)){req.resume();reply(res,401);return;}
-      if(Number(req.headers['content-length'])>262144){req.resume();reply(res,413);return;}
-      const body=await readBounded(req,262144,signal);
-      if(list&&body.length){reply(res,400);return;}
-      if(call)headers['content-type']='application/json';headers['content-length']=body.length;
+      if(req.headers['content-encoding']!==undefined){req.resume();reply(res,415);return;}
+      if(Number(req.headers['content-length'])>requestLimit){req.resume();reply(res,413);return;}
+      // Reading a slow body never inherits the long Docker operation deadline.
+      const body=await readBounded(req,requestLimit,AbortSignal.any([signal,AbortSignal.timeout(15000)]));
+      if((list||req.method==='DELETE')&&body.length){reply(res,400);return;}
+      if(call||build&&req.method!=='DELETE')headers['content-type']=req.headers['content-type']??'application/json';headers['content-length']=body.length;
       const result=await new Promise((resolve,reject)=>{
         const upstream=http.request({socketPath,path:req.url,method:req.method,headers,signal},async response=>{
           try{
-            if(response.statusCode!==200){response.resume();const error=new Error('upstream');error.upstreamStatus=response.statusCode;throw error;}
+            if(response.statusCode!==(create?201:200)){response.resume();const error=new Error('upstream');error.upstreamStatus=response.statusCode;throw error;}
             if(Number(response.headers['content-length'])>300000){response.destroy();throw new Error('large response');}
             let output;try{output=await readBounded(response,300000,signal);}catch{response.destroy();throw new Error('response unavailable');}
             const value=JSON.parse(output.toString('utf8'));
             const allowed=list?['tools']:['content','isError'];
-            if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>!allowed.includes(key))||
-              !Array.isArray(list?value.tools:value.content))throw new Error('response unavailable');
+            if(!value||typeof value!=='object'||Array.isArray(value)||!build&&(Object.keys(value).some(key=>!allowed.includes(key))||
+              !Array.isArray(list?value.tools:value.content)))throw new Error('response unavailable');
             resolve(output);
           }catch(error){reject(error);}
         });upstream.once('error',()=>reject(new Error('upstream unavailable')));upstream.end(body);
-      });reply(res,200,result);
-    }catch(error){reply(res,error.status===413?413:[400,401,403,404,409,413,503].includes(error.upstreamStatus)?error.upstreamStatus:502);}
+      });reply(res,create?201:200,result);
+    }catch(error){reply(res,error.status===413?413:[400,401,403,404,405,408,409,413,415,503].includes(error.upstreamStatus)?error.upstreamStatus:502);}
   });
-  server.headersTimeout=timeoutMs;server.requestTimeout=timeoutMs;server.timeout=timeoutMs;
+  server.headersTimeout=10000;server.requestTimeout=15000;server.timeout=0;
   const rejectTunnel=(_req,socket)=>{socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');};
   server.on('connect',rejectTunnel);server.on('upgrade',rejectTunnel);
   server.on('clientError',(_error,socket)=>{if(socket.writable)socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');});

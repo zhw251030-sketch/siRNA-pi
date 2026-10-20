@@ -8,6 +8,7 @@
 !containers/agent-compose-guest/pi.sh
 !containers/agent-compose-guest/patch-mcp-config.mjs
 !containers/agent-compose-guest/patch-mcp-refresh.mjs
+!containers/agent-compose-guest/patch-mcp-builder-timeout.mjs
 !config/
 !config/pi/
 !config/pi/compose-settings.json
@@ -16,11 +17,13 @@
 !packages/domain/sirna-tools/
 !packages/domain/sirna-tools/candidates.mjs
 !packages/domain/sirna-tools/sirna-tools.mjs
+!packages/domain/sirna-tools/tool-builder-tools.mjs
 !apps/
 !apps/mcp/
 !apps/mcp/server.mjs
 !apps/mcp/approved-server.mjs
 !apps/mcp/remote-client.mjs
 !apps/mcp/remote-server.mjs
+!apps/mcp/tool-builder-client.mjs
 !scripts/
 !scripts/verify-guest-mcp.mjs
