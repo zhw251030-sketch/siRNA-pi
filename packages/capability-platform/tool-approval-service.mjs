@@ -45,7 +45,8 @@ export function approveRegisteredToolProposal(id,approvedBy,{root}={}){
       version=registry.listToolVersions(detail.registry.toolName).find(item=>item.proposalId===id);
       readRegisteredToolVersion(version,{root,registry});
       const catalog=writeActiveToolCatalog({root,registry});
-      return {version,catalog,alreadyApproved:true,approved:true,activated:true,agentCallable:false};
+      // Approval checks stored evidence, not live Agent gateway connectivity.
+      return {version,catalog,alreadyApproved:true,approved:true,activated:true,agentCallable:null,callabilityChecked:false};
     }
     must(registry.listToolVersions(detail.registry.toolName).length===0,'A version with this tool name already exists; parent updates are not supported in this step');
     const saved=readToolProposal(id,{proposalsRoot:paths.proposalsRoot,expectedArtifactSha256:detail.registry.artifactSha256});
@@ -65,7 +66,7 @@ export function approveRegisteredToolProposal(id,approvedBy,{root}={}){
       packageDirectory:published.directoryName,packageSha256:published.packageSha256,imageDigest:saved.manifest.runtimeArtifact.imageDigest,
       approvedBy,approvedAt,validationId:validation.id,reportSha256:validation.reportSha256,artifactSha256:saved.artifactSha256});
     const catalog=writeActiveToolCatalog({root,registry});
-    return {version,catalog,alreadyApproved:false,approved:true,activated:true,agentCallable:false};
+    return {version,catalog,alreadyApproved:false,approved:true,activated:true,agentCallable:null,callabilityChecked:false};
   }catch(error){
     error.proposalId=id;if(published)error.packagePath=published.directory;
     if(version){error.versionActivated=true;error.toolName=version.toolName;error.version=version.version;

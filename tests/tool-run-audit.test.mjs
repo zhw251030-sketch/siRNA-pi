@@ -27,6 +27,16 @@ test('writer rejects unsafe identities before creating runtime',t=>{
     const options=settings(root);mutate(options);assert.throws(()=>api.startToolRunAudit(options));assert.deepEqual(fs.readdirSync(root),[]);
   }
 });
+test('optional task context is a strict immutable server identity preserved in request and terminal evidence',t=>{
+  const root=fixture(t),options=settings(root);const context={taskId:randomUUID(),executionSessionId:randomUUID(),sandboxId:'a'.repeat(64),agentTurnId:randomUUID(),agentRunId:'compose-run_12'};
+  const run=api.startToolRunAudit({...options,taskContext:context});const expected={...context};context.agentRunId='changed';
+  assert.deepEqual(JSON.parse(fs.readFileSync(run.requestPath)).taskContext,expected);run.finish({success:true});assert.deepEqual(JSON.parse(fs.readFileSync(run.auditPath)).taskContext,expected);
+});
+test('invalid and extra task context fields fail before writing evidence',t=>{
+  const root=fixture(t);const valid={taskId:randomUUID(),executionSessionId:randomUUID(),sandboxId:'a'.repeat(64),agentTurnId:randomUUID(),agentRunId:'compose-run'};
+  for(const bad of [null,{}, {...valid,taskId:'bad'},{...valid,executionSessionId:'bad'},{...valid,sandboxId:'bad'},{...valid,agentTurnId:'bad'},{...valid,agentRunId:'../bad'},{...valid,token:'secret'}])assert.throws(()=>api.startToolRunAudit({...settings(root),taskContext:bad}));
+  assert.deepEqual(fs.readdirSync(root),[]);
+});
 test('linked parent and linked or altered request cannot publish terminal evidence',t=>{
   assert.equal(typeof api.startToolRunAudit,'function');const root=fixture(t);fs.mkdirSync(path.join(root,'runtime'));fs.mkdirSync(path.join(root,'elsewhere'));
   const redirected=path.join(root,'runtime/approved-tool-runs');fs.symlinkSync(path.join(root,'elsewhere'),redirected,'junction');

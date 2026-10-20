@@ -3,6 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ComposeSessionStore, sandboxIdPattern } from './compose-session-store.mjs';
 import { createComposeEventProjector } from './compose-events.mjs';
+import { writeTaskToolContext } from './task-tool-context.mjs';
 
 const safeFailure = '本轮容器执行未完成，已保留记录；请检查运行状态后再试。';
 const now = () => new Date().toISOString();
@@ -31,11 +32,12 @@ function recordDaemonOutcome(run, snapshot) {
 }
 
 export class AgentComposeRuntime {
-  constructor({ root, executor, rpc }) {
+  constructor({ root, executor, rpc, toolCallLeases }) {
     this.root = path.resolve(root);
     this.store = new ComposeSessionStore(this.root);
     this.executor = executor;
     this.rpc = rpc;
+    this.toolCallLeases = toolCallLeases;
     this.active = new Map();
     this.releasing = new Map();
     this.canceling = new Map();
@@ -55,6 +57,7 @@ export class AgentComposeRuntime {
     const session = await this.status(id);
     const unresolved = unresolvedRun(session);
     return { backend: session.backend, sandboxId: session.sandboxId, supportsLifecycle: true,
+      approvedToolsAvailable: session.remoteApprovedTools === true || (!session.projectId && Boolean(this.toolCallLeases)),
       runtimeReleased: Boolean(session.runtimeReleased),
       stopUnconfirmed: Boolean((unresolved && (!this.active.has(id) || unresolved.stopUnconfirmed || unresolved.outcomeUnconfirmed)) ||
         hasCurrentUncertainty(session) ||
@@ -102,6 +105,7 @@ export class AgentComposeRuntime {
       const project = await this.executor.up();
       if (typeof project.project?.id !== 'string') throw new Error('Missing project ID');
       session.projectId = project.project.id;
+      session.remoteApprovedTools = Boolean(this.toolCallLeases);
       this.store.save(session);
     }
     if (!session.workspaceReady) {
@@ -277,6 +281,13 @@ export class AgentComposeRuntime {
     let run;
     let log;
     let submitted = false;
+    let toolLease;
+    let removeToolContext;
+    let closingTools;
+    const closeTools = () => closingTools ??= (async () => {
+      await toolLease?.close();
+      removeToolContext?.();
+    })();
     let cancelPersistenceError;
     const rememberUserCancel = () => {
       if (!run || !submitted) return;
@@ -340,12 +351,19 @@ export class AgentComposeRuntime {
       session.currentRunId = run.runId;
       this.store.save(session);
       const projector = createComposeEventProjector(send);
+      if (this.toolCallLeases && session.remoteApprovedTools === true) {
+        run.agentTurnId = randomUUID();
+        toolLease = this.toolCallLeases.begin({ taskId: request.taskId, executionSessionId: id,
+          sandboxId: session.sandboxId, agentTurnId: run.agentTurnId, signal, onCall: send });
+        removeToolContext = writeTaskToolContext({ root: this.root, workspacePath: session.workspacePath, context: toolLease.context });
+        this.store.save(session);
+      }
       submitted = true;
       // Register before RPC's abort handler so intent is durable before StopRun.
       signal.addEventListener('abort', rememberUserCancel, { once: true });
       if (signal.aborted) rememberUserCancel();
       let snapshot = await this.rpc.run({ projectId: session.projectId, agentName: 'designer', sandboxId: session.sandboxId,
-        prompt: '当前任务工作目录是 /workspace。输入资料在 input/，结果请写入 output/。本阶段仅使用 read/write，保留其他文件。\n' +
+        prompt: '当前任务工作目录是 /workspace。输入资料在 input/，结果请写入 output/。可使用 read/write 和显式配置的 mcp 工具，保留其他文件。不要读取或展示隐藏的任务连接配置。\n' +
           inputContext + '\n用户消息：\n' + request.message }, {
         signal,
         onStarted: task => {
@@ -353,13 +371,19 @@ export class AgentComposeRuntime {
           run.runId = task.runId;
           run.accepted = true;
           session.currentRunId = task.runId;
+          // A stop can revoke the pending lease before Started arrives. Still
+          // remember daemon identity and let its confirmed canceled result win.
+          if (!signal.aborted) toolLease?.activate(task.runId);
           send({ type: 'session', mode: 'model', sandboxId: session.sandboxId, piSessionId: session.piSessionId,
             workspacePath: session.workspacePath, eventLogPath: `runtime/compose-web/${id}.${task.runId}.events.jsonl` });
           send({ type: 'run_status', status: 'running' });
+          if (this.toolCallLeases && !toolLease) send({ type: 'progress_message',
+            text: '此任务保留旧版容器，尚不支持正式工具；需要使用正式工具时请新建任务。' });
         },
         onAgentEvent: event => projector.onAgentEvent(event),
         onTurnCompleted: raw => projector.onTurnCompleted(raw),
       });
+      await closeTools();
       if (snapshot.runId !== run.runId || snapshot.sandboxId !== session.sandboxId || !run.accepted) throw new Error('Unexpected final run identity');
       snapshot = recordDaemonOutcome(run, snapshot);
       if (cancelPersistenceError) throw cancelPersistenceError;
@@ -377,6 +401,8 @@ export class AgentComposeRuntime {
       send({ type: 'run_status', status: 'succeeded', piSessionId: session.piSessionId });
       send({ type: 'done', status: 'succeeded', piSessionId: session.piSessionId });
     } catch (error) {
+      // No terminal event may outrun an accepted host tool's audit and cleanup.
+      try { await closeTools(); } catch { /* Preserve a failed turn; credentials are revoked by close first. */ }
       session ??= await this.status(id);
       if (!run) {
         run = { runId: randomUUID(), startedAt: now(), outputCharacters: 0 };
@@ -393,6 +419,7 @@ export class AgentComposeRuntime {
       send({ type: 'error', error: safeFailure });
       send({ type: 'done', status: 'failed', piSessionId: session.piSessionId });
     } finally {
+      try { await closeTools(); } catch { /* Failure has already been recorded above. */ }
       signal.removeEventListener('abort', rememberUserCancel);
       if (log !== undefined) fs.closeSync(log);
       this.active.delete(id);

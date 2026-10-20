@@ -9,7 +9,7 @@ if (process.platform !== 'linux' || userInfo().username !== 'hanwen' || process.
 }
 if (await realpath(root) !== root) throw new Error('Refusing a redirected project directory.');
 
-for (const name of ['runtime', 'runtime/agent-compose', 'runtime/agent-compose/data']) {
+for (const name of ['runtime', 'runtime/agent-compose', 'runtime/agent-compose/data', 'runtime/agent-tools']) {
   const path = `${root}/${name}`;
   await mkdir(path, { mode: 0o700 }).catch(error => {
     if (error.code !== 'EEXIST') throw error;

@@ -7,6 +7,7 @@
 !containers/agent-compose-guest/Dockerfile
 !containers/agent-compose-guest/pi.sh
 !containers/agent-compose-guest/patch-mcp-config.mjs
+!containers/agent-compose-guest/patch-mcp-refresh.mjs
 !config/
 !config/pi/
 !config/pi/compose-settings.json
@@ -18,5 +19,8 @@
 !apps/
 !apps/mcp/
 !apps/mcp/server.mjs
+!apps/mcp/approved-server.mjs
+!apps/mcp/remote-client.mjs
+!apps/mcp/remote-server.mjs
 !scripts/
 !scripts/verify-guest-mcp.mjs

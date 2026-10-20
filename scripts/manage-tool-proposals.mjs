@@ -7,6 +7,8 @@ import { getLatestToolValidationReport } from '../packages/capability-platform/t
 import {approveRegisteredToolProposal,listRegisteredToolVersions,getRegisteredToolVersion,getRegisteredToolCatalog} from '../packages/capability-platform/tool-approval-service.mjs';
 
 const root='/home/hanwen/Project/project/siNRA-pi';
+// CLI registration/approval reads never probe the live Agent tool gateway.
+const callability={agentCallable:null,callabilityChecked:false};
 try {
   const [action,...values]=process.argv.slice(2);const [value,second]=values;
   const counts={submit:1,list:0,show:1,report:1,approve:2,versions:0,version:2,catalog:0,'catalog-rebuild':0};
@@ -21,9 +23,9 @@ try {
     : action==='show' ? getRegisteredToolProposal(value,{root})
     : action==='report' ? {validation:getLatestToolValidationReport(value,{root})??null}
     : action==='approve' ? approveRegisteredToolProposal(value,second,{root})
-    : action==='versions' ? {versions:listRegisteredToolVersions({root}),agentCallable:false}
-    : action==='version' ? {...getRegisteredToolVersion(value,second,{root}),agentCallable:false}
-    : ['catalog','catalog-rebuild'].includes(action) ? {catalog:getRegisteredToolCatalog({root,rebuild:action==='catalog-rebuild'}),agentCallable:false}
+    : action==='versions' ? {versions:listRegisteredToolVersions({root}),...callability}
+    : action==='version' ? {...getRegisteredToolVersion(value,second,{root}),...callability}
+    : ['catalog','catalog-rebuild'].includes(action) ? {catalog:getRegisteredToolCatalog({root,rebuild:action==='catalog-rebuild'}),...callability}
       : {proposals:listRegisteredToolProposals({root}),limit:100,integrityChecked:false,
         executed:false,verified:false,approved:false,activated:false,runtimeArtifactVerified:false};
   console.log(JSON.stringify({ok:true,action,...result},null,2));
@@ -32,6 +34,6 @@ try {
     ...(error.proposalId?{proposalId:error.proposalId,artifactPath:error.artifactPath}:{}),
     ...(error.packagePath?{packagePath:error.packagePath}:{}),...(error.temporaryPath?{temporaryPath:error.temporaryPath}:{}),
     ...(error.versionActivated?{versionActivated:true,toolName:error.toolName,version:error.version}:{}),
-    executed:false,approved:error.versionActivated===true,activated:error.versionActivated===true,agentCallable:false}));
+    executed:false,approved:error.versionActivated===true,activated:error.versionActivated===true,...callability}));
   process.exitCode=1;
 }

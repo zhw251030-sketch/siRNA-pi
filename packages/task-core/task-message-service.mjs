@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 
 // Follows the reference service's task-scoped turn and event contracts, without
 // its revisions or capability-coordinator features.
-const persistedEventTypes = new Set(["progress_message", "tool_start", "tool_end", "run_status", "done", "error", "workspace_synced", "workspace_warning"]);
+const persistedEventTypes = new Set(["progress_message", "tool_start", "tool_end", "run_status", "done", "error", "workspace_synced", "workspace_warning", "approved_tool_call"]);
+const storedType = type => type.startsWith('workspace_') || type === 'approved_tool_call' ? 'progress_message' : type;
 const safeFailure = "本轮执行失败，请稍后重试；服务端已保留任务记录。";
 
 export class TaskMessageSubmissionError extends Error {
@@ -213,7 +214,7 @@ export class TaskMessageService {
     const pendingEvents = [];
     const flushPending = () => {
       for (const pending of pendingEvents.splice(0)) {
-        this.taskStore.appendRunEvent(taskId, turn.message.id, runId, pending.type.startsWith('workspace_') ? 'progress_message' : pending.type, pending);
+        this.taskStore.appendRunEvent(taskId, turn.message.id, runId, storedType(pending.type), pending);
       }
     };
     const persist = (event) => {
@@ -222,7 +223,7 @@ export class TaskMessageService {
       flushPending();
       // Keep the existing SQLite event schema; payload.type retains the exact
       // public workspace event contract for live SSE and history rendering.
-      this.taskStore.appendRunEvent(taskId, turn.message.id, runId, event.type.startsWith('workspace_') ? 'progress_message' : event.type, event);
+      this.taskStore.appendRunEvent(taskId, turn.message.id, runId, storedType(event.type), event);
     };
     const accept = (original) => {
       const event = original.type === "error" ? { ...original, error: safeFailure } : original;
@@ -243,7 +244,7 @@ export class TaskMessageService {
     };
     try {
       try {
-        await this.agentRuntime.run({ sessionId: turn.task.executionSessionId, message,
+        await this.agentRuntime.run({ taskId, sessionId: turn.task.executionSessionId, message,
           ...(this.workspaceFiles ? { prepareWorkspace: async () => {
             const result = await this.workspaceFiles.hydrate(turn.task);
             return (result.inputFiles ?? []).map(file => file.name);

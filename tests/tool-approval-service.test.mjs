@@ -19,7 +19,7 @@ test('approval publishes the verified snapshot and reopens a truthful approved s
   const result=await service.approveRegisteredToolProposal(id,actor,{root});
   assert.equal(result.version.version,'1.0.0');assert.notEqual(result.version.toolId,id);
   assert.equal(result.version.state,'active');assert.equal(result.version.proposalId,id);
-  assert.equal(result.approved,true);assert.equal(result.activated,true);assert.equal(result.agentCallable,false);
+  assert.equal(result.approved,true);assert.equal(result.activated,true);assert.equal(result.agentCallable,null);assert.equal(result.callabilityChecked,false);
   assert.equal(result.alreadyApproved,false);assert.equal(result.catalog.tools.length,1);
   const detail=service.getRegisteredToolVersion(saved.proposal.toolName,'1.0.0',{root});
   assert.equal(detail.package.manifest.id,result.version.toolId);
@@ -29,7 +29,7 @@ test('approval publishes the verified snapshot and reopens a truthful approved s
   assert.deepEqual(fs.readFileSync(path.join(detail.package.directory,'tool.mjs')),fs.readFileSync(path.join(saved.registry.artifactPath,'tool.mjs')));
   const shown=getRegisteredToolProposal(id,{root});
   assert.equal(shown.proposal.status,'draft');assert.equal(shown.registry.state,'approved');
-  assert.equal(shown.approved,true);assert.equal(shown.activated,true);assert.equal(shown.agentCallable,false);
+  assert.equal(shown.approved,true);assert.equal(shown.activated,true);assert.equal(shown.agentCallable,null);assert.equal(shown.callabilityChecked,false);
   assert.equal(shown.verified,true);assert.equal(shown.events.length,3);
   assert.equal(shown.events.at(-1).eventType,'version_activated');
   assert.deepEqual(getLatestToolValidationReport(id,{root}),before);

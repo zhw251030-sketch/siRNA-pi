@@ -1,6 +1,32 @@
 # Docker Compose starts the manager. agent-compose.yml describes its task guests.
 name: sirna-pi
 services:
+  agent-tools-relay:
+    # Reuse our already-verified Node guest by immutable local image ID.
+    image: sha256:e34a8f3fe6b2b74a3fa7f1a6143a126ae1e5414fa8a334c7bba82fe57d28971b
+    pull_policy: never
+    entrypoint: [/usr/bin/node, /relay/relay.mjs]
+    user: "0:0"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 32
+    mem_limit: 128m
+    volumes:
+      - type: bind
+        source: ./containers/agent-tools-relay/relay.mjs
+        target: /relay/relay.mjs
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ./runtime/agent-tools
+        target: /run/sirna-tools
+        read_only: true
+        bind: {create_host_path: false}
+    restart: unless-stopped
+    networks:
+      default:
+        aliases: [agent-tools-relay]
   agent-compose:
     image: chaitin/agent-compose:v2609.3.0@sha256:91168af6c048ca811cff33a6fddbb1c176b1636456add94fb506d9b9952d0cb3
     platform: linux/amd64

@@ -42,7 +42,8 @@ export function resolveToolLearningPaths(root,create=false) {
   return {proposalsRoot,approvedRoot,databasePath:path.join(registryRoot,'registry.sqlite'),catalogPath:path.join(registryRoot,'active-tools.json')};
 }
 function flags(report,version) {
-  return {registered:true,executed:report?.executionPerformed===true,verified:report?.passed===true,approved:!!version,activated:version?.state==='active',agentCallable:false,runtimeArtifactVerified:report?.runtimeArtifactVerified===true};
+  // Registration metadata never probes a deployed Agent gateway.
+  return {registered:true,executed:report?.executionPerformed===true,verified:report?.passed===true,approved:!!version,activated:version?.state==='active',agentCallable:null,callabilityChecked:false,runtimeArtifactVerified:report?.runtimeArtifactVerified===true};
 }
 function integrity(artifactSha256) {
   return {packageMatchesRegistration:true,sourceHashesMatch:true,artifactSha256};

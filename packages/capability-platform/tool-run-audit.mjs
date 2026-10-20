@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
+import {types} from 'node:util';
 
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const SHA=/^[a-f0-9]{64}$/;
@@ -23,7 +24,19 @@ function write(file,bytes){
 }
 function bytes(value){return Buffer.from(`${JSON.stringify(value,null,2)}\n`);}
 
-export function startToolRunAudit({root,identity,toolCallId,inputSha256}={}){
+export function validateToolTaskContext(value){
+  if(value===undefined)return undefined;
+  const keys=['taskId','executionSessionId','sandboxId','agentTurnId','agentRunId'];
+  must(value&&typeof value==='object'&&!types.isProxy(value)&&[null,Object.prototype].includes(Object.getPrototypeOf(value)),'Invalid tool task context');
+  must(Reflect.ownKeys(value).length===keys.length&&keys.every(key=>Object.hasOwn(value,key)),'Invalid tool task context fields');
+  const safe={};
+  for(const key of keys){const field=Object.getOwnPropertyDescriptor(value,key);must(field.enumerable&&Object.hasOwn(field,'value')&&typeof field.value==='string','Invalid tool task context field');safe[key]=field.value;}
+  must(UUID.test(safe.taskId)&&UUID.test(safe.executionSessionId)&&UUID.test(safe.agentTurnId)&&/^[a-f0-9]{64}$/.test(safe.sandboxId)&&/^[A-Za-z0-9_-]{1,256}$/.test(safe.agentRunId),'Invalid tool task context identity');
+  return Object.freeze(safe);
+}
+
+export function startToolRunAudit({root,identity,toolCallId,inputSha256,taskContext}={}){
+  taskContext=validateToolTaskContext(taskContext);
   must(typeof root==='string'&&path.isAbsolute(root),'Audit requires an absolute root');root=path.resolve(root);directory(root);
   must(identity&&/^[a-z][a-z0-9_]{0,63}$/.test(identity.toolName),'Invalid audit tool name');
   must(UUID.test(toolCallId)&&UUID.test(identity.toolId)&&UUID.test(identity.proposalId),'Invalid audit UUID v4 identity');
@@ -38,6 +51,7 @@ export function startToolRunAudit({root,identity,toolCallId,inputSha256}={}){
   function checkDirectories(){for(const [dir,before]of snapshots){const after=directory(dir);must(before.dev===after.dev&&before.ino===after.ino,'Audit directory changed');}}
   const request={protocolVersion:'sirna-approved-tool-audit/v1',runId,toolCallId,toolName:identity.toolName,proposalId:identity.proposalId,
     toolVersion:identity.toolVersion,toolId:identity.toolId,packageSha256:identity.packageSha256,imageDigest:identity.imageDigest,inputSha256,startedAt:new Date().toISOString()};
+  if(taskContext!==undefined)request.taskContext=taskContext;
   const requestPath=path.join(runDirectory,'request.json');const auditPath=path.join(runDirectory,'audit.json');
   checkDirectories();const requestBytes=bytes(request);write(requestPath,requestBytes);const requestStat=ordinary(requestPath);
   let finished=false;

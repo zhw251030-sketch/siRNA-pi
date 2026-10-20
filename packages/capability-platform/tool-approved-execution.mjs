@@ -4,7 +4,7 @@ import {isDeepStrictEqual,types} from 'node:util';
 import {getRegisteredToolCatalog,getRegisteredToolVersion} from './tool-approval-service.mjs';
 import {readToolProposal} from './tool-proposals.mjs';
 import {resolveToolLearningPaths} from './tool-lifecycle.mjs';
-import {startToolRunAudit} from './tool-run-audit.mjs';
+import {startToolRunAudit,validateToolTaskContext} from './tool-run-audit.mjs';
 
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const SHA=/^[a-f0-9]{64}$/;
@@ -45,14 +45,14 @@ function readBound(root,expected){
 function diagnostic(error){
   return {name:typeof error?.name==='string'?error.name.slice(0,80):'Error',code:typeof error?.code==='string'?error.code.slice(0,80):null};
 }
-function createTool(root,runner,expected,manifest){
+function createTool(root,runner,expected,manifest,taskContext){
   return {name:expected.toolName,label:manifest.name,description:manifest.description,
     parameters:{type:'object',properties:{input:{type:'object',additionalProperties:true}},required:['input'],additionalProperties:false},executionMode:'sequential',
     async execute(toolCallId,args,signal){
       const business=validateApprovedToolArguments(args);must(typeof toolCallId==='string'&&UUID.test(toolCallId),'toolCallId must be a UUID v4');
       must(!signal?.aborted,'Approved tool call cancelled before execution');must(runner&&typeof runner.run==='function','An explicit execution runner is required');
       const {registered,saved}=readBound(root,expected);const version=registered.version;
-      const audit=startToolRunAudit({root,toolCallId,inputSha256:hash(JSON.stringify(business)),identity:{toolName:expected.toolName,toolId:expected.toolId,
+      const audit=startToolRunAudit({root,toolCallId,taskContext,inputSha256:hash(JSON.stringify(business)),identity:{toolName:expected.toolName,toolId:expected.toolId,
         proposalId:version.proposalId,toolVersion:version.version,packageSha256:expected.packageSha256,imageDigest:expected.imageDigest}});
       let result=null,operationError=null,output=null,success=false;
       try{
@@ -79,13 +79,14 @@ function createTool(root,runner,expected,manifest){
       return {content:[{type:'text',text:JSON.stringify(output)}],details:{output,workerFiles:[],auditPath:audit.auditPath,packageSha256:expected.packageSha256,approvedTool:true}};
     }};
 }
-export function discoverApprovedTools({root,runner}={}){
+export function discoverApprovedTools({root,runner,taskContext}={}){
+  taskContext=validateToolTaskContext(taskContext);
   const tools=[],packages=[],rejected=[];
   try{
     const catalog=getRegisteredToolCatalog({root});
     for(const entry of catalog.tools){
       const expected=binding(entry);const {registered}=readBound(root,expected);
-      tools.push(createTool(root,runner,expected,registered.package.manifest));packages.push(registered.package);
+      tools.push(createTool(root,runner,expected,registered.package.manifest,taskContext));packages.push(registered.package);
     }
   }catch(error){return {tools:[],packages:[],rejected:[{error:typeof error.message==='string'?error.message.slice(0,512):'Approved tool discovery failed'}]};}
   return {tools,packages,rejected};

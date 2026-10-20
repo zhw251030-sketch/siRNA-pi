@@ -17,6 +17,8 @@ RUN test -L /usr/local/share/agent-compose/pi-mcp-adapter/index.ts \
     && ln -s /usr/lib/node_modules/pi-mcp-adapter /usr/local/share/agent-compose/pi-mcp-adapter
 COPY containers/agent-compose-guest/patch-mcp-config.mjs /opt/sirna-pi/patch-mcp-config.mjs
 RUN node /opt/sirna-pi/patch-mcp-config.mjs /usr/lib/node_modules/pi-mcp-adapter
+COPY containers/agent-compose-guest/patch-mcp-refresh.mjs /opt/sirna-pi/patch-mcp-refresh.mjs
+RUN node /opt/sirna-pi/patch-mcp-refresh.mjs /usr/lib/node_modules/pi-mcp-adapter
 COPY --chmod=755 containers/agent-compose-guest/pi.sh /usr/local/bin/pi
 RUN test "$(/usr/local/bin/pi --version)" = "1.2.0"
 

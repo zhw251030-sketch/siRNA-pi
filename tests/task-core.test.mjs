@@ -50,6 +50,22 @@ function deferred() {
   return { promise, resolve };
 }
 
+test('server task identity reaches runtime and approved-call evidence survives SQLite reopen', async t => {
+  const callId = randomUUID();
+  const f = fixture(t, async (input, emit, runId) => {
+    assert.ok(input.taskId);
+    emit({type:'approved_tool_call',toolName:'summarize_target_sequence',toolCallId:callId,agentRunId:runId,success:true});
+    emit({type:'done',status:'succeeded',runId});
+  });
+  const {task}=await f.service.createTask('approved-context-create');
+  const handle=await f.service.start({taskId:task.id,message:'summarize',requestId:'approved-context-message'},()=>{});
+  await handle.completion;
+  assert.equal(f.calls[0].taskId,task.id);
+  const event=f.reopen().listRunEvents(task.id).find(e=>e.payload.type==='approved_tool_call');
+  assert.equal(event.type,'progress_message');assert.equal(event.taskId,task.id);
+  assert.equal(event.payload.toolCallId,callId);assert.equal(event.payload.agentRunId,event.runId);
+});
+
 test("task history and execution events survive closing and reopening SQLite", async (t) => {
   const f = fixture(t, async (_input, emit, runId) => {
     emit({ type: "run_status", status: "running", runId });

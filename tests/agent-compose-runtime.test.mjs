@@ -4,6 +4,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { AgentComposeRuntime } from '../packages/agent-runtime/agent-compose-runtime.mjs';
+import { createToolCallLeases } from '../packages/capability-platform/tool-call-leases.mjs';
 
 const base = new URL('../runtime/compose-runtime-tests/', import.meta.url);
 function fixture(t) {
@@ -55,9 +56,71 @@ function fixture(t) {
       return { runId, sandboxId: request.sandboxId, status: 'succeeded', resultJson: JSON.stringify({ ...result, type: 'result', stopReason: 'eof' }) };
     },
   };
-  const make = () => new AgentComposeRuntime({ root, executor, rpc });
+  const make = (options = {}) => new AgentComposeRuntime({ root, executor, rpc, ...options });
   return { root, executor, rpc, counts, sandboxes, make, runtime: make() };
 }
+
+test('web tool lease is activated with daemon identity, drained before done and removed from workspace', {timeout:2000}, async t => {
+  const f = fixture(t); const taskId = randomUUID(); const token = 'a'.repeat(64); const calls = []; let context;
+  let release; const gate = new Promise(resolve => { release = resolve; }); let closing;
+  const entered = new Promise(resolve => { closing = resolve; });
+  const leases = { begin(binding) {
+    calls.push(['begin', binding]);
+    context = { protocolVersion: 'sirna-task-context/v1', taskId, agentTurnId: binding.agentTurnId, token };
+    return { context, activate(id) { calls.push(['activate', id]); }, async close() { closing(); await gate; calls.push(['close']); } };
+  } };
+  const runtime = f.make({ toolCallLeases: leases }); const session = await runtime.create(); const events = [];
+  const run = runtime.run({ taskId, sessionId: session.id, message: 'call tool' }, e => events.push(e));
+  await entered;
+  const saved = await runtime.status(session.id);
+  const file = path.join(f.root, saved.workspacePath, '.sirna-task-context.json');
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), context);
+  assert.equal(calls[0][1].executionSessionId, session.id);
+  assert.equal(calls[0][1].sandboxId, saved.sandboxId);
+  assert.equal(calls[1][1], saved.currentRunId);
+  assert.notEqual(calls[0][1].agentTurnId, saved.currentRunId);
+  assert.equal(events.some(e => e.type === 'done'), false);
+  release(); await run;
+  assert.equal(events.at(-1).status, 'succeeded');
+  assert.equal(fs.existsSync(file), false);
+  assert.equal(calls.filter(c => c[0] === 'close').length, 1);
+  assert.equal(JSON.stringify(events).includes(token), false);
+  assert.equal(JSON.stringify(await runtime.status(session.id)).includes(token), false);
+});
+
+test('failed submission still closes its pending capability before emitting failure', async t => {
+  const f = fixture(t); const taskId = randomUUID(); let closed = false; let file;
+  const runtime = f.make({ toolCallLeases: { begin(binding) {
+    return { context: { protocolVersion: 'sirna-task-context/v1', taskId, agentTurnId: binding.agentTurnId, token: 'b'.repeat(64) },
+      activate() { throw new Error('must not activate'); }, async close() { closed = true; } };
+  } } });
+  const session = await runtime.create();
+  f.rpc.run = async () => { file = path.join(f.root, (await runtime.status(session.id)).workspacePath, '.sirna-task-context.json'); throw new Error('transport unavailable'); };
+  const events = [];
+  await runtime.run({ taskId, sessionId: session.id, message: 'go' }, e => { if (e.type === 'done') assert.equal(closed, true); events.push(e); });
+  assert.equal(events.at(-1).status, 'failed'); assert.equal(fs.existsSync(file), false);
+});
+
+test('old guest revision is explicitly unsupported for approved tools and receives no capability', async t => {
+  const f=fixture(t);const session=await f.runtime.create();await f.runtime.ensureWorkspace(session.id);
+  const runtime=f.make({toolCallLeases:{begin(){throw new Error('old guest must not receive a lease');}}});
+  const events=[];await runtime.run({taskId:randomUUID(),sessionId:session.id,message:'old fixed tool task'},e=>events.push(e));
+  assert.equal(events.at(-1).status,'succeeded');
+  assert.equal((await runtime.describe(session.id)).approvedToolsAvailable,false);
+  assert.ok(events.some(e=>e.type==='progress_message'&&e.text.includes('新建任务')));
+  assert.equal(fs.existsSync(path.join(f.root,(await runtime.status(session.id)).workspacePath,'.sirna-task-context.json')),false);
+});
+
+test('cancel after RPC submission but before started keeps the confirmed canceled outcome with real leases', async t => {
+  const f=fixture(t);const controller=new AbortController();const leases=createToolCallLeases();
+  const runtime=f.make({toolCallLeases:leases});const session=await runtime.create();const original=f.rpc.run;
+  f.rpc.run=async(request,callbacks)=>{controller.abort();const result=await original(request,callbacks);return {...result,status:'canceled'};};
+  const events=[];await runtime.run({taskId:randomUUID(),sessionId:session.id,message:'cancel on startup'},e=>events.push(e),controller.signal);
+  assert.equal(events.at(-1).status,'canceled');
+  const saved=await runtime.status(session.id);assert.equal(saved.runs.at(-1).status,'canceled');
+  assert.notEqual(saved.runs.at(-1).outcomeUnconfirmed,true);
+  assert.equal(fs.existsSync(path.join(f.root,saved.workspacePath,'.sirna-task-context.json')),false);
+});
 
 test('creating a task saves metadata without creating containers or calling a model', async t => {
   const f = fixture(t); const session = await f.runtime.create();

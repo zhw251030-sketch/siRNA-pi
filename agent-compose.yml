@@ -1,16 +1,18 @@
-# A new project identity preserves existing tasks' MCP-free project revision.
-name: sirna-pi-learning-mcp
+# A new project identity preserves existing tasks and their guest revisions.
+name: sirna-pi-learning-approved-tools
 mcp_servers:
   sirna-tools:
     type: local
     command: /usr/bin/node
     args:
-      - /opt/sirna-pi/apps/mcp/server.mjs
+      - /opt/sirna-pi/apps/mcp/remote-server.mjs
+    env:
+      SIRNA_APPROVED_TOOLS_URL: http://agent-tools-relay:7420
 agents:
   designer:
     provider: pi
     model: minimax-cn/MiniMax-M3
-    image: sirna-pi-guest:pi1.2.0-mcp1
+    image: sirna-pi-guest:pi1.2.0-mcp2
     mcp_servers:
       - sirna-tools
     driver:

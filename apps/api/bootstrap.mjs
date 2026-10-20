@@ -10,6 +10,12 @@ import { RuntimeRouter } from "../../packages/agent-runtime/runtime-router.mjs";
 import { TaskStore } from "../../packages/task-core/task-store.mjs";
 import { TaskFiles } from "../../packages/task-core/task-files.mjs";
 import { createAppServer } from "./router.mjs";
+import { createToolCallLeases } from "../../packages/capability-platform/tool-call-leases.mjs";
+import { discoverApprovedTools } from "../../packages/capability-platform/tool-approved-execution.mjs";
+import { createDockerValidationRunner } from "../../packages/capability-platform/tool-validation-runner.mjs";
+import { DockerEngineClient } from "../../packages/capability-platform/docker-engine-client.mjs";
+import { createAgentToolsServer } from "./agent-tools.mjs";
+import { listenToolSocket } from "./tool-api-socket.mjs";
 
 process.umask(0o077);
 const directory = path.join(projectRoot, "runtime", "tasks");
@@ -19,7 +25,14 @@ for (const file of [database, `${database}-wal`, `${database}-shm`]) {
   if (fs.existsSync(file) && fs.realpathSync(file) !== file) throw new Error("任务数据库路径无效。");
 }
 const rpc = new AgentComposeRpcClient({ token: readComposeControlToken(projectRoot) });
-const compose = new AgentComposeRuntime({ root: projectRoot, executor: createComposeExecutor(projectRoot), rpc });
+const dockerSocket = path.join(projectRoot, 'runtime/docker/run/docker.sock');
+if (fs.realpathSync(dockerSocket) !== dockerSocket || !fs.lstatSync(dockerSocket).isSocket()) throw new Error('Expected project Docker socket');
+const runner = createDockerValidationRunner({ docker: new DockerEngineClient(dockerSocket), purpose: 'approved-call' });
+const toolCallLeases = createToolCallLeases();
+const toolsServer = createAgentToolsServer({ leases: toolCallLeases,
+  discover: ({taskContext}) => discoverApprovedTools({ root: projectRoot, runner, taskContext }) });
+await listenToolSocket(toolsServer, {root: projectRoot});
+const compose = new AgentComposeRuntime({ root: projectRoot, executor: createComposeExecutor(projectRoot), rpc, toolCallLeases });
 const agentRuntime = new RuntimeRouter({ compose, legacy: new LocalPiRuntime() });
 const taskStore = new TaskStore(database);
 const recovered = taskStore.recoverInterruptedTasks();
@@ -28,10 +41,12 @@ const server = createAppServer({ taskStore, agentRuntime, workspaceFiles });
 server.listen(3000, "127.0.0.1", () => {
   console.log(`siRNA-pi: http://127.0.0.1:3000/ ; runtime=agent-compose ; recovered=${recovered.length}`);
 });
-server.on("error", () => { console.error("网页服务启动失败，请检查端口与项目配置。"); process.exitCode = 1; taskStore.close(); rpc.close(); });
+server.on("error", () => { console.error("网页服务启动失败，请检查端口与项目配置。"); process.exitCode = 1; toolsServer.close(); taskStore.close(); rpc.close(); });
 // Deployment stops an idle server. Let any accepted HTTP turn finish on normal shutdown.
 process.once("SIGTERM", () => server.close(async () => {
   await server.waitForTaskCompletion();
+  await new Promise(resolve => toolsServer.close(resolve));
+  await toolsServer.waitForCalls();
   taskStore.close();
   rpc.close();
   process.exit(0);

@@ -208,3 +208,19 @@ tool-run-audit.mjs在runtime/approved-tool-runs/<toolName>/<UUID>写request.json
 新增24测试，942总数：Linux940通过/2Windows专属跳过，Windows930通过/12平台权限跳过，0失败；独立Task1/Task2/整体审查通过。证据runtime/approved-call-{acceptance,state-before,local-tests,linux-tests,sync}、approved-tool-runs；详细文件教学docs/19-正式工具发现调用与审计.md。验收脚本runtime/verify-approved-call.mjs会执行业务且独占写证据，不能当只读检查重复运行。
 
 当前hostMcpCallable=true、webAgentCallable=false；管理CLI的agentCallable=false仍指网页未接线。下一步按原仓库/v1/agent-tools及/call连接guest远程MCP、任务上下文与工具列表刷新，再做真实网页调用并关联审计。不得给guest挂Docker socket/登记库，不声称已实现动态网页调用、版本替换/回滚或自进化。只改本学习项目/main，不改上级研究状态或agent_RSI_demo。
+
+以上为第10F步历史；以下为当前状态。
+
+2026-10-21：第10G步完成新网页任务远程正式工具链路。TaskCore传已登记taskId；AgentComposeRuntime在RPC前创建本轮agentTurnId/随机能力凭证，onStarted绑定真实agentRunId；pending仅允许发现。tool-call-leases按token和task/turn核验服务端身份，取消立即撤销新调用，已接受工具有界排空/审计/清理后才发终态。进程重启能力失效；不保证即时终止Docker业务。task-tool-context写工作区根隐藏文件0600，正常结束移除，不入提示/归档/Git；guest可读，不宣称对模型保密。审计可选taskContext含task/session/sandbox/turn/Compose run；业务toolCallId独立。管理metadata为agentCallable:null/callabilityChecked:false，不探测部署，不能作为实时可调用判断。
+
+apps/api/agent-tools.mjs在专用UDS公开参考GET/v1/agent-tools、POST/:name/call，严格{arguments:{input}}、全服务busy、每次重新发现，成功只content。bootstrap仅在runtime/agent-tools/api.sock监听该入口，目录0700/socket0600，旧socket拒绝盲删。compose.yml新增agent-tools-relay，项目私网7420无publishedport，只读挂relay代码/专用socketdir，不挂Docker/登记/模型key；rootless0映射hanwen、rofs/capdropall/128MiB/32PID。网页仍127.0.0.1:3000。start脚本启动controller+relay；prepare检查新目录。只在空闲后重启本项目网页/重建controller刷新单文件bind配置，未改系统服务。
+
+agent-compose.yml新identity sirna-pi-learning-approved-tools，guest pi1.2.0-mcp2 ImageID sha256:f2a4a04be99db5cf0508989e982d2b4c468753cc02fff8fa1b51af8e25dc8fa7。remote-server/client把正式工具转发至私网relay，固定领域算法仍local。approved-server可选2s列表通知；patch-mcp-refresh对锁定adapter2.11.0补通知/缓存/搜索/列表/未知回查，版本/全部锚点预检，MIT保留。真实guest无模型验证同MCP进程工具增加/调用/移除成功（fixtureCalls1，正式执行0）。旧project不迁移、不发新能力，describe明确approvedToolsAvailable=false，运行时提示新建任务。
+
+网页验收task ea1eb12d-3aa9-44ad-b943-5e9f1ef966f5，session851c5872-cb9a-4967-a051-734c64eec9e0，sandbox0f54108530db060b12ac2e950486d757243cbfa36bdbccc8a9eef8d38cc038e2，Pi01a15a9a-c264-751b-87c8-78194b82c0c0。Compose run55dac5e39d98e19abfaefb4030517438350182c09cf93e6d6e7b1cceaf3cd1f8，toolCall7b77c97f-34ee-44c7-a52a-52404383de1c。输入AACCGGGUUUA→length11/gc5/11，6模型响应/6Pi操作/1正式执行业务；原toolId977b9593…/1.0.0/包SHA4e259ca6…未变。output/approved-summary.json46字节SHA91a08439329ea14c1af35f264a6cc6766a3afca042fce4aea1300adc7cfc1b2d，工作区/归档/HTTP一致，toolcontainer移除，guest已stopped/released，上下文能力文件移除。旧10会话字节/2guest/正式材料登记/凭据元数据保持；当前运行4容器为controller/relay/2旧guest。
+
+Pi最后自由解释错误写C3/U2以及3+3=5，实际A3/C2/G3/U3；工具JSON/长度/GC正确。保留原回答，不追加模型请求遮盖；不得声称整段解释可靠、siRNA活性有效或自进化有效。
+
+新增32项，974测试：Windows961通过/13跳过，Linux972通过/2跳过，均0失败；独立审查两P2（漏启relay、pending取消误判）已修复复核。冻结前并行poll-close一次失败，冻结后全套通过。后续网页/文件24项、metadata15项定向回归通过。脚本verify-compose-approved-tool.mjs <taskId> ended只读验收；verify-guest-approved-mcp.mjs只在专用无模型容器中运行。私有证据runtime/web-approved-{state-before,network,completed,ended,adapter-check,local-tests,linux-tests,sync}与截图；逐文件说明docs/20-网页调用正式工具与任务审计.md。
+
+当前hostMcpCallable=true，新网页任务webAgentCallable=true。下一步沿原仓库完成parent版本关系、候选与原版比较、版本发布/切换及回退，再进入受控改进循环。文件传输、更多运行类型、自动工具构建/提案、长期多用户鉴权、崩溃恢复/孤立容器清理仍未实现。继续main同步，只改siRNA-pi，不改上级RSI项目和研究阶段。

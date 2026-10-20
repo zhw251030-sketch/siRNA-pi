@@ -1,5 +1,5 @@
 #!/bin/sh
-# Start only the manager; this does not create a task or call a model.
+# Start the manager and private tool relay; no task or model call is created.
 set -eu
 project_root=/home/hanwen/Project/project/siNRA-pi
 if [ "$#" -ne 0 ]; then
@@ -9,4 +9,4 @@ fi
 /home/hanwen/.nvm/versions/node/v24.16.0/bin/node "$project_root/scripts/prepare-agent-compose.mjs"
 exec sh "$project_root/scripts/project-docker.sh" compose \
   --project-name sirna-pi --env-file /dev/null --file "$project_root/compose.yml" \
-  up --detach --wait --wait-timeout 120 agent-compose
+  up --detach --wait --wait-timeout 120 agent-compose agent-tools-relay

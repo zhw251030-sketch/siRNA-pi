@@ -12,13 +12,14 @@ function publicResult(result){
     Buffer.byteLength(JSON.stringify(result.content))>262144)throw new Error('Invalid public tool result');
   return {content:result.content.map(({text})=>({type:'text',text}))};
 }
-export function createApprovedMcpServer({discover}={}){
+export function createApprovedMcpServer({discover,pollIntervalMs}={}){
   if(typeof discover!=='function')throw new TypeError('An explicit approved-tool discovery callback is required');
+  if(pollIntervalMs!==undefined&&(!Number.isInteger(pollIntervalMs)||pollIntervalMs<10||pollIntervalMs>30000))throw new TypeError('Invalid discovery poll interval');
   const fixed=new Map(createSirnaTools().map(tool=>[tool.name,tool]));let busy=false;
-  const server=new Server({name:'sirna-approved-tools',version:'0.1.0'},{capabilities:{tools:{}},
+  const server=new Server({name:'sirna-approved-tools',version:'0.1.0'},{capabilities:{tools:pollIntervalMs?{listChanged:true}:{}},
     instructions:'Use registered tools for calculations. Approved means adopted after the recorded checks; outputs do not establish biological efficacy. Approved tools take {"input":{...business arguments...}}. File transfers are not supported by this learning step.'});
-  async function load(){
-    let result;try{result=await discover();}catch{throw new Error('Approved tool discovery unavailable');}
+  async function load(signal){
+    let result;try{result=await discover(signal?{signal}:undefined);}catch{throw new Error('Approved tool discovery unavailable');}
     if(!result||!Array.isArray(result.tools)||!Array.isArray(result.rejected)||result.rejected.length)throw new Error('Approved tool discovery unavailable');
     const tools=new Map(fixed);
     for(const tool of result.tools){
@@ -28,12 +29,27 @@ export function createApprovedMcpServer({discover}={}){
     }
     return tools;
   }
-  server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:[...(await load()).values()].map(tool=>({
+  const descriptors=tools=>[...tools.values()].map(tool=>({
     name:tool.name,title:tool.label,description:tool.description,inputSchema:tool.parameters,
     annotations:{readOnlyHint:fixed.has(tool.name),destructiveHint:false,idempotentHint:fixed.has(tool.name),openWorldHint:false},
-  }))}));
+  }));
+  let fingerprint;let timer;let polling=false;
+  server.setRequestHandler(ListToolsRequestSchema,async(_request,extra)=>{const tools=descriptors(await load(extra.signal));fingerprint=JSON.stringify(tools);return {tools};});
+  if(pollIntervalMs){
+    const controller=new AbortController();
+    timer=setInterval(async()=>{
+      if(polling||!server.transport)return;
+      polling=true;
+      try{const next=JSON.stringify(descriptors(await load(controller.signal)));if(controller.signal.aborted)return;if(fingerprint!==undefined&&fingerprint!==next)await server.sendToolListChanged();fingerprint=next;}
+      catch{/* A fresh list/call fails closed; do not publish host diagnostics. */}
+      finally{polling=false;}
+    },pollIntervalMs);timer.unref();
+    const stop=()=>{clearInterval(timer);controller.abort();};
+    const close=server.close.bind(server);server.close=async()=>{stop();return close();};
+    const onclose=server.onclose;server.onclose=()=>{stop();onclose?.();};
+  }
   server.setRequestHandler(CallToolRequestSchema,async(request,extra)=>{
-    let tool;try{tool=(await load()).get(request.params.name);}catch{return failure('Approved tool discovery unavailable. Inspect the host registry.');}
+    let tool;try{tool=(await load(extra.signal)).get(request.params.name);}catch{return failure('Approved tool discovery unavailable. Inspect the host registry.');}
     if(!tool)return failure('Unknown siRNA tool');
     const args=request.params.arguments??{};
     if(fixed.has(tool.name)){
