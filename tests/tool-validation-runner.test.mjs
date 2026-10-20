@@ -202,3 +202,17 @@ test('getters on input data are rejected without invoking host code', async () =
   await assert.rejects(module.createDockerValidationRunner({ docker }).run({ ...data, target: 'candidate', caseInput, toolCallId: SESSION }), /JSON/);
   assert.equal(accessed, false); assert.equal(docker.calls.length, 0);
 });
+
+test('approved-call purpose uses distinct ownership and events with the same execution restrictions',async()=>{
+  const data=materials();const docker=new DockerBoundary(data);const events=[];
+  await module.createDockerValidationRunner({docker,purpose:'approved-call',onEvent:e=>events.push(e)}).run({...data,target:'candidate',caseInput:{sequence:'AC'},toolCallId:SESSION});
+  const created=docker.calls.find(c=>c[0]==='createContainer');assert.match(created[1],/^sirna-approved-tool-/);
+  assert.equal(created[2].Labels['sirna.learning.role'],'approved-call');assert.ok(created[2].Labels['sirna.tool.approved-run']);
+  assert.equal(Object.hasOwn(created[2].Labels,'sirna.tool.validation-run'),false);
+  assert.deepEqual(events.map(e=>e.type),['approved_tool_container_created','approved_tool_container_cleaned']);
+  assert.deepEqual([...docker.containers.keys()],['old-unrelated']);assert.equal(created[2].HostConfig.NetworkMode,'none');
+});
+
+test('unknown runner purpose is rejected before Docker',()=>{
+  const docker=new DockerBoundary(materials());assert.throws(()=>module.createDockerValidationRunner({docker,purpose:'unknown'}),/purpose/i);assert.equal(docker.calls.length,0);
+});

@@ -62,10 +62,13 @@ function environment(image) {
   for (const [key, value] of Object.entries({ PATH: '/usr/bin:/bin', HOME: '/tmp/work', NODE_OPTIONS: '', NODE_PATH: '', LD_PRELOAD: '', LD_LIBRARY_PATH: '' })) clean.set(key, value);
   return [...clean].map(([key, value]) => `${key}=${value}`);
 }
-function labels(id, target) { return { 'sirna.learning.project': 'siRNA-pi', 'sirna.tool.validation-run': id, 'sirna.learning.role': 'validation', 'sirna.tool.validation-target': target }; }
-function config(image, id, target) {
+function labels(id, target, purpose) {
+  return purpose === 'approved-call' ? { 'sirna.learning.project': 'siRNA-pi', 'sirna.tool.approved-run': id, 'sirna.learning.role': 'approved-call', 'sirna.tool.approved-target': target } :
+    { 'sirna.learning.project': 'siRNA-pi', 'sirna.tool.validation-run': id, 'sirna.learning.role': 'validation', 'sirna.tool.validation-target': target };
+}
+function config(image, id, target, purpose) {
   return { Image: image.Id, Entrypoint: [], Cmd: [...KEEP_ALIVE], User: '65534:65534', WorkingDir: '/tmp', Env: environment(image),
-    NetworkDisabled: true, Labels: labels(id, target), HostConfig: { NetworkMode: 'none', Memory: 1073741824, PidsLimit: 64,
+    NetworkDisabled: true, Labels: labels(id, target, purpose), HostConfig: { NetworkMode: 'none', Memory: 1073741824, PidsLimit: 64,
       CapDrop: ['ALL'], SecurityOpt: ['no-new-privileges'], ReadonlyRootfs: true, Tmpfs: { ...TMPFS } } };
 }
 function actualPolicy(inspect, expected) {
@@ -113,7 +116,8 @@ function parseRun(raw) {
     output, stdout: raw.stdout, stderr: raw.stderr, outputLimitExceeded: raw.outputLimitExceeded };
 }
 
-export function createDockerValidationRunner({ docker, timeoutMs = 10000, onEvent = async () => {} } = {}) {
+export function createDockerValidationRunner({ docker, timeoutMs = 10000, onEvent = async () => {}, purpose = 'validation' } = {}) {
+  must(['validation', 'approved-call'].includes(purpose), 'Unsupported runner purpose');
   must(docker && ['inspectImage', 'createContainer', 'inspectContainer', 'startContainer', 'exec', 'removeContainer'].every(name => typeof docker[name] === 'function'), 'Docker validation adapter is required');
   must(Number.isInteger(timeoutMs) && timeoutMs >= 100 && timeoutMs <= 30000, 'timeoutMs must be an integer from 100 to 30000');
   must(typeof onEvent === 'function', 'onEvent must be a function');
@@ -131,13 +135,13 @@ export function createDockerValidationRunner({ docker, timeoutMs = 10000, onEven
     return image;
   }
   async function inContainer(materials, target, operation) {
-    const image = await imageFor(materials, target); const id = randomUUID(); const expected = config(image, id, target);
+    const image = await imageFor(materials, target); const id = randomUUID(); const expected = config(image, id, target, purpose);
     let containerId; let originalError;
     try {
-      containerId = await docker.createContainer(`sirna-tool-validation-${id}`, expected);
+      containerId = await docker.createContainer(`${purpose === 'approved-call' ? 'sirna-approved-tool' : 'sirna-tool-validation'}-${id}`, expected);
       must(typeof containerId === 'string' && containerId.length > 0, 'Docker returned no container ID');
       const policy = actualPolicy(await docker.inspectContainer(containerId), expected);
-      await emit({ type: 'validation_container_created', containerId, imageDigest: image.Id, target, actualPolicy: policy });
+      await emit({ type: purpose === 'approved-call' ? 'approved_tool_container_created' : 'validation_container_created', containerId, imageDigest: image.Id, target, actualPolicy: policy });
       await docker.startContainer(containerId);
       const exec = (command, user = '0:0', duration = timeoutMs) => docker.exec(containerId, command, { user, timeoutMs: duration });
       const encoded = Buffer.from(JSON.stringify({ helper, baseline: materials.input.baseline.script })).toString('base64');
@@ -161,7 +165,7 @@ export function createDockerValidationRunner({ docker, timeoutMs = 10000, onEven
             try { await docker.inspectContainer(containerId); } catch (error) { if (!notFound(error)) throw error; absent = true; }
             must(absent, 'Container removal was not confirmed');
           }
-          await emit({ type: 'validation_container_cleaned', containerId, imageDigest: image.Id, target });
+          await emit({ type: purpose === 'approved-call' ? 'approved_tool_container_cleaned' : 'validation_container_cleaned', containerId, imageDigest: image.Id, target });
         } catch (error) { throw Object.assign(new Error(`Validation cleanup failed for ${containerId}`, { cause: originalError ?? error }), { containerId, cleanupError: error }); }
       }
     }

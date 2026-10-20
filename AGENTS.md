@@ -192,3 +192,19 @@ CLI tools:proposals新增approve <UUID> <approvedBy>、versions、version <toolN
 负例runtime/approval-negative-LXga7l克隆真实数据：超大目录拒读/显式恢复、submitted拒批、正式包源码和报告篡改拒绝；正式数据未改。首轮私有验收断言错误消息正则过窄，修正脚本后新副本通过，非产品失败。新增103项，最终918测试：Linux916pass/2Windows专属skip；Windows906pass/12平台权限skip，0fail。独立审查一P2超大目录恢复已修复且复审通过。旧10会话/3运行容器/凭据元数据保持，health就绪空闲，候选执行0/模型0，无容器镜像写操作或重启。
 
 证据runtime/approval-{acceptance,negative-acceptance,local-tests,linux-tests,sync}，文件说明docs/18-工具批准与正式版本.md。下一步对照正式包发现和执行流程接入Agent/MCP及调用审计，再扩展parent版本迭代。持续main同步，仅本学习项目；不把active目录写成Pi已可调用，不把批准当作新科学有效性证据。
+
+以上为第10E步结束状态；以下为最新进度。
+
+2026-10-21：第10F步完成正式工具发现、受控调用、持久审计和宿主stdio MCP。tool-approved-execution.mjs组合catalog/DB/正式包/原材料/报告，只暴露active/retained正式版本；调用前后绑定toolId/version/packageSha256/imageDigest。参数严格{input:普通JSON对象}、业务JSON65536字节，拒绝文件传输和协议字段；平台UUIDv4进入sirna-approved-tool-call/v1。未登记/损坏目录不能回退扫描。
+
+复用tool-validation-runner的candidate执行内核，purpose=approved-call仅改变容器名/标签/事件，默认validation兼容；不跑基线/验证关卡、不改批准。仍核对真实镜像/source及非root/离线/只读/1GiB/64进程/tmp64MiB，CPU配额未施加。固定助手装入baseline惰性文本但不执行。每次独立容器、归属核对后清理；无自动重试。
+
+tool-run-audit.mjs在runtime/approved-tool-runs/<toolName>/<UUID>写request.json和audit.json，sirna-approved-tool-audit/v1。请求刷盘后执行，终态先独占临时文件/fsync再不覆盖硬链接发布，0400单链接；正文只含摘要和元数据，不存原input/stdout/stderr。executionEvidence含容器ID/镜像/实际策略；cleanupConfirmed明确true/false/null，不能把未知当已清理。崩溃可能仅request/临时证据，不自动恢复；进行中取消等待受限执行清理，非即时中断保证。
+
+新增apps/mcp/approved-server.mjs与scripts/approved-tools-mcp.mjs：显式discover回调，list/call都重新发现，名称冲突/损坏明确失败，正式调用实例内busy拒绝；成功只返回content，失败固定提示不回显宿主路径。MCP外层256KiB覆盖64KiB结果二次JSON编码。宿主入口仅Linux/hanwen/精确项目根/项目socket，不读凭据，npm tools:mcp仅人工入口；自动客户端直接Node脚本避免npm横幅。原guest apps/mcp/server.mjs和镜像/网页服务均未变。
+
+真实stdio MCP两次输入：AACCGGTTAA→10/0.4，FASTA demo加GGCCAU→6/(2/3)。runId6e0cfeff-8c26-400f-acea-8658ac099848、0afd95d1-cfc2-4298-9e44-9fa0253d15fb，正式工具仍977b9593…@1.0.0/包4e259ca6…；输入输出摘要/实际策略/权限/容器移除独立核验。3个坏参数无运行目录。原材料/报告/目录/登记内容及10旧会话/3运行容器保持、health就绪空闲。2业务执行/0模型请求，无新镜像、迁移或重启。
+
+新增24测试，942总数：Linux940通过/2Windows专属跳过，Windows930通过/12平台权限跳过，0失败；独立Task1/Task2/整体审查通过。证据runtime/approved-call-{acceptance,state-before,local-tests,linux-tests,sync}、approved-tool-runs；详细文件教学docs/19-正式工具发现调用与审计.md。验收脚本runtime/verify-approved-call.mjs会执行业务且独占写证据，不能当只读检查重复运行。
+
+当前hostMcpCallable=true、webAgentCallable=false；管理CLI的agentCallable=false仍指网页未接线。下一步按原仓库/v1/agent-tools及/call连接guest远程MCP、任务上下文与工具列表刷新，再做真实网页调用并关联审计。不得给guest挂Docker socket/登记库，不声称已实现动态网页调用、版本替换/回滚或自进化。只改本学习项目/main，不改上级研究状态或agent_RSI_demo。
