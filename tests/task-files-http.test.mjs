@@ -60,7 +60,7 @@ test('file HTTP routes reject foreign origins, unknown tasks and malformed names
   assert.equal((await fetch(`${f.base}/v1/tasks/missing/files/output/result.json`)).status, 404);
   assert.equal((await f.call('/output/%FF')).status, 400);
   assert.equal((await f.call('/state/result.json')).status, 404);
-  assert.equal((await f.call('', { method: 'POST' })).status, 404);
+  assert.equal((await f.call('', { method: 'POST' })).status, 409);
   assert.equal(f.calls.length, 0);
   f.workspaceFiles.list = async () => { throw new Error('PRIVATE_DIRECTORY_AND_SECRET'); };
   const response = await f.call(); assert.equal(response.status, 500);

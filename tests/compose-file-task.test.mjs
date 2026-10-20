@@ -145,3 +145,24 @@ for (const [name, overrides, expected] of [
 ]) {
   test(`拒绝${name}`, () => assert.throws(() => verify(undefined, overrides), expected));
 }
+
+test('上传练习可指定输入和输出文件名并独立检查统计结果', () => {
+  const entries = fixture();
+  entries[3].message.content[0].arguments.path = 'input/values.csv';
+  entries[5].message.content[0].arguments.path = '/workspace/output/upload-result.json';
+  entries[7].message.content[0].arguments.path = './output/upload-result.json';
+  const report = verify(entries, { inputName: 'values.csv', outputName: 'upload-result.json',
+    csv: 'value\n3\n9\n15\n', resultJson: '{"count":3,"sum":27,"mean":9}' });
+  assert.deepEqual(report.result, { count: 3, sum: 27, mean: 9 });
+  assert.equal(report.toolCalls, 3);
+});
+
+test('指定上传文件时不能用旧样例的读写轨迹通过验收', () => {
+  assert.throws(() => verify(undefined, { inputName: 'values.csv', outputName: 'upload-result.json' }), /路径|读取|序列/);
+});
+
+for (const options of [{ inputName: '../numbers.csv' }, { outputName: '../result.json' }, { inputName: '' }, { outputName: '' }]) {
+  test(`自定义练习文件名不能扩大工具路径范围 ${JSON.stringify(options)}`, () => {
+    assert.throws(() => verify(undefined, options), /路径|文件名/);
+  });
+}

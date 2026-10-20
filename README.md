@@ -19,7 +19,8 @@
 - 2026-10-20：网页接入正式 Agent Compose RPC，真实统计、不同任务独立环境、网页服务重启后同 Pi 会话续聊通过；170 项 Node 测试与 4 项 Linux 凭据测试通过。详见 [第 5 步 D：网页接入 Agent Compose](docs/09-网页接入AgentCompose.md)。
 - 2026-10-20：完成停止本轮、结束任务与容器释放。真实网页停止后同会话续聊成功，运行中结束后 guest 释放、8 条消息及文件保留，刷新只读；239 项 Node 测试与4项 Linux 凭据测试通过。见 [第 6 步：停止运行与结束任务](docs/10-停止运行与结束任务.md)。
 - 2026-10-20：完成网页任务文件列表、文本预览与下载。已结束任务仍能查看 CSV/JSON，浏览器下载与宿主字节一致，切换任务不混入其他结果。Linux 271 项 Node 测试通过；本轮没有模型调用。见 [第 7 步：网页查看任务文件](docs/11-网页查看任务文件.md)。
-- 下一步对照原仓库增加输入上传及任务文件归档／同步，再进入工具封装。第 5 步 D 的两个网页 guest 仍保留；生命周期专用验收 guest 已释放，文件保留。资源配额、开机自启、专业 siRNA 工具与自进化尚未实现。
+- 2026-10-20：第8步已实现输入上传、独立任务归档、执行前回填和执行后收集。Linux354项测试通过；真实网页上传、回填、旧结果归档下载及结束保留通过。两次新模型验收均遭MiniMax 529过载、0工具调用，成功生成新结果仍待补验。详见 [上传资料与任务文件归档](docs/12-上传资料与任务文件归档.md)。
+- 下一步先在模型服务恢复后补齐上传任务的成功验收，再进入工具封装。第5步D两个网页guest仍保留，本轮两个验收guest及生命周期guest均已释放、文件保留。资源配额、开机自启、专业siRNA工具与自进化尚未实现。
 
 安装位置、文件解释和验证记录见 [第 1 步 A：安装与运行 Pi](docs/01-安装与运行Pi.md)。服务器项目目录是 `/home/hanwen/Project/project/siNRA-pi/`，按用户指定拼写保留。
 
@@ -50,7 +51,8 @@ SDK 示例、逐段代码解释和实际结果见 [第 2 步：调用 Pi SDK 创
 | `npm run verify:first-task` | 验证已有 CLI 样例产物 | 否 |
 | `npm run verify:sdk-task` | 验证已有 SDK 样例产物 | 否 |
 | `node scripts/verify-compose-web-task.mjs <taskId>` | 验证新容器网页统计任务的记录、原生会话和真实文件 | 否 |
-| `node scripts/verify-compose-task-files.mjs <taskId>` | 校验文件接口、下载与宿主字节一致、读取不改变任务记录 | 否 |
+| `node scripts/verify-compose-task-files.mjs <taskId>` | 校验下载与任务归档字节一致、读取不改变任务记录；GET 可刷新归档 | 否 |
+| `node scripts/verify-compose-upload.mjs <taskId> uploaded\|completed\|ended` | 核验上传未启动环境、真实工具执行和结束后文件保留 | 否 |
 | `npm run verify:web-task -- <executionSessionId> --run <runId>` | 验证旧 SDK 网页统计示例的一次具体执行 | 否 |
 | `npm run verify:web-task -- <旧任务编号>` | 兼容第 3 步原有网页样例 | 否 |
 
@@ -141,7 +143,9 @@ scripts/verify-compose-lifecycle.mjs           中断、续聊、释放后的状
 apps/api/router.mjs         任务接口、SSE 传输与静态页面
 packages/task-core/task-store.mjs           SQLite 任务、消息和运行事件
 packages/task-core/task-message-service.mjs 消息检查、去重、执行协调与保存
-packages/task-core/workspace.mjs           任务 input/output 列表、受限读取与 SHA-256
+packages/task-core/workspace.mjs           工作目录归属、受限读取与 SHA-256 共享原语
+packages/task-core/task-files.mjs          输入上传、任务归档、执行前回填与结果收集
+packages/task-core/safe-file-tree.mjs      安全目录遍历、容量检查与原子文件写入
 packages/agent-runtime/runtime-port.mjs     上层调用执行器的边界说明
 packages/agent-runtime/local-pi-runtime.mjs 旧 SDK 任务的执行会话与事件转换
 packages/agent-runtime/pi-sdk.mjs           CLI/网页共用的 SDK 创建与运行
@@ -177,9 +181,11 @@ docs/07-AgentCompose与任务环境.md 控制服务、任务环境、挂载与�
 docs/08-容器中的Pi与模型连接.md  镜像、模型转接、凭据范围与真实模型任务
 docs/09-网页接入AgentCompose.md 网页正式 RPC、执行事件、同会话续聊及验收
 docs/10-停止运行与结束任务.md   停止请求、确认终态、保留文件并释放容器
+docs/11-网页查看任务文件.md     文件列表、文本预览与下载
+docs/12-上传资料与任务文件归档.md 上传、独立资料区和执行同步
 docs/superpowers/plans/      安装步骤与执行记录
 ```
 
-服务器的 `node_modules/` 保存依赖，`runtime/` 保存运行状态，`workspaces/` 保存旧练习产物；这些都不进入 Git。所有网页任务历史仍在 `runtime/tasks/tasks.sqlite`。新任务使用 `runtime/compose-sessions/` 保存执行关系，`runtime/compose-web/` 保存投影事件，真实工作文件和 Pi 原生会话位于 `runtime/agent-compose/data/sandboxes/<日期>/<sandboxId>/`。旧 SDK 任务继续使用 `runtime/pi-web/sessions/`、`workspaces/web/<executionSessionId>/` 及 `runtime/web/`。
+服务器的 `node_modules/` 保存依赖，`runtime/` 保存运行状态，`workspaces/` 保存旧练习产物；这些都不进入 Git。所有网页任务历史仍在 `runtime/tasks/tasks.sqlite`。新任务使用 `runtime/compose-sessions/` 保存执行关系，`runtime/compose-web/` 保存投影事件，真实工作文件和 Pi 原生会话位于 `runtime/agent-compose/data/sandboxes/<日期>/<sandboxId>/`。第8步新增 `runtime/task-files/<taskId>/input|output` 保存独立任务资料，执行前回填输入、执行后收回输出。旧 SDK 任务继续使用 `runtime/pi-web/sessions/`、`workspaces/web/<executionSessionId>/` 及 `runtime/web/`。
 
 网页后端只读管理令牌；控制服务读取模型 key，且官方会把它保存到管理数据库。因此整个 `runtime/agent-compose/data/` 应作为敏感状态保护，只把每项任务自己的 sandbox 子目录挂给它的 guest。

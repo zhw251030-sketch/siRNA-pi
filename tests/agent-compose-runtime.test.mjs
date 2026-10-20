@@ -559,3 +559,193 @@ test('failure to persist stop intent remains owned by the run while RPC still re
   assert.equal(events.at(-1).status, 'failed');
   assert.ok(!events.some(event => event.status === 'canceled' || event.type === 'assistant_message'));
 });
+
+test('workspace preparation hydrates real input after idle preflight and before model submission', async t => {
+  const f = fixture(t); const s = await f.runtime.create(); const order = []; let prompt;
+  f.rpc.hasActiveRuns = async id => {
+    const saved = f.runtime.store.load(s.id);
+    assert.equal(saved.workspaceReady, true);
+    assert.equal(saved.sandboxId, id);
+    assert.equal(fs.existsSync(path.join(f.root, saved.workspacePath, 'input/upload.csv')), false);
+    order.push('idle'); return false;
+  };
+  const run = f.rpc.run;
+  f.rpc.run = async (request, callbacks) => {
+    order.push('model'); prompt = request.prompt;
+    const saved = f.runtime.store.load(s.id);
+    assert.equal(fs.readFileSync(path.join(f.root, saved.workspacePath, 'input/upload.csv'), 'utf8'), 'value\n7\n');
+    return run(request, callbacks);
+  };
+  const events = [];
+  await f.runtime.run({ sessionId: s.id, message: 'use my input', prepareWorkspace: async () => {
+    order.push('hydrate'); const saved = await f.runtime.status(s.id);
+    fs.writeFileSync(path.join(f.root, saved.workspacePath, 'input/upload.csv'), 'value\n7\n');
+    return ['upload.csv'];
+  } }, e => events.push(e));
+  assert.deepEqual(order, ['idle', 'hydrate', 'model']);
+  assert.equal(events.at(-1).status, 'succeeded');
+  assert.match(prompt, /input\//); assert.match(prompt, /output\//);
+  assert.match(prompt, /upload\.csv/); assert.doesNotMatch(prompt, /value\n7\n/);
+});
+
+test('workspace preparation failure saves a failed turn without submitting a model request', async t => {
+  const f = fixture(t); const s = await f.runtime.create(); const events = [];
+  await f.runtime.run({ sessionId: s.id, message: 'go', prepareWorkspace: async () => {
+    throw new Error('archive hydration failed');
+  } }, e => events.push(e));
+  assert.equal(f.counts.model, 0);
+  assert.equal(events.at(-1).status, 'failed');
+  assert.equal((await f.runtime.status(s.id)).runs.at(-1).accepted, undefined);
+});
+
+test('abort during workspace preparation cancels before model submission', async t => {
+  const f = fixture(t); const s = await f.runtime.create(); const controller = new AbortController(); const events = [];
+  await f.runtime.run({ sessionId: s.id, message: 'go', prepareWorkspace: async () => {
+    await Promise.resolve(); controller.abort(); return ['upload.csv'];
+  } }, e => events.push(e), controller.signal);
+  assert.equal(f.counts.model, 0);
+  assert.equal(events.at(-1).status, 'canceled');
+  assert.equal((await f.runtime.status(s.id)).runs.at(-1).accepted, undefined);
+});
+
+for (const names of [Array.from({ length: 70 }, (_, i) => `upload-${i}.csv`),
+  Array.from({ length: 50 }, (_, i) => `${'x'.repeat(175)}-${i}`)]) {
+  test(`input names remain bounded JSON data in the model prompt (${names[0].length} character names)`, async t => {
+    const f = fixture(t); const s = await f.runtime.create(); let prompt;
+    const run = f.rpc.run;
+    f.rpc.run = async (request, callbacks) => { prompt = request.prompt; return run(request, callbacks); };
+    await f.runtime.run({ sessionId: s.id, message: 'inspect uploads', prepareWorkspace: async () => names }, () => {});
+    const line = prompt.split('\n').find(item => item.startsWith('['));
+    assert.ok(line, 'the model must receive an explicit JSON filename list');
+    assert.ok(line.length <= 8000);
+    const listed = JSON.parse(line);
+    assert.ok(listed.length > 0 && listed.length <= 50);
+    assert.deepEqual(listed, names.slice(0, listed.length));
+    assert.match(prompt, /数据.*指令/);
+  });
+}
+
+test('upload idle check on a pristine session does not create a workspace or change metadata', async t => {
+  const f = fixture(t); const s = await f.runtime.create();
+  await f.runtime.assertWorkspaceIdle(s.id);
+  assert.deepEqual(await f.runtime.status(s.id), s);
+  assert.deepEqual(f.counts, { boot: 0, model: 0 });
+});
+
+test('detached active work blocks both hydration and upload idle confirmation', async t => {
+  const f = fixture(t); const s = await f.runtime.create(); await f.runtime.ensureWorkspace(s.id);
+  f.rpc.hasActiveRuns = async () => true; let hydrated = false;
+  await f.runtime.run({ sessionId: s.id, message: 'retry', prepareWorkspace: async () => { hydrated = true; return []; } }, () => {});
+  assert.equal(hydrated, false); assert.equal(f.counts.model, 0);
+  await assert.rejects(async () => f.runtime.assertWorkspaceIdle(s.id), error =>
+    !(error instanceof TypeError) && /active|idle/i.test(error.message));
+});
+
+for (const result of [undefined, null, 0]) {
+  test(`an unknown idle response (${String(result)}) blocks hydration and uploads`, async t => {
+    const f = fixture(t); const s = await f.runtime.create(); await f.runtime.ensureWorkspace(s.id);
+    f.rpc.hasActiveRuns = async () => result; let hydrated = false;
+    await f.runtime.run({ sessionId: s.id, message: 'retry', prepareWorkspace: async () => { hydrated = true; return []; } }, () => {});
+    assert.equal(f.counts.model, 0); assert.equal(hydrated, false);
+    await assert.rejects(async () => f.runtime.assertWorkspaceIdle(s.id), error =>
+      !(error instanceof TypeError) && /active|idle|confirm/i.test(error.message));
+  });
+}
+
+test('upload idle confirmation rejects a failed controller check without changing metadata', async t => {
+  const f = fixture(t); const s = await f.runtime.create(); const before = await f.runtime.ensureWorkspace(s.id);
+  f.rpc.hasActiveRuns = async () => { throw new Error('controller unavailable'); };
+  await assert.rejects(async () => f.runtime.assertWorkspaceIdle(s.id), /controller unavailable/);
+  assert.deepEqual(await f.runtime.status(s.id), before);
+});
+
+for (const uncertainty of ['accepted-running', 'unknown-stop', 'outcome', 'bootstrap', 'bootstrap-stop']) {
+  test(`upload idle confirmation rejects persisted ${uncertainty} uncertainty`, async t => {
+    const f = fixture(t); const s = await f.runtime.create(); const saved = await f.runtime.ensureWorkspace(s.id);
+    if (uncertainty === 'accepted-running') saved.runs.push({ runId: 'pending', status: 'running', accepted: true });
+    if (uncertainty === 'unknown-stop') saved.runs.push({ runId: 'unknown', status: 'failed', stopUnconfirmed: true });
+    if (uncertainty === 'outcome') saved.runs.push({ runId: 'accepted', status: 'failed', accepted: true, outcomeUnconfirmed: true });
+    if (uncertainty === 'bootstrap') { saved.workspaceReady = false; saved.bootstrapStatus = 'running'; }
+    if (uncertainty === 'bootstrap-stop') saved.bootstrapStopUnconfirmed = true;
+    f.runtime.store.save(saved);
+    await assert.rejects(async () => f.make().assertWorkspaceIdle(s.id), error =>
+      !(error instanceof TypeError) && /unconfirmed|idle|running|bootstrap/i.test(error.message));
+    assert.deepEqual(f.runtime.store.load(s.id), saved);
+    assert.equal(f.counts.model, 0);
+  });
+}
+
+test('upload idle confirmation rechecks a task ended while the controller response was pending', async t => {
+  const f = fixture(t); const s = await f.runtime.create(); await f.runtime.ensureWorkspace(s.id);
+  let unblock; let entered; const gate = new Promise(resolve => { unblock = resolve; });
+  const ready = new Promise(resolve => { entered = resolve; });
+  f.rpc.hasActiveRuns = async () => { entered(); await gate; return false; };
+  const checking = f.runtime.assertWorkspaceIdle(s.id);
+  await ready;
+  await f.runtime.remove(s.id); unblock();
+  await assert.rejects(checking, /ended|stopped/i);
+  assert.equal(f.counts.model, 0);
+});
+
+test('upload idle confirmation rejects a live model turn before querying the controller', async t => {
+  const f = fixture(t); const s = await f.runtime.create(); let release; let entered;
+  const gate = new Promise(resolve => { release = resolve; }); const ready = new Promise(resolve => { entered = resolve; });
+  const run = f.rpc.run;
+  f.rpc.run = async (...args) => { entered(); await gate; return run(...args); };
+  const running = f.runtime.run({ sessionId: s.id, message: 'go' }, () => {}); await ready;
+  f.rpc.hasActiveRuns = async () => { throw new Error('unexpected query while locally running'); };
+  try { await assert.rejects(async () => f.runtime.assertWorkspaceIdle(s.id), /running/i); }
+  finally { release(); await running; }
+});
+
+test('RuntimeRouter permits Compose upload checks and rejects legacy sessions', async t => {
+  const { RuntimeRouter } = await import('../packages/agent-runtime/runtime-router.mjs');
+  const f = fixture(t); const s = await f.runtime.create();
+  const router = new RuntimeRouter({ compose: f.runtime, legacy: { status: async id => ({ id, backend: 'local-pi' }) } });
+  await router.assertWorkspaceIdle(s.id);
+  await assert.rejects(async () => router.assertWorkspaceIdle(randomUUID()), /legacy|SDK/i);
+  assert.deepEqual(f.counts, { boot: 0, model: 0 });
+});
+
+for (const operation of ['preparing', 'releasing', 'canceling']) {
+  test(`upload idle confirmation blocks while ${operation} is in progress`, async t => {
+    const f = fixture(t); const s = await f.runtime.create(); let unblock; let entered;
+    const gate = new Promise(resolve => { unblock = resolve; }); const ready = new Promise(resolve => { entered = resolve; });
+    let pending;
+    if (operation === 'preparing') {
+      const bootstrap = f.executor.bootstrap;
+      f.executor.bootstrap = async callback => { entered(); await gate; return bootstrap(callback); };
+      pending = f.runtime.ensureWorkspace(s.id);
+    } else if (operation === 'releasing') {
+      await f.runtime.ensureWorkspace(s.id); const release = f.executor.release;
+      f.executor.release = async id => { entered(); await gate; return release(id); };
+      pending = f.runtime.remove(s.id);
+    } else {
+      const saved = await detached(f, s.id);
+      f.rpc.getRun = async id => { entered(); await gate; return { runId: id, sandboxId: saved.sandboxId, status: 'canceled' }; };
+      pending = f.runtime.cancel(s.id);
+    }
+    await ready;
+    f.rpc.hasActiveRuns = async () => { throw new Error('unexpected controller query during local operation'); };
+    try {
+      await assert.rejects(async () => f.runtime.assertWorkspaceIdle(s.id), error =>
+        !(error instanceof TypeError) && /prepar|ending|cancel/i.test(error.message));
+    } finally { unblock(); await pending; }
+  });
+}
+
+test('upload idle confirmation rechecks a release lock acquired during the controller query', async t => {
+  const f = fixture(t); const s = await f.runtime.create(); await f.runtime.ensureWorkspace(s.id);
+  let finishCheck; let checkingEntered; const checkGate = new Promise(resolve => { finishCheck = resolve; });
+  const checkReady = new Promise(resolve => { checkingEntered = resolve; });
+  let finishRelease; let releaseEntered; const releaseGate = new Promise(resolve => { finishRelease = resolve; });
+  const releaseReady = new Promise(resolve => { releaseEntered = resolve; });
+  f.rpc.hasActiveRuns = async () => { checkingEntered(); await checkGate; return false; };
+  const release = f.executor.release;
+  f.executor.release = async id => { releaseEntered(); await releaseGate; return release(id); };
+  const checking = f.runtime.assertWorkspaceIdle(s.id); await checkReady;
+  const ending = f.runtime.remove(s.id); await releaseReady;
+  finishCheck();
+  try { await assert.rejects(checking, /ending/i); }
+  finally { finishRelease(); await ending; }
+});

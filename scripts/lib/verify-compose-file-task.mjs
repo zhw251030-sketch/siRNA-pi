@@ -14,7 +14,11 @@ function toolPath(value) {
 }
 
 // Validate persisted native Pi messages, separately from the actual output file.
-export function verifyComposeFileTask({ sessionJsonl, csv, resultJson }) {
+export function verifyComposeFileTask({ sessionJsonl, csv, resultJson, inputName = 'numbers.csv', outputName = 'result.json' }) {
+  assert.ok(typeof inputName === 'string' && inputName && !inputName.startsWith('/') &&
+    typeof outputName === 'string' && outputName && !outputName.startsWith('/'), '练习文件名不合法');
+  const inputPath = toolPath(`input/${inputName}`);
+  const outputPath = toolPath(`output/${outputName}`);
   const lines = csv.trim().split(/\r?\n/);
   assert.equal(lines.shift(), 'value', 'CSV 必须只有 value 一列');
   assert.ok(lines.length > 0, 'CSV 没有数据');
@@ -64,11 +68,11 @@ export function verifyComposeFileTask({ sessionJsonl, csv, resultJson }) {
         assert.ok(['read', 'write'].includes(call.name), '调用了未允许的工具');
         const path = toolPath(call.arguments?.path);
         if (call.name === 'write') {
-          assert.equal(path, '/workspace/output/result.json', '写入路径不允许');
+          assert.equal(path, outputPath, '写入路径不允许');
           assert.ok(inputRead, '调用顺序错误：必须先成功读取输入');
           writeCalls += 1;
         } else {
-          if (path === '/workspace/output/result.json') assert.ok(writesCompleted > 0, '调用顺序错误：必须先写入再重新读取');
+          if (path === outputPath) assert.ok(writesCompleted > 0, '调用顺序错误：必须先写入再重新读取');
           readCalls += 1;
         }
         calls.set(call.id, { name: call.name, path });
@@ -81,8 +85,8 @@ export function verifyComposeFileTask({ sessionJsonl, csv, resultJson }) {
       assert.equal(message.isError, false, '工具失败或缺少明确成功 isError 标记');
       completed.add(message.toolCallId);
       if (call.name === 'write') writesCompleted += 1;
-      if (call.name === 'read' && call.path === '/workspace/input/numbers.csv') inputRead = true;
-      if (call.name === 'read' && call.path === '/workspace/output/result.json') verifiedWrite = writesCompleted;
+      if (call.name === 'read' && call.path === inputPath) inputRead = true;
+      if (call.name === 'read' && call.path === outputPath) verifiedWrite = writesCompleted;
     }
   }
   assert.equal(calls.size, completed.size, '工具结果尚未完成');

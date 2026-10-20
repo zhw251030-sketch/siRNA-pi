@@ -168,3 +168,83 @@ test('files that grew beyond the preview limit are rejected before displaying co
   assert.equal(viewer.state.preview.status, 'error');
   assert.equal(viewer.state.preview.text, '');
 });
+
+test('archived inputs can be listed and previewed before an execution environment exists', async () => {
+  const archived = file('mine.csv', { id: 'input:mine.csv', kind: 'input', size: 4 });
+  const viewer = createTaskFiles({ fetcher: async url => url.endsWith('/files')
+    ? Response.json({ state: 'ready', synchronization: 'unprepared', files: [archived] })
+    : new Response('1,2\n') });
+  viewer.setTask('unstarted');
+  await viewer.refresh();
+  assert.equal(viewer.state.synchronization, 'unprepared');
+  await viewer.previewFile(viewer.state.files[0]);
+  assert.equal(viewer.state.preview.text, '1,2\n');
+});
+
+test('cached archive warnings survive later failed list refreshes without being called synchronized', async () => {
+  let fail = false;
+  const viewer = createTaskFiles({ fetcher: async () => fail
+    ? Response.json({ error: 'unavailable' }, { status: 503 })
+    : Response.json({ state: 'ready', synchronization: 'cached', warning: '同步失败；显示此前归档。', files: [file()] }) });
+  viewer.setTask('a');
+  await viewer.refresh();
+  assert.equal(viewer.state.synchronization, 'cached');
+  assert.match(viewer.state.warning, /此前归档/);
+  fail = true;
+  await viewer.refresh();
+  assert.equal(viewer.state.synchronization, 'cached');
+  assert.match(viewer.state.warning, /此前归档/);
+});
+
+test('a cached preview downgrades a current listing and warns that the displayed bytes are archived', async () => {
+  const viewer = createTaskFiles({ fetcher: async url => url.endsWith('/files')
+    ? Response.json({ state: 'ready', synchronization: 'current', files: [file()] })
+    : new Response('archived content', { headers: { 'X-Task-Files-Sync': 'cached' } }) });
+  viewer.setTask('a');
+  await viewer.refresh();
+  await viewer.previewFile(viewer.state.files[0]);
+  assert.equal(viewer.state.preview.text, 'archived content');
+  assert.equal(viewer.state.synchronization, 'cached');
+  assert.match(viewer.state.warning, /归档/);
+});
+
+test('a successful current preview clears the stale cached warning', async () => {
+  const viewer = createTaskFiles({ fetcher: async url => url.endsWith('/files')
+    ? Response.json({ state: 'ready', synchronization: 'cached', warning: '此前归档，等待核对。', files: [file()] })
+    : new Response('current content', { headers: { 'X-Task-Files-Sync': 'current' } }) });
+  viewer.setTask('a');
+  await viewer.refresh();
+  await viewer.previewFile(viewer.state.files[0]);
+  assert.equal(viewer.state.preview.text, 'current content');
+  assert.equal(viewer.state.synchronization, 'current');
+  assert.equal(viewer.state.warning, '');
+});
+
+test('a late preview cannot downgrade current bytes or erase a newer cached warning', async () => {
+  for (const [oldSync, latestSync] of [['cached', 'current'], ['current', 'cached']]) {
+    const { viewer, queue } = await readyViewer();
+    const old = viewer.previewFile(viewer.state.files[0]);
+    const latest = viewer.previewFile(viewer.state.files[1]);
+    queue[2].resolve(new Response('latest content', { headers: { 'X-Task-Files-Sync': latestSync } }));
+    await latest;
+    queue[1].resolve(new Response('obsolete content', { headers: { 'X-Task-Files-Sync': oldSync } }));
+    await old;
+    assert.equal(viewer.state.preview.text, 'latest content');
+    assert.equal(viewer.state.synchronization, latestSync);
+    if (latestSync === 'cached') assert.match(viewer.state.warning, /归档/);
+    else assert.equal(viewer.state.warning, '');
+  }
+});
+
+test('failed or unlabelled previews cannot clear a cached synchronization warning', async () => {
+  for (const response of [new Response(Uint8Array.of(255), { headers: { 'X-Task-Files-Sync': 'current' } }), new Response('unlabelled content')]) {
+    const viewer = createTaskFiles({ fetcher: async url => url.endsWith('/files')
+      ? Response.json({ state: 'ready', synchronization: 'cached', warning: '此前归档，等待核对。', files: [file()] })
+      : response });
+    viewer.setTask('a');
+    await viewer.refresh();
+    await viewer.previewFile(viewer.state.files[0]);
+    assert.equal(viewer.state.synchronization, 'cached');
+    assert.match(viewer.state.warning, /此前归档/);
+  }
+});

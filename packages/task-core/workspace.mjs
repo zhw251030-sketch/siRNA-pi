@@ -79,7 +79,7 @@ async function verifyDirectories(directory) {
 
 async function inWorkspace(root, relative, action) {
   const volume = path.parse(root).root;
-  const segments = [...root.slice(volume.length).split(path.sep).filter(Boolean), ...relative.split('/')];
+  const segments = [...root.slice(volume.length).split(path.sep).filter(Boolean), ...relative.split('/').filter(Boolean)];
   const opened = [];
   try {
     let current = await openDirectory(null, volume);
@@ -95,6 +95,12 @@ async function inWorkspace(root, relative, action) {
     for (const directory of opened.reverse()) await directory.handle?.close();
   }
 }
+
+// Shared filesystem primitives keep the live viewer and durable archive under
+// the same descriptor, identity, bounded-read and error-redaction rules.
+export { FILE_BYTES, LIST_BYTES, LIST_ENTRIES, denied, changed, missing, safeError,
+  validName, sameIdentity, sameFile, ordinaryFile, childPath, openDirectory,
+  verifyDirectories, inWorkspace, readStable };
 
 async function readStable(directory, basename, kind, name, { maxBytes, collect, budget }) {
   const location = childPath(directory, basename);

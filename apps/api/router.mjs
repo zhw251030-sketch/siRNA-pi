@@ -49,7 +49,7 @@ async function readBody(request) {
 // HTTP only coordinates transport. Task state and runtime execution stay in
 // their own packages, matching the reference repository's responsibility split.
 export function createAppServer({ taskStore, agentRuntime, workspaceFiles } = {}) {
-  const taskMessages = new TaskMessageService({ taskStore, agentRuntime });
+  const taskMessages = new TaskMessageService({ taskStore, agentRuntime, workspaceFiles });
   const activeTurns = new Set();
   const track = (operation) => {
     activeTurns.add(operation);
@@ -85,16 +85,22 @@ export function createAppServer({ taskStore, agentRuntime, workspaceFiles } = {}
       }
       if (request.method === "GET" && pathname === "/v1/tasks") return reply(response, 200, { tasks: taskStore.listTasks() });
       const filesRoute = /^\/v1\/tasks\/([^/]+)\/files(?:\/(input|output)\/([^/]+))?$/.exec(pathname);
+      if (request.method === 'POST' && filesRoute && !filesRoute[2]) {
+        const payload = await readBody(request);
+        const result = await track(taskMessages.uploadInput(filesRoute[1], payload));
+        if (!response.destroyed) reply(response, 201, result);
+        return;
+      }
       if (request.method === 'GET' && filesRoute) {
         const task = taskStore.getTask(filesRoute[1]);
         if (!task) return reply(response, 404, { error: '没有找到这个任务。' });
         if (!workspaceFiles) return reply(response, 503, { error: '任务文件服务尚未配置。' });
-        if (!filesRoute[2]) return reply(response, 200, await workspaceFiles.list(task));
+        if (!filesRoute[2]) return reply(response, 200, await track(workspaceFiles.list(task)));
         let name;
         try { name = decodeURIComponent(filesRoute[3]); }
         catch { invalid('文件名称编码不正确。'); }
         const inline = url.searchParams.get('download') !== 'true' && previewExtensions.has(name.split('.').at(-1).toLowerCase());
-        const { data } = await workspaceFiles.read(task, filesRoute[2], name, { maxBytes: inline ? 256 * 1024 : 50_000_000 });
+        const { data, synchronization } = await track(workspaceFiles.read(task, filesRoute[2], name, { maxBytes: inline ? 256 * 1024 : 50_000_000 }));
         if (inline) {
           try { new TextDecoder('utf-8', { fatal: true }).decode(data); }
           catch { return reply(response, 415, { error: '此文件不是有效的 UTF-8 文本，请下载后查看。' }); }
@@ -104,6 +110,7 @@ export function createAppServer({ taskStore, agentRuntime, workspaceFiles } = {}
           'Content-Length': data.length,
           'Content-Disposition': fileDisposition(name, inline),
           'Content-Security-Policy': "default-src 'none'; sandbox",
+          ...(['current', 'cached', 'unprepared'].includes(synchronization) ? { 'X-Task-Files-Sync': synchronization } : {}),
         });
         return response.end(data);
       }

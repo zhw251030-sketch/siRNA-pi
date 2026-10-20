@@ -10,6 +10,10 @@ export class RuntimeRouter {
   }
   async status(id) { return (await this.runtime(id)).status(id); }
   async run(request, emit, signal) { return (await this.runtime(request.sessionId)).run(request, emit, signal); }
+  async assertWorkspaceIdle(id) {
+    if (await this.runtime(id) !== this.compose) throw new Error('Legacy SDK tasks do not support workspace uploads');
+    return this.compose.assertWorkspaceIdle(id);
+  }
   async cancel(id) {
     if (await this.runtime(id) !== this.compose) throw new Error('Legacy SDK tasks do not support lifecycle operations');
     return this.compose.cancel(id);

@@ -10,12 +10,13 @@ const elements = Object.fromEntries([
   "files-panel", "refresh-files", "input-files", "output-files", "files-status", "file-list",
   "file-preview", "file-preview-title", "file-preview-meta", "file-preview-status", "file-preview-text",
   "file-preview-download", "close-file-preview",
+  "file-input", "upload-file", "upload-status", "files-warning",
 ].map((id) => [id, document.getElementById(id)]));
 const exampleMessages = {
   "local-pi": "请使用 read 工具读取当前目录的 numbers.csv，计算其中数值的数量 count、总和 sum 和平均值 mean。使用 write 工具将结果保存为当前目录的 result.json，内容只包含 count、sum、mean 三个字段。最后再次使用 read 工具读取 result.json，核对保存的结果，并用中文简要说明。",
   "agent-compose": "请使用 read 工具读取 /workspace/input/numbers.csv，计算其中数值的数量 count、总和 sum 和平均值 mean。使用 write 工具将结果保存为 /workspace/output/result.json，内容只包含 count、sum、mean 三个字段。最后再次使用 read 工具读取 /workspace/output/result.json，核对保存的结果，并用中文简要说明。",
 };
-const state = { tasks: [], task: null, execution: null, busy: false, lifecycleBusy: null, stopRequested: false, messages: new Map(), tools: new Map(), assistant: null, pendingUser: null };
+const state = { tasks: [], task: null, execution: null, busy: false, uploadBusy: false, lifecycleBusy: null, stopRequested: false, messages: new Map(), tools: new Map(), assistant: null, pendingUser: null };
 const pendingKey = "sirna-pi.pending-message";
 const selectedKey = "sirna-pi.selected-task";
 const creationKey = "sirna-pi.pending-creation";
@@ -52,9 +53,16 @@ function fileMetadata(file) {
   return `${fileSize(file.size)} · ${date}`;
 }
 function renderTaskFiles(view, forceList = false) {
+  state.uploadBusy = view.uploadStatus === "loading";
+  if (previousFilesView?.taskId !== view.taskId) elements["file-input"].value = "";
+  elements["upload-status"].textContent = view.uploadMessage;
+  elements["upload-status"].dataset.state = view.uploadStatus;
+  const warning = view.synchronization === "cached" ? `当前显示已归档的文件，尚未确认与执行环境一致。${view.warning || ""}` : view.warning;
+  elements["files-warning"].textContent = warning;
+  elements["files-warning"].hidden = !warning;
+  elements["files-panel"].setAttribute("aria-busy", String(view.listStatus === "loading" || state.uploadBusy));
   // A preview response must not replace its focused list button.
   if (forceList || !previousFilesView || view.files !== previousFilesView.files || view.listStatus !== previousFilesView.listStatus || view.taskId !== previousFilesView.taskId) {
-    elements["files-panel"].setAttribute("aria-busy", String(view.listStatus === "loading"));
     elements["refresh-files"].disabled = !view.taskId || view.listStatus === "loading";
     elements["refresh-files"].textContent = view.listStatus === "loading" ? "读取中…" : "刷新文件";
     for (const kind of ["input", "output"]) {
@@ -67,9 +75,10 @@ function renderTaskFiles(view, forceList = false) {
     let message = !view.taskId ? "选择任务后查看文件。" : "文件尚未载入，可点击“刷新文件”。";
     if (view.listStatus === "loading") message = "正在读取本任务文件…";
     else if (view.listStatus === "error") message = `读取失败：${view.error}`;
-    else if (view.workspaceState === "unprepared") message = "本任务尚未生成文件目录，没有可查看的文件。查看或刷新文件不会启动任务。";
+    else if (view.workspaceState === "unprepared") message = "尚无任务文件。可以先上传输入资料，再发送任务要求。";
     else if (view.workspaceState === "unsupported") message = "此旧版任务暂不支持网页文件查看，可在下方查看原工作目录。";
     else if (view.workspaceState === "ready") message = files.length ? `${files.length} 个${label}。点击文本文件名可预览。` : `暂无${label}。`;
+    if (view.workspaceState === "ready" && view.synchronization === "unprepared") message += " 已保存的资料会在下次执行时同步到任务环境。";
     elements["files-status"].textContent = message;
     elements["files-status"].dataset.state = view.listStatus;
     elements["file-list"].setAttribute("aria-label", label);
@@ -111,6 +120,7 @@ function renderTaskFiles(view, forceList = false) {
     elements["file-preview-download"].download = preview.file.name.split("/").at(-1);
   } else elements["file-preview-download"].removeAttribute("href");
   previousFilesView = view;
+  syncControls();
 }
 function setStatus(text, kind = "idle") {
   if (state.task?.status === "stopped") {
@@ -124,7 +134,7 @@ function statusLabel(status) {
   return { idle: "可继续", running: "运行中", failed: "运行失败", stopped: "已结束", pending: "等待中", succeeded: "已完成", canceled: "已中断", cancelled: "已中断" }[status] || "等待中";
 }
 function syncControls() {
-  const navigating = state.busy || Boolean(state.lifecycleBusy);
+  const navigating = state.busy || state.uploadBusy || Boolean(state.lifecycleBusy);
   const recovering = Boolean(pending && pending.taskId === state.task?.id);
   const blocked = navigating || state.stopRequested || state.task?.status === "running" || state.task?.status === "stopped" || Boolean(pending) || !state.task;
   elements["send-button"].disabled = blocked;
@@ -139,10 +149,20 @@ function syncControls() {
   elements["chat-panel"].setAttribute("aria-busy", String(state.busy || state.task?.status === "running"));
   const controls = lifecycleControls(state);
   elements["stop-run"].disabled = !controls.canStop;
-  elements["end-task"].disabled = !controls.canEnd;
+  elements["end-task"].disabled = !controls.canEnd || state.uploadBusy;
   elements["stop-run"].textContent = state.lifecycleBusy === "stop" || state.stopRequested ? "正在停止…" : "停止本轮";
   elements["end-task"].textContent = state.lifecycleBusy === "end" ? "正在结束…" : "结束任务";
+  const uploadAllowed = canUploadToTask();
+  elements["file-input"].disabled = !uploadAllowed;
+  elements["upload-file"].disabled = !uploadAllowed || !elements["file-input"].files?.length;
+  elements["upload-file"].textContent = state.uploadBusy ? "上传中…" : "上传所选文件";
+  elements["refresh-files"].disabled = !state.task || state.uploadBusy || taskFiles.state.listStatus === "loading";
   for (const button of elements["task-list"].querySelectorAll("button")) button.disabled = navigating;
+}
+function canUploadToTask() {
+  return Boolean(state.task && ["idle", "failed"].includes(state.task.status)
+    && state.execution?.backend === "agent-compose" && !state.execution.unavailable && !state.execution.stopUnconfirmed
+    && !state.busy && !state.uploadBusy && !state.lifecycleBusy && !state.stopRequested && !pending);
 }
 function upsertTask(task) {
   if (!task?.id) return;
@@ -164,7 +184,7 @@ function renderTaskList() {
   for (const task of tasks) {
     const button = node("button", "task-item");
     button.type = "button";
-    button.disabled = state.busy || Boolean(state.lifecycleBusy);
+    button.disabled = state.busy || state.uploadBusy || Boolean(state.lifecycleBusy);
     button.setAttribute("aria-current", String(task.id === state.task?.id));
     button.append(node("strong", "", task.title || "新的设计任务"));
     const date = new Date(task.updatedAt);
@@ -268,6 +288,8 @@ function showActivity(event) {
     tool.label.textContent = event.type === "tool_start" ? "执行中" : event.isError ? "失败" : "完成";
     if (typeof event.args?.path === "string") tool.path.textContent = event.args.path;
   } else if (event.type === "progress_message") addRunEntry("执行说明", event.text || "");
+  else if (event.type === "workspace_synced") addRunEntry("任务文件已同步", "本轮文件同步已完成，可刷新文件查看。");
+  else if (event.type === "workspace_warning") addRunEntry("文件同步尚未确认", event.warning || event.error || event.message || "请刷新文件核对已归档的内容。", "error");
   else if (event.type === "run_status") addRunEntry("运行状态", statusLabel(event.status), event.status === "failed" ? "error" : "");
   else if (event.type === "done") {
     const runId = event.runId || state.task?.currentRunId || "";
@@ -312,6 +334,7 @@ function handleStreamEvent(event) {
   } else if (event.type === "request_deduplicated") {
     setStatus("这条消息已被接收，正在恢复已有记录…", "running");
   }
+  if (event.type === "workspace_synced" || event.type === "workspace_warning") void taskFiles.refresh();
   showActivity(event);
   syncControls();
 }
@@ -368,7 +391,7 @@ async function selectTask(id) {
   void taskFiles.refresh();
 }
 async function withBusy(action) {
-  if (state.busy || state.lifecycleBusy) return;
+  if (state.busy || state.uploadBusy || state.lifecycleBusy) return;
   state.busy = true;
   syncControls();
   try { await action(); }
@@ -377,6 +400,7 @@ async function withBusy(action) {
 }
 
 async function changeLifecycle(action) {
+  if (action === "end" && state.uploadBusy) return;
   const controls = lifecycleControls(state);
   if (action === "stop" ? !controls.canStop : !controls.canEnd) return;
   const id = state.task.id;
@@ -411,7 +435,7 @@ async function changeLifecycle(action) {
   }
 }
 async function sendPending() {
-  if (!pending || pending.taskId !== state.task?.id) return;
+  if (state.uploadBusy || !pending || pending.taskId !== state.task?.id) return;
   const request = pending;
   state.assistant = null;
   if (!state.pendingUser?.article.isConnected) state.pendingUser = appendMessage("user", request.message);
@@ -456,6 +480,20 @@ elements["recover-message"].addEventListener("click", () => void withBusy(sendPe
 elements["stop-run"].addEventListener("click", () => void changeLifecycle("stop"));
 elements["end-task"].addEventListener("click", () => void changeLifecycle("end"));
 elements["refresh-files"].addEventListener("click", () => void taskFiles.refresh());
+elements["file-input"].addEventListener("change", syncControls);
+elements["upload-file"].addEventListener("click", async () => {
+  if (!canUploadToTask()) return;
+  const file = elements["file-input"].files?.[0];
+  if (!file) return;
+  const id = state.task.id;
+  const selection = taskSelectionVersion;
+  const uploaded = await taskFiles.uploadFile(file);
+  if (!uploaded || state.task?.id !== id || selection !== taskSelectionVersion) return;
+  elements["file-input"].value = "";
+  fileGroup = "input";
+  renderTaskFiles(taskFiles.state, true);
+  await taskFiles.refresh();
+});
 for (const kind of ["input", "output"]) elements[`${kind}-files`].addEventListener("click", () => {
   fileGroup = kind;
   taskFiles.closePreview();
@@ -469,7 +507,7 @@ elements["close-file-preview"].addEventListener("click", () => {
 });
 elements.composer.addEventListener("submit", (event) => {
   event.preventDefault();
-  if (state.busy || state.lifecycleBusy || state.stopRequested || !state.task || state.task.status === "running" || state.task.status === "stopped" || pending) return;
+  if (state.busy || state.uploadBusy || state.lifecycleBusy || state.stopRequested || !state.task || state.task.status === "running" || state.task.status === "stopped" || pending) return;
   const message = elements["message-input"].value.trim();
   if (!message || message.length > 120000) { setStatus("请输入 1 到 120000 个字符的任务要求。", "error"); return; }
   pending = { taskId: state.task.id, requestId: `message:${crypto.randomUUID()}`, message };

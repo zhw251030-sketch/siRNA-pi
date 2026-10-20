@@ -8,7 +8,7 @@ import { createComposeExecutor } from "../../packages/agent-runtime/compose-exec
 import { readComposeControlToken } from "../../packages/agent-runtime/compose-control-token.mjs";
 import { RuntimeRouter } from "../../packages/agent-runtime/runtime-router.mjs";
 import { TaskStore } from "../../packages/task-core/task-store.mjs";
-import { WorkspaceFiles } from "../../packages/task-core/workspace.mjs";
+import { TaskFiles } from "../../packages/task-core/task-files.mjs";
 import { createAppServer } from "./router.mjs";
 
 process.umask(0o077);
@@ -23,7 +23,7 @@ const compose = new AgentComposeRuntime({ root: projectRoot, executor: createCom
 const agentRuntime = new RuntimeRouter({ compose, legacy: new LocalPiRuntime() });
 const taskStore = new TaskStore(database);
 const recovered = taskStore.recoverInterruptedTasks();
-const workspaceFiles = new WorkspaceFiles({ root: projectRoot, agentRuntime });
+const workspaceFiles = new TaskFiles({ root: projectRoot, agentRuntime });
 const server = createAppServer({ taskStore, agentRuntime, workspaceFiles });
 server.listen(3000, "127.0.0.1", () => {
   console.log(`siRNA-pi: http://127.0.0.1:3000/ ; runtime=agent-compose ; recovered=${recovered.length}`);

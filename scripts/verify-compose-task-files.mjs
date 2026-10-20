@@ -1,4 +1,5 @@
-// Read-only acceptance of an existing Compose task. No model or Docker action.
+// GET may refresh the host archive. Task history, execution metadata, models
+// and container lifecycle are unchanged by this acceptance check.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -37,15 +38,17 @@ const session = JSON.parse(metadataBytes);
 assert.equal(session.id, before.task.executionSessionId);
 const listing = await json(`${base}/files`);
 if (session.workspacePath == null) {
-  assert.equal(listing.state, 'unprepared');
-  assert.deepEqual(listing.files, []);
+  assert.equal(listing.state, listing.files.length ? 'ready' : 'unprepared');
+  assert.equal(listing.synchronization, 'unprepared');
   assert.ok(session.sandboxId == null);
   assert.deepEqual(session.runs, []);
 } else {
   assert.match(session.workspacePath, /^runtime\/agent-compose\/data\/sandboxes\/\d{4}\/\d{2}\/\d{2}\/[a-f0-9]{64}\/workspace$/);
   assert.equal(session.workspacePath.split('/').at(-2), session.sandboxId);
   assert.equal(listing.state, 'ready');
+  assert.ok(['current', 'cached'].includes(listing.synchronization));
 }
+const archivePath = `runtime/task-files/${taskId}`;
 const verified = [];
 for (const file of listing.files) {
   assert.ok(['input', 'output'].includes(file.kind));
@@ -57,10 +60,17 @@ for (const file of listing.files) {
   const bytes = Buffer.from(await response.arrayBuffer());
   assert.equal(bytes.length, file.size);
   assert.equal(hash(bytes), file.sha256);
-  assert.deepEqual(bytes, localFile(`${session.workspacePath}/${file.kind}/${file.name}`));
-  verified.push({ kind: file.kind, name: file.name, size: bytes.length, sha256: hash(bytes) });
+  assert.deepEqual(bytes, localFile(`${archivePath}/${file.kind}/${file.name}`));
+  let guestComparison;
+  if (session.workspacePath != null) {
+    const relative = `${session.workspacePath}/${file.kind}/${file.name}`;
+    try { guestComparison = { guestBytesMatchArchive: bytes.equals(localFile(relative)) }; }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+  }
+  verified.push({ kind: file.kind, name: file.name, size: bytes.length, sha256: hash(bytes), ...guestComparison });
 }
 assert.deepEqual(await json(`${base}/messages`), before);
 assert.deepEqual(localFile(metadataPath), metadataBytes);
-console.log(JSON.stringify({ taskId, taskStatus: before.task.status, workspaceState: listing.state, files: verified,
-  downloadedBytesMatchHost: verified.length ? true : null, taskHistoryUnchanged: true, executionMetadataUnchanged: true }, null, 2));
+console.log(JSON.stringify({ taskId, taskStatus: before.task.status, workspaceState: listing.state,
+  synchronization: listing.synchronization, archivePath, files: verified,
+  downloadedBytesMatchArchive: verified.length ? true : null, taskHistoryUnchanged: true, executionMetadataUnchanged: true }, null, 2));

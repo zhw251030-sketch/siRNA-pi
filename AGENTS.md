@@ -100,3 +100,13 @@ Linux 用目录描述符锚定逐层读取，拒绝符号链接、硬链接、�
 第7步验收：Linux271项Node测试通过（新增32项，无跳过）；Windows268通过、3项Linux专属检查跳过。已结束任务36ba635d-8b5c-44d2-a4fe-ec272564f5d6的CSV18字节／JSON45字节可预览下载，JSON指纹b62fa3ddc398457bbb243e0bbe7dbed5b4293f896eebbc4f8e1acdee587b03bf，内容4/100/25。另一任务52072665-52fb-4f0e-b93c-167ada3950e4只有自己的输入，没有输出混入。新建空任务b430129d-72e1-4304-9907-cb97103c0d0b用于文件空状态检查，没有发送模型消息。验收入口scripts/verify-compose-task-files.mjs，私有证据runtime/compose-web/files-*-acceptance.json。参考说明docs/11-网页查看任务文件.md。本轮无模型调用、无系统变更，两个旧guest未停止。
 
 最新下一步：按原仓库加入输入文件上传、独立任务文件归档以及与sandbox的同步，再学习工具封装。继续main提交与GitHub/bundle服务器同步，只改siRNA-pi学习项目。
+
+以上为第7步结束状态，以下为最新进度。
+
+2026-10-20：第8步上传与独立归档代码完成。bootstrap使用TaskFiles；runtime/task-files/<taskId>/input|output保存任务资料，hydrate在Compose准备完成且远端明确空闲后、RPC提交前回填输入；collect在执行后和释放后收集输出。POST files沿用{name,contentBase64}，新上传1..600000字节、同名409不覆盖；历史输入导入／回填与下载保留50MB，总量100MB/1000条目。旧输入只导入缺失项，GET不回写guest，归档不镜像删除。保存成功但同步失败201pending；归档失败workspace_warning与模型终态分开；workspace事件外层沿用SQLite progress_message，实际类型在payload.type。上传和运行／结束互斥，重启后先核查远端活动状态。网页预览读取X-Task-Files-Sync提示cached。
+
+本轮Linux354项Node测试全通过；Windows350通过、4项Linux专属跳过。真实浏览器两个任务624e3709-f5f8-422b-8ce7-a7c8e079d155和a841937e-66a1-4010-bd2d-97fb3a58b7a1上传values.csv13字节成功，上传本身无guest/Pi会话/模型运行；输入归档、工作区与HTTP字节相同。两个任务的模型请求均收到MiniMax529 overloaded_error（相隔约4分钟），原生记录0工具调用，没有生成3/27/9结果，真实成功链路尚未验收，不能声称已通过。两项guest已结束释放、0容器、无活动运行，输入及失败历史保留。第5步D的两个旧guest仍运行。旧结束任务36ba635d的result.json45字节已按需收回任务归档，字节指纹和4/100/25历史结果未变，下载验证通过。
+
+验收脚本scripts/verify-compose-upload.mjs支持uploaded/completed/ended，只查验、不调用模型；completed严格检查原生read→write→read、统计和同步记录，本次两次失败均拒绝通过。私有证据runtime/compose-web/upload-{acceptance-uploaded,retry-uploaded,first-overload,retry-overload,retry-files,legacy-archive,releases}.json，完整测试runtime/upload-step8-tests.log。详细文件解释见docs/12-上传资料与任务文件归档.md。
+
+最新下一步：MiniMax服务恢复后，用新专用任务补齐上传→模型读取→新结果归档→结束后下载的成功验收；保留失败任务与记录，不循环自动付费重试。然后对照原仓库capability-platform/agent-tool.ts与pi-extension.ts进入可复用工具封装。main单分支；无新系统权限/服务/安装变更；不改上级RSI项目。

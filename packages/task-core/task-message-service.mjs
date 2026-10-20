@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 
 // Follows the reference service's task-scoped turn and event contracts, without
-// its container synchronization, revisions, or capability-coordinator features.
-const persistedEventTypes = new Set(["progress_message", "tool_start", "tool_end", "run_status", "done", "error"]);
+// its revisions or capability-coordinator features.
+const persistedEventTypes = new Set(["progress_message", "tool_start", "tool_end", "run_status", "done", "error", "workspace_synced", "workspace_warning"]);
 const safeFailure = "本轮执行失败，请稍后重试；服务端已保留任务记录。";
 
 export class TaskMessageSubmissionError extends Error {
@@ -28,10 +28,12 @@ export class TaskMessageService {
   #creating = new Map();
   #canceling = new Map();
   #ending = new Map();
+  #uploading = new Map();
 
-  constructor({ taskStore, agentRuntime }) {
+  constructor({ taskStore, agentRuntime, workspaceFiles }) {
     this.taskStore = taskStore;
     this.agentRuntime = agentRuntime;
+    this.workspaceFiles = workspaceFiles;
   }
 
   async createTask(requestId) {
@@ -78,7 +80,7 @@ export class TaskMessageService {
       return { ...result, completion: Promise.resolve(result) };
     }
     if (!this.agentRuntime) throw new TaskMessageSubmissionError(503, "Agent runtime is unavailable");
-    if (this.#active.has(taskId) || this.#ending.has(taskId) || this.#canceling.has(taskId) || existing.status === "running" || existing.status === "stopped") {
+    if (this.#active.has(taskId) || this.#ending.has(taskId) || this.#canceling.has(taskId) || this.#uploading.has(taskId) || existing.status === "running" || existing.status === "stopped") {
       throw new TaskMessageSubmissionError(409, "This design task cannot accept a new message now");
     }
     // No await before this reservation and database insert: simultaneous HTTP
@@ -113,6 +115,35 @@ export class TaskMessageService {
     }
   }
 
+  async uploadInput(taskId, payload) {
+    const task = this.taskStore.getTask(taskId);
+    if (!task) throw new TaskMessageSubmissionError(404, '没有找到这个任务。');
+    if (!this.workspaceFiles) throw new TaskMessageSubmissionError(503, '任务文件服务尚未配置。');
+    if (this.#active.has(taskId) || this.#ending.has(taskId) || this.#canceling.has(taskId) || this.#uploading.has(taskId) ||
+        task.status === 'running' || task.status === 'stopped') {
+      throw new TaskMessageSubmissionError(409, '任务正在执行、结束或上传，或已结束；现在不能上传资料。');
+    }
+    const pending = Promise.resolve().then(async () => {
+      try {
+        if (typeof this.agentRuntime?.assertWorkspaceIdle !== 'function') throw new Error('Unsupported runtime');
+        await this.agentRuntime.assertWorkspaceIdle(task.executionSessionId);
+      } catch {
+        throw new TaskMessageSubmissionError(409, '暂时无法确认执行环境空闲，或此任务不支持上传。请刷新记录后重试。');
+      }
+      const file = await this.workspaceFiles.saveInput(task, payload);
+      try {
+        const result = await this.workspaceFiles.hydrate(task);
+        return { file, synchronization: result.synchronization };
+      } catch {
+        // Saving and syncing are distinct outcomes. Never invite an automatic
+        // retry of an already saved upload by reporting it as a failed save.
+        return { file, synchronization: 'pending', warning: '文件已保存到任务资料区；同步到执行环境尚未确认，将在下次执行前重试。' };
+      }
+    });
+    this.#uploading.set(taskId, pending);
+    try { return await pending; } finally { this.#uploading.delete(taskId); }
+  }
+
   #lifecycleOperation(map, taskId, operation) {
     const pending = Promise.resolve().then(operation).catch((error) => {
       if (error instanceof TaskMessageSubmissionError) throw error;
@@ -127,6 +158,7 @@ export class TaskMessageService {
   async cancelTask(taskId) {
     const existing = this.taskStore.getTask(taskId);
     if (!existing) throw new TaskMessageSubmissionError(404, "没有找到这个任务。");
+    if (this.#uploading.has(taskId)) throw new TaskMessageSubmissionError(409, '资料正在上传，请等待保存完成。');
     if (this.#ending.has(taskId)) throw new TaskMessageSubmissionError(409, "任务正在结束，请等待记录保存。");
     if (this.#canceling.has(taskId)) return this.#canceling.get(taskId);
     return this.#lifecycleOperation(this.#canceling, taskId, async () => {
@@ -148,6 +180,7 @@ export class TaskMessageService {
   async endTask(taskId) {
     const existing = this.taskStore.getTask(taskId);
     if (!existing) throw new TaskMessageSubmissionError(404, "没有找到这个任务。");
+    if (this.#uploading.has(taskId)) throw new TaskMessageSubmissionError(409, '资料正在上传，请等待保存完成。');
     if (this.#ending.has(taskId)) return this.#ending.get(taskId);
     // Reserve synchronously, before metadata inspection or a preceding stop.
     return this.#lifecycleOperation(this.#ending, taskId, async () => {
@@ -164,6 +197,9 @@ export class TaskMessageService {
       }
       const session = await this.agentRuntime.remove(existing.executionSessionId);
       if (session?.status !== "stopped") throw new Error("Release was not confirmed");
+      // Graceful release retains the workspace. Collect stable output before
+      // confirming the task ended; failed collection can be retried safely.
+      if (this.workspaceFiles) await this.workspaceFiles.collect(this.taskStore.getTask(taskId));
       return { task: this.taskStore.updateExecution(taskId, { status: "stopped" }) };
     });
   }
@@ -177,14 +213,16 @@ export class TaskMessageService {
     const pendingEvents = [];
     const flushPending = () => {
       for (const pending of pendingEvents.splice(0)) {
-        this.taskStore.appendRunEvent(taskId, turn.message.id, runId, pending.type, pending);
+        this.taskStore.appendRunEvent(taskId, turn.message.id, runId, pending.type.startsWith('workspace_') ? 'progress_message' : pending.type, pending);
       }
     };
     const persist = (event) => {
       if (!persistedEventTypes.has(event.type)) return;
       if (!runId) { pendingEvents.push(event); return; }
       flushPending();
-      this.taskStore.appendRunEvent(taskId, turn.message.id, runId, event.type, event);
+      // Keep the existing SQLite event schema; payload.type retains the exact
+      // public workspace event contract for live SSE and history rendering.
+      this.taskStore.appendRunEvent(taskId, turn.message.id, runId, event.type.startsWith('workspace_') ? 'progress_message' : event.type, event);
     };
     const accept = (original) => {
       const event = original.type === "error" ? { ...original, error: safeFailure } : original;
@@ -205,7 +243,12 @@ export class TaskMessageService {
     };
     try {
       try {
-        await this.agentRuntime.run({ sessionId: turn.task.executionSessionId, message }, accept, signal);
+        await this.agentRuntime.run({ sessionId: turn.task.executionSessionId, message,
+          ...(this.workspaceFiles ? { prepareWorkspace: async () => {
+            const result = await this.workspaceFiles.hydrate(turn.task);
+            return (result.inputFiles ?? []).map(file => file.name);
+          } } : {}),
+        }, accept, signal);
         if (!finalStatus) throw new Error("Runtime did not finish");
         if (!runId) {
           runId = randomUUID();
@@ -218,6 +261,16 @@ export class TaskMessageService {
         this.taskStore.updateExecution(taskId, { currentRunId: runId });
         accept({ type: "error", error: safeFailure, runId });
         if (finalStatus !== "failed") accept({ type: "done", status: "failed", runId });
+      }
+      if (this.workspaceFiles) {
+        try {
+          const result = await this.workspaceFiles.collect(this.taskStore.getTask(taskId));
+          if (result.synchronization === 'cached') throw new Error('Fresh archive was not confirmed');
+          if (result.state === 'ready' && result.synchronization === 'current') accept({ type: 'workspace_synced', runId });
+        } catch {
+          // File delivery and model execution have separate outcomes.
+          accept({ type: 'workspace_warning', runId, error: '本轮执行已结束，但文件归档尚未确认。请刷新文件重试。' });
+        }
       }
       const wasCanceled = finalStatus === "canceled" || finalStatus === "cancelled";
       const content = assistantText.trim() || (failed ? `错误：${safeFailure}`
