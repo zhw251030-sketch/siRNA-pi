@@ -124,3 +124,11 @@ Linux 用目录描述符锚定逐层读取，拒绝符号链接、硬链接、�
 真实复验任务5567e0ae-6715-4db8-8be9-0a4ea6079ca6：7响应/6成功工具（read、MCP连接、MCP描述、MCP业务call、write、read）；4条候选与独立expected.json一致，812字节JSON原文未改写，archive/HTTP/guest及浏览器下载SHA一致。completed/ended验收通过，guest已释放，历史文件保留；两个第5步D旧guest仍运行。验收入口scripts/verify-compose-candidate-tool.mjs与lib/verify-compose-candidate-task.mjs，新增32项负例/成功轨迹检查。最终Linux406通过/0跳过，Windows402通过/4Linux专属跳过；无模型guest适配器检查也通过。
 
 完整文件解释与证据见docs/13-第一个MCP工具.md。下一步围绕原仓库工具合同、注册记录和验证案例学习工具管理，再进入外部软件执行与版本流程；不要把当前固定算法接入称为自动封装或自进化完成。本轮不修改系统服务/权限、上级RSI项目，继续main同步。
+
+2026-10-20：第10A步完成工具提案合同预检。packages/capability-platform/tool-contract.mjs区分完整性与字段检查，tool-validation.mjs提供已有记录的成功/输出匹配/重复性判据；scripts/check-tool-contract.mjs只读JSON，绝不运行源码。npm run check:tool-contract -- examples/04-tool-contract/proposal.draft.json --draft退出0，默认正式MCP要求检查退出2且仅缺/runtimeArtifact。教学提案尚无真实运行产物，不得伪造摘要；executed/registered/activated/runtimeArtifactVerified始终false。
+
+对照原tool-contract/tool-lifecycle/output-matcher独立实现；原MCP提交要求运行产物，而HTTP提交未开启同一完整性选项，不能混为一谈。expectedOutput为字面递归子集，不是JSON Schema；exact要求两次成功且stdout/stderr/filesDigest相同，contract仅放松字节相同要求。JSON和未知字段有意收紧；运行记录必须完整，拒绝自定义数组原型。依赖预检沿参考字符规则，next/stable/1.x可能通过，不保证版本不可变或实际安装。
+
+新增126项专测，原RPC超时测试分成两种明确情形，生产停止代码未改。最终Linux533通过/0跳过，Windows529通过/4项Linux专属跳过。两地实际CLI结果一致；服务器10份会话元数据哈希、3个运行容器ID/镜像、凭据文件元数据保持，health就绪空闲。0模型请求，不读真实凭据内容，不构建镜像，不重启服务。日志在runtime/contract-preflight-*，详见docs/14-工具提案合同预检.md。
+
+当前下一步：为工具建立真实可追溯的运行产物，再登记提案、在专用环境实际验证、批准并暴露版本；这些尚未实现。现有MCP仍只有固定候选枚举工具，预检CLI未接到网页或MCP服务；不要把“字段通过”写成verified/approved或自进化完成。

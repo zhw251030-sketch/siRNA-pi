@@ -366,18 +366,37 @@ test('GetRun normalizes details, authenticates and keeps only nonempty cleanup e
   assert.deepEqual(received.gets[0].auth, ['Bearer local-test-token']);
 });
 
-test('detached stop waits for terminal state with a bounded timeout and never sends a second stop', { timeout: 5000 }, async t => {
-  const { client, received } = await fixture(t, { attach() {},
-    stop(_call, reply) { reply(null, { run: { summary: run }, stopRequested: true }); },
-    get(_call, reply) { reply(null, { run: { summary: run } }); },
+for (const getMode of ['running', 'unresponsive']) {
+  test(`detached stop has a bounded timeout and sends one stop when GetRun is ${getMode}`, { timeout: 5000 }, async t => {
+    let warmup = true;
+    const { client, received } = await fixture(t, { attach() {},
+      stop(_call, reply) { reply(null, { run: { summary: run }, stopRequested: true }); },
+      get(_call, reply) {
+        if (warmup || getMode === 'running') reply(null, { run: { summary: run } });
+      },
+    });
+    // Establish the real transport before measuring the short stop deadline.
+    await client.getRun('run-test');
+    warmup = false;
+    const started = performance.now();
+    await assert.rejects(client.stopRunAndWait('run-test', { timeoutMs: 40 }), error => {
+      assert.equal(error.runId, 'run-test');
+      assert.equal(error.sandboxId, 'sandbox-test');
+      assert.equal(error.stopError, error.message);
+      // A last GetRun may reach its RPC deadline before the outer loop checks time.
+      if (getMode === 'unresponsive' || error.code !== undefined) {
+        assert.equal(error.code, grpc.status.DEADLINE_EXCEEDED);
+      } else {
+        assert.equal(error.stopError, 'Agent Compose stop timed out before a terminal run was confirmed');
+      }
+      return true;
+    });
+    assert.ok(performance.now() - started < 1000, 'stop verification must remain bounded');
+    assert.equal(received.stops.length, 1);
+    assert.equal(received.stops[0].request.runId, 'run-test');
+    assert.ok(received.gets.length >= 2, 'must query run state after the stop acknowledgement');
   });
-  await assert.rejects(client.stopRunAndWait('run-test', { timeoutMs: 40 }), error => {
-    assert.equal(error.runId, 'run-test');
-    assert.match(error.stopError, /terminal|timed out/i);
-    return true;
-  });
-  assert.equal(received.stops.length, 1);
-});
+}
 
 test('a success stop acknowledgement does not truncate later normal stream callbacks', { timeout: 5000 }, async t => {
   const controller = new AbortController();

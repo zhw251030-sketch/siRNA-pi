@@ -1,0 +1,40 @@
+{
+  "name": "靶序列长度与GC统计（合同教学）",
+  "toolName": "summarize_target_sequence",
+  "description": "Normalize one target sequence or FASTA record and report length and GC fraction. This teaching example does not predict siRNA activity.",
+  "runtime": "node",
+  "script": "import fs from 'node:fs';\nconst envelope = JSON.parse(fs.readFileSync(0, 'utf8'));\nconst raw = envelope.input.sequence;\nif (typeof raw !== 'string') throw new Error('sequence must be text');\nconst sequence = raw.split(/\\r?\\n/).filter(line => !line.trimStart().startsWith('>')).join('').replace(/\\s/g, '').toUpperCase().replace(/U/g, 'T');\nif (!/^[ACGT]+$/.test(sequence)) throw new Error('unsupported or empty sequence');\nconst gcCount = [...sequence].filter(base => base === 'G' || base === 'C').length;\nprocess.stdout.write(JSON.stringify({ length: sequence.length, gcFraction: gcCount / sequence.length }));\n",
+  "repeatabilityMode": "exact",
+  "smokeInput": { "sequence": "ACGT" },
+  "dependencies": [],
+  "testCases": [
+    {
+      "name": "four-base DNA input",
+      "input": { "sequence": "ACGT" },
+      "expectedOutput": { "length": 4, "gcFraction": 0.5 }
+    },
+    {
+      "name": "single FASTA RNA input",
+      "input": { "sequence": ">target\nACGU\n" },
+      "expectedOutput": { "length": 4, "gcFraction": 0.5 }
+    }
+  ],
+  "baseline": {
+    "runtime": "node",
+    "script": "import fs from 'node:fs';\nconst envelope = JSON.parse(fs.readFileSync(0, 'utf8'));\nconst sequence = envelope.input.sequence.trim().toUpperCase();\nif (!/^[ACGT]+$/.test(sequence)) throw new Error('baseline accepts plain DNA only');\nconst gcCount = [...sequence].filter(base => base === 'G' || base === 'C').length;\nprocess.stdout.write(JSON.stringify({ length: sequence.length, gcFraction: gcCount / sequence.length }));\n"
+  },
+  "benchmarkCases": [
+    {
+      "name": "preserve plain DNA behavior",
+      "input": { "sequence": "ACGT" },
+      "expectedOutput": { "length": 4, "gcFraction": 0.5 }
+    },
+    {
+      "name": "handle FASTA and RNA input",
+      "input": { "sequence": ">target\nACGU\n" },
+      "expectedOutput": { "length": 4, "gcFraction": 0.5 }
+    }
+  ],
+  "minNetGain": 1,
+  "permissions": { "profile": "no_external_access" }
+}
