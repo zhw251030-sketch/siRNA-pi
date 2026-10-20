@@ -28,7 +28,7 @@ assert.equal(unauthenticated.status, 401, 'The management HTTP API must reject m
 await unauthenticated.body?.cancel();
 await compose('status');
 // Fail before creating a run if the large guest image has not been downloaded.
-const guestImage = 'sirna-pi-guest:pi1.2.0';
+const guestImage = 'sirna-pi-guest:pi1.2.0-mcp1';
 const expectedGuestId = await docker('image', 'inspect', '--format', '{{.Id}}', guestImage);
 const project = await compose('up');
 assert.equal(typeof project.project?.id, 'string');

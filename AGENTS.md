@@ -44,7 +44,7 @@
 - 使用已有 Node 24 运行环境即可；不再向用户主目录的 .pi、.config 或 /tmp 写入本项目状态。
 - MiniMax 国内服务使用 minimax-cn / MiniMax-M3。启动入口是 npm run pi:minimax，读取 docs/auth.json 并将 Pi 状态目录设为 runtime/pi。
 - SDK 入口为 npm run pi:sdk；--check 只创建并检查会话，不调用模型。SDK 状态位于 runtime/pi-sdk，任务事件位于 runtime/sdk-task.events.jsonl，结果位于 workspaces/sdk-task/result.json，保留原 CLI 练习证据。
-- 本阶段仅开放原生 read/write，关闭扩展、MCP 和自动资源发现；CLI/SDK 命令行练习仍用内存会话，网页使用项目内 Pi 持久化会话。这不是操作系统级沙箱。
+- 原CLI/SDK练习仍只开放read/write、使用内存会话。第9步新Compose guest允许read/write/mcp；mcp来自官方显式pi-mcp-adapter 2.11.0，只连接控制端指定的固定服务。Pi原生MCP和自动资源发现仍关闭；网页使用项目内持久化会话。工具允许清单不是操作系统级沙箱。
 - 网页入口为 npm run web → apps/api/bootstrap.mjs，只监听 127.0.0.1:3000，经 SSH 隧道访问。先 POST /v1/tasks 创建，再 POST /v1/tasks/:id/messages 发送；不要恢复成旧的一次性合并接口。
 - 网页历史保存在 runtime/tasks/tasks.sqlite。旧 SDK 任务的 Pi 上下文位于 runtime/pi-web/sessions，执行元数据 runtime/task-sessions，目录 workspaces/web/<executionSessionId>，日志 runtime/web/<executionSessionId>.<runId>.events.jsonl；该旧路径有任务目录读写限制。
 - 新任务默认 Agent Compose：元数据 runtime/compose-sessions，投影日志 runtime/compose-web，实际文件/原生 Pi 会话在 runtime/agent-compose/data/sandboxes/<日期>/<sandboxId> 下。日期路径必须读取 inspect.workspace_path；guest 中 read/write 允许清单不等于严格路径限制。通过 RuntimeRouter 保留旧 SDK 任务，不将故障新任务静默改走 SDK。
@@ -110,3 +110,17 @@ Linux 用目录描述符锚定逐层读取，拒绝符号链接、硬链接、�
 验收脚本scripts/verify-compose-upload.mjs支持uploaded/completed/ended，只查验、不调用模型；completed严格检查原生read→write→read、统计和同步记录，本次两次失败均拒绝通过。私有证据runtime/compose-web/upload-{acceptance-uploaded,retry-uploaded,first-overload,retry-overload,retry-files,legacy-archive,releases}.json，完整测试runtime/upload-step8-tests.log。详细文件解释见docs/12-上传资料与任务文件归档.md。
 
 最新下一步：MiniMax服务恢复后，用新专用任务补齐上传→模型读取→新结果归档→结束后下载的成功验收；保留失败任务与记录，不循环自动付费重试。然后对照原仓库capability-platform/agent-tool.ts与pi-extension.ts进入可复用工具封装。main单分支；无新系统权限/服务/安装变更；不改上级RSI项目。
+
+以上为第8步当时状态；以下为最新进度。
+
+2026-10-20：已补齐第8步成功验收，专用任务4f75f67c-a3ab-43b3-94a4-6f0e680334b0完成3次工具和3/27/9，uploaded/completed/ended均通过，结束后文件保留。原529任务保持失败历史。
+
+第9步完成首个固定MCP工具enumerate_sirna_candidates：packages/domain/sirna-tools负责确定性算法和工具合同，apps/mcp/server.mjs使用固定MCP SDK1.30.0/stdin-stdout。与参考transparent_prefilter_v1的输出和评分规则对齐，严格拒绝未知参数。分数只是预筛选，不是活性预测；未实现专业软件或自进化。
+
+正式路径agent-compose.yml声明sirna-tools，通过官方pi-mcp-adapter2.11.0向Pi1.2.0提供mcp入口；业务名带前缀sirna_tools_enumerate_sirna_candidates。新项目sirna-pi-learning-mcp、新镜像sirna-pi-guest:pi1.2.0-mcp1。pi.sh仅允许read/write/mcp，关闭原生MCP和自动资源发现。构建补丁只允许显式控制端MCP配置，拒绝imports，防止全局/项目配置替换；这不是OS路径沙箱。旧任务保留原project/revision/image，不静默迁移。
+
+第一次网页试跑061b69c5因控制容器单文件bind mount仍指向旧YAML而没有MCP，未生成候选，已结束并保留记录。检查所有任务空闲后仅重建本项目控制容器并up；旧8份session文件、旧项目修订和两个旧guest保留。后续修改此配置需同时核验容器内内容，不能只看宿主文件或up退出码。
+
+真实复验任务5567e0ae-6715-4db8-8be9-0a4ea6079ca6：7响应/6成功工具（read、MCP连接、MCP描述、MCP业务call、write、read）；4条候选与独立expected.json一致，812字节JSON原文未改写，archive/HTTP/guest及浏览器下载SHA一致。completed/ended验收通过，guest已释放，历史文件保留；两个第5步D旧guest仍运行。验收入口scripts/verify-compose-candidate-tool.mjs与lib/verify-compose-candidate-task.mjs，新增32项负例/成功轨迹检查。最终Linux406通过/0跳过，Windows402通过/4Linux专属跳过；无模型guest适配器检查也通过。
+
+完整文件解释与证据见docs/13-第一个MCP工具.md。下一步围绕原仓库工具合同、注册记录和验证案例学习工具管理，再进入外部软件执行与版本流程；不要把当前固定算法接入称为自动封装或自进化完成。本轮不修改系统服务/权限、上级RSI项目，继续main同步。

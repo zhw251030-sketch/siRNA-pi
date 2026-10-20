@@ -6,6 +6,17 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund --engine-strict
 
 COPY config/pi/compose-settings.json /opt/sirna-pi/settings.json
+COPY packages/domain/sirna-tools/ /opt/sirna-pi/packages/domain/sirna-tools/
+COPY apps/mcp/ /opt/sirna-pi/apps/mcp/
+COPY scripts/verify-guest-mcp.mjs /opt/sirna-pi/scripts/verify-guest-mcp.mjs
+# The official adapter imports adjacent TypeScript modules. Expose its complete
+# package, keeping the upstream MIT license and locked implementation intact.
+RUN test -L /usr/local/share/agent-compose/pi-mcp-adapter/index.ts \
+    && rm /usr/local/share/agent-compose/pi-mcp-adapter/index.ts \
+    && rmdir /usr/local/share/agent-compose/pi-mcp-adapter \
+    && ln -s /usr/lib/node_modules/pi-mcp-adapter /usr/local/share/agent-compose/pi-mcp-adapter
+COPY containers/agent-compose-guest/patch-mcp-config.mjs /opt/sirna-pi/patch-mcp-config.mjs
+RUN node /opt/sirna-pi/patch-mcp-config.mjs /usr/lib/node_modules/pi-mcp-adapter
 COPY --chmod=755 containers/agent-compose-guest/pi.sh /usr/local/bin/pi
 RUN test "$(/usr/local/bin/pi --version)" = "1.2.0"
 

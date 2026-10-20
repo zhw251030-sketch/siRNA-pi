@@ -6,6 +6,17 @@
 !containers/agent-compose-guest/
 !containers/agent-compose-guest/Dockerfile
 !containers/agent-compose-guest/pi.sh
+!containers/agent-compose-guest/patch-mcp-config.mjs
 !config/
 !config/pi/
 !config/pi/compose-settings.json
+!packages/
+!packages/domain/
+!packages/domain/sirna-tools/
+!packages/domain/sirna-tools/candidates.mjs
+!packages/domain/sirna-tools/sirna-tools.mjs
+!apps/
+!apps/mcp/
+!apps/mcp/server.mjs
+!scripts/
+!scripts/verify-guest-mcp.mjs

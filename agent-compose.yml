@@ -1,10 +1,18 @@
-# Same agent name and driver boundary as the reference; no model run in this step.
-name: sirna-pi-learning
+# A new project identity preserves existing tasks' MCP-free project revision.
+name: sirna-pi-learning-mcp
+mcp_servers:
+  sirna-tools:
+    type: local
+    command: /usr/bin/node
+    args:
+      - /opt/sirna-pi/apps/mcp/server.mjs
 agents:
   designer:
     provider: pi
     model: minimax-cn/MiniMax-M3
-    image: sirna-pi-guest:pi1.2.0
+    image: sirna-pi-guest:pi1.2.0-mcp1
+    mcp_servers:
+      - sirna-tools
     driver:
       docker: {}
     sandbox:

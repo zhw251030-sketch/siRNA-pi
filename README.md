@@ -20,7 +20,9 @@
 - 2026-10-20：完成停止本轮、结束任务与容器释放。真实网页停止后同会话续聊成功，运行中结束后 guest 释放、8 条消息及文件保留，刷新只读；239 项 Node 测试与4项 Linux 凭据测试通过。见 [第 6 步：停止运行与结束任务](docs/10-停止运行与结束任务.md)。
 - 2026-10-20：完成网页任务文件列表、文本预览与下载。已结束任务仍能查看 CSV/JSON，浏览器下载与宿主字节一致，切换任务不混入其他结果。Linux 271 项 Node 测试通过；本轮没有模型调用。见 [第 7 步：网页查看任务文件](docs/11-网页查看任务文件.md)。
 - 2026-10-20：第8步已实现输入上传、独立任务归档、执行前回填和执行后收集。Linux354项测试通过；真实网页上传、回填、旧结果归档下载及结束保留通过。两次新模型验收均遭MiniMax 529过载、0工具调用，成功生成新结果仍待补验。详见 [上传资料与任务文件归档](docs/12-上传资料与任务文件归档.md)。
-- 下一步先在模型服务恢复后补齐上传任务的成功验收，再进入工具封装。第5步D两个网页guest仍保留，本轮两个验收guest及生命周期guest均已释放、文件保留。资源配额、开机自启、专业siRNA工具与自进化尚未实现。
+- 2026-10-20：后续补齐第8步真实成功验收，上传values.csv后3次工具调用得到3/27/9，结束后归档、工作区、HTTP字节一致。原529失败任务保留。
+- 2026-10-20：第9步接入首个固定MCP工具 `enumerate_sirna_candidates`。真实网页7响应/6工具，完成MCP业务调用、保存和重读4条候选；结束后下载字节一致。Linux406项测试通过，旧任务保留。详细实现、真实验收和部署问题见 [第一个MCP工具](docs/13-第一个MCP工具.md)。
+- 当前从“网页封装”进入“工具封装”。已提供一个透明预筛选工具，不代表专业软件安装、工具治理或自进化已经实现；资源配额、开机自启仍未实现。旧任务保留原环境，本步新工具在新任务中使用。
 
 安装位置、文件解释和验证记录见 [第 1 步 A：安装与运行 Pi](docs/01-安装与运行Pi.md)。服务器项目目录是 `/home/hanwen/Project/project/siNRA-pi/`，按用户指定拼写保留。
 
@@ -53,6 +55,7 @@ SDK 示例、逐段代码解释和实际结果见 [第 2 步：调用 Pi SDK 创
 | `node scripts/verify-compose-web-task.mjs <taskId>` | 验证新容器网页统计任务的记录、原生会话和真实文件 | 否 |
 | `node scripts/verify-compose-task-files.mjs <taskId>` | 校验下载与任务归档字节一致、读取不改变任务记录；GET 可刷新归档 | 否 |
 | `node scripts/verify-compose-upload.mjs <taskId> uploaded\|completed\|ended` | 核验上传未启动环境、真实工具执行和结束后文件保留 | 否 |
+| `node scripts/verify-compose-candidate-tool.mjs <taskId> completed\|ended` | 核对真实MCP调用、独立预期、输出归档与结束后交付 | 否 |
 | `npm run verify:web-task -- <executionSessionId> --run <runId>` | 验证旧 SDK 网页统计示例的一次具体执行 | 否 |
 | `npm run verify:web-task -- <旧任务编号>` | 兼容第 3 步原有网页样例 | 否 |
 
@@ -130,6 +133,10 @@ scripts/build-project-guest.sh            用项目 Docker 构建 guest
 scripts/verify-agent-compose-model.mjs    真实容器模型任务及上下文续接验收
 scripts/lib/verify-compose-file-task.mjs  按原生会话与真实文件独立验收
 apps/api/bootstrap.mjs      组合数据库、运行时与 HTTP 服务，启动网页
+apps/mcp/server.mjs         通过stdio MCP列举和调用固定工具
+packages/domain/sirna-tools/candidates.mjs   确定性候选枚举与透明预筛选规则
+packages/domain/sirna-tools/sirna-tools.mjs  工具说明、参数合同与执行入口
+examples/03-candidate-tool/                单条FASTA教学输入及独立验收预期
 packages/agent-runtime/runtime-router.mjs       新任务走 Compose，旧 SDK 任务继续原上下文
 packages/agent-runtime/agent-compose-runtime.mjs 组织任务容器、模型运行与结果保存
 packages/agent-runtime/agent-compose-rpc.mjs     使用正式双向 RPC、认证、截止时间和 EOF

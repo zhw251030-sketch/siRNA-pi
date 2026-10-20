@@ -59,7 +59,7 @@ function modelResult(run, sandboxId) {
 }
 
 console.log(`Private evidence: ${evidence}`);
-const expectedImage = await docker('image', 'inspect', '--format', '{{.Id}}', 'sirna-pi-guest:pi1.2.0');
+const expectedImage = await docker('image', 'inspect', '--format', '{{.Id}}', 'sirna-pi-guest:pi1.2.0-mcp1');
 const project = await compose('up');
 await save('project', project);
 let sandboxId;

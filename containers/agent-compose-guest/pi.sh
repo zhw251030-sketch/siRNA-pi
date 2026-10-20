@@ -18,4 +18,4 @@ cp /opt/sirna-pi/settings.json "$PI_CODING_AGENT_DIR/settings.json"
 exec /usr/bin/node /opt/sirna-pi/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js \
   --no-extensions --no-mcp --no-skills --no-prompt-templates \
   --no-themes --no-context-files --no-approve --offline \
-  --tools read,write --thinking off "$@"
+  --tools read,write,mcp --thinking off "$@"

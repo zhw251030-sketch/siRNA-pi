@@ -1,0 +1,13 @@
+{
+  "sequenceLength": 24,
+  "guideLength": 21,
+  "totalWindows": 4,
+  "returnedCandidates": 4,
+  "scoringMethod": "transparent_prefilter_v1",
+  "candidates": [
+    {"id":"SIRNA-00001","start":1,"end":21,"targetWindow":"ACGUACGUACGUACGUACGUA","guide":"UACGUACGUACGUACGUACGU","gcFraction":0.4762,"prefilterScore":0.8686,"warnings":[]},
+    {"id":"SIRNA-00004","start":4,"end":24,"targetWindow":"UACGUACGUACGUACGUACGU","guide":"ACGUACGUACGUACGUACGUA","gcFraction":0.4762,"prefilterScore":0.8686,"warnings":[]},
+    {"id":"SIRNA-00002","start":2,"end":22,"targetWindow":"CGUACGUACGUACGUACGUAC","guide":"GUACGUACGUACGUACGUACG","gcFraction":0.5238,"prefilterScore":0.7714,"warnings":[]},
+    {"id":"SIRNA-00003","start":3,"end":23,"targetWindow":"GUACGUACGUACGUACGUACG","guide":"CGUACGUACGUACGUACGUAC","gcFraction":0.5238,"prefilterScore":0.7714,"warnings":[]}
+  ]
+}
