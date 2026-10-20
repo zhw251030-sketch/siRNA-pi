@@ -26,7 +26,8 @@
 - 2026-10-20：第10B步完成真实工具产物构建：可信CLI将教学源码写入专用容器、冒烟、保存镜像，再在两个新容器复测，输出均为length4/gcFraction0.5；篡改拒绝及真实语法失败验收通过，临时容器已清理。详见 [构建真实工具运行产物](docs/15-构建真实工具运行产物.md)。
 - 2026-10-20：第10C步完成提案材料快照、SQLite登记与完整性读回。真实成品已登记为submitted；独立进程重开、材料摘要、事务回滚与篡改拒绝验收通过。Linux730通过/2项Windows专属跳过，0模型调用。详见 [工具提案登记与完整性](docs/16-工具提案登记与完整性.md)。
 - 2026-10-20：第10D步完成已登记工具的独立验证、报告保存与状态更新。真实候选基准2/2、基线1/2，净增益1达到门槛；正式提案已成为verified。门槛不足、源码/镜像不一致与报告篡改负例通过。Linux813通过/2项Windows专属跳过，0模型调用。详见 [工具独立验证与报告](docs/17-工具独立验证与报告.md)。
-- 当前从“网页封装”进入“工具封装”。已有固定工具、合同预检、构建/执行内核、提案登记，以及Node/无依赖/离线范围的独立验证；审批发布、更多运行类型和自进化尚未实现。新工具运行容器声明内存/进程限制，CPU配额仍不可用；旧任务环境与配额不变，开机自启未配置。构建、登记和验证CLI尚未接到网页或MCP。
+- 2026-10-20：第10E步完成显式批准、首个正式版本包、SQLite版本事务与工具目录。summarize_target_sequence的1.0.0已批准并在目录中active；原源码/报告字节不变，重复批准不新增版本或事件，损坏目录恢复及篡改拒绝通过。Linux916通过/2项Windows专属跳过，0候选执行/模型调用。详见 [工具批准与正式版本](docs/18-工具批准与正式版本.md)。
+- 当前从“网页封装”进入“工具封装”。已有固定工具、合同预检、构建/执行内核、提案登记、Node离线独立验证，以及显式首版批准与版本目录。动态版本尚未接入Agent/MCP，版本替换/回滚、更多运行类型和自进化未实现。新工具运行容器声明内存/进程限制，CPU配额仍不可用；旧任务环境与配额不变，开机自启未配置。工具管理CLI尚未接到网页或MCP。
 
 安装位置、文件解释和验证记录见 [第 1 步 A：安装与运行 Pi](docs/01-安装与运行Pi.md)。服务器项目目录是 `/home/hanwen/Project/project/siNRA-pi/`，按用户指定拼写保留。
 
@@ -50,6 +51,9 @@ SDK 示例、逐段代码解释和实际结果见 [第 2 步：调用 Pi SDK 创
 | `npm run tools:proposals -- list` / `show <提案UUID>` | 列出最近100条登记 / 重新核对一份材料并查看详情 | 否 |
 | `npm run validate:tool -- <提案UUID>` | 从登记材料重新执行验证，保存报告并更新verified/verification_failed；不是批准 | 否；会真实执行候选和基线并创建临时容器 |
 | `npm run tools:proposals -- report <提案UUID>` | 只读查看最新验证报告，核对报告摘要与登记关系 | 否 |
+| `npm run tools:proposals -- approve <提案UUID> "<批准人>"` | 显式批准已验证提案、生成首个1.0.0并写版本目录；重复批准核对原版本 | 否，也不执行候选 |
+| `npm run tools:proposals -- versions` / `version <工具名> 1.0.0` | 只读版本列表 / 核对正式包与来源证据 | 否 |
+| `npm run tools:proposals -- catalog` / `catalog-rebuild` | 核对当前目录 / 显式从登记和正式包重建目录 | 否 |
 | `npm run pi:sdk -- --check` | 检查 Pi SDK 会话配置 | 否 |
 | `sh scripts/check-docker-rootless.sh` | 服务器上的 Docker 前提检查，不启动或安装服务 | 否 |
 | `sh scripts/project-docker.sh info` | 检查项目 Docker 的实际模式、目录和能力 | 否 |
@@ -162,6 +166,9 @@ packages/capability-platform/tool-validation-static.mjs  执行范围和候选/�
 packages/capability-platform/tool-validation-runner.mjs  源码与镜像绑定、独立容器真实运行
 packages/capability-platform/tool-validation-service.mjs 七项关卡编排与候选/基线比较
 packages/capability-platform/tool-validation-reports.mjs 报告私有保存、摘要与完整性读回
+packages/capability-platform/tool-approved-packages.mjs 正式五文件版本包与加载完整性
+packages/capability-platform/tool-approval-service.mjs  明确批准、首版登记、重复批准及失败状态
+packages/capability-platform/tool-catalog.mjs           从active版本生成并核对目录，显式恢复损坏目录
 scripts/lib/tool-validation-guest.mjs                  容器内固定助手、执行结果与文件摘要
 scripts/validate-tool-proposal.mjs                     按提案编号启动真实独立验证
 scripts/manage-tool-proposals.mjs                     可信提交/查询CLI，不运行候选源码

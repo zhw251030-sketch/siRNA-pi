@@ -176,3 +176,19 @@ CLI npm run validate:tool -- <proposalUUID>仅Linux/hanwen/唯一项目根/项�
 新增83项，815项总测试：Linux813通过/2项Windows专属跳过，Windows805通过/10平台权限跳过，0失败。独立全审及范围复审通过，修复UUID跨模块合同、Docker传输错误误计基线、文件摘要编码歧义并补回归。证据runtime/validation-{acceptance,negative-acceptance,local-tests,linux-tests,sync}；文件教学docs/17-工具独立验证与报告.md。旧10会话哈希/3运行容器/凭据元数据不变，临时验证容器0，health就绪空闲，模型0。无系统变更/重启/镜像创建或删除；所有证据、备份和镜像保留。
 
 下一步：沿原仓库实现明确审批、正式工具版本、Agent发现/调用边界。不要把verified写成已批准/自动可用，不把提案案例成绩写成未见输入泛化或科研活性证明。持续main提交/GitHub推送/bundle同步，仅本学习项目；不改参考、上级研究库或agent_RSI_demo。
+
+以上为第10D步结束状态；以下为最新进度。
+
+2026-10-20：第10E步完成显式批准与首版目录。tool-approved-packages.mjs生成并核对五文件包：manifest/tool.mjs/verification/approval/integrity，协议sirna-approved-tool/v1、sirna-tool-approval/v1、sirna-approved-tool-integrity/v1；源与报告原字节不变，基线留原提案。正式包SHA沿参考sorted name+NUL+fileHexSHA+LF，原提案摘要算法不改。Linux文件0400/目录0500；有界读取、精确集合/身份/摘要/前后stat，链接/硬链接拒绝。无签名；私有父目录可信，不承诺抵抗同UID恶意并发替换。
+
+tool-registry schema3增加tool_versions，v1/v2显式升级先VACUUM INTO一致备份，旧版只读不迁移，v2仍可recordValidation。activateVersion事务内核对verified/最新validationId/报告SHA/材料SHA/工具名/镜像/无同名首版，再插active版本、改提案approved、记version_activated事件。仅首个1.0.0，无parent替换/禁用/回滚。
+
+tool-approval-service从原登记证据出发，包→DB→目录不是共同事务：DB失败保留孤立包路径，目录失败明确versionActivated=true，重复批准核验原包并修复目录，不增版本事件。tool-catalog生成sirna-tool-catalog/v1，读取与DB active投影和包一致；显式重建可替换损坏普通文件，不能跟随链接，读取/生成均限1MiB。show/report批准后仍核对原材料与报告，show另外核对版本包。active只表示目录当前选择，agentCallable=false。
+
+CLI tools:proposals新增approve <UUID> <approvedBy>、versions、version <toolName> 1.0.0、catalog、catalog-rebuild，沿用Linux/hanwen/唯一项目根限制。批准人文本是审计声明非认证。本次用户授权助手继续学习步骤，记hanwen (delegated learning step)，不冒充用户亲自逐行审阅。
+
+正式提案f742eea2-b025-4474-ae47-d6eab267c408现approved，工具summarize_target_sequence、toolId977b9593-091a-4624-a4ba-b0c8f12b62df、1.0.0 active。包SHA4e259ca65e6bd9b70e9ebe0017fbcd76d79a3777c1dfe5e3a0d2d195a4b5cd73；原验证db1ef939-a129-4766-9a47-5b52917e927e及报告SHA42056952…未变，原三材料摘要一致。v2备份8c98cbf1-9b31-452c-8d98-9edf2cedbb0c保留原verified/2事件；正式v3为1版本/3事件/目录1项。重复批准版本/批准时间/包字节/事件不变。
+
+负例runtime/approval-negative-LXga7l克隆真实数据：超大目录拒读/显式恢复、submitted拒批、正式包源码和报告篡改拒绝；正式数据未改。首轮私有验收断言错误消息正则过窄，修正脚本后新副本通过，非产品失败。新增103项，最终918测试：Linux916pass/2Windows专属skip；Windows906pass/12平台权限skip，0fail。独立审查一P2超大目录恢复已修复且复审通过。旧10会话/3运行容器/凭据元数据保持，health就绪空闲，候选执行0/模型0，无容器镜像写操作或重启。
+
+证据runtime/approval-{acceptance,negative-acceptance,local-tests,linux-tests,sync}，文件说明docs/18-工具批准与正式版本.md。下一步对照正式包发现和执行流程接入Agent/MCP及调用审计，再扩展parent版本迭代。持续main同步，仅本学习项目；不把active目录写成Pi已可调用，不把批准当作新科学有效性证据。

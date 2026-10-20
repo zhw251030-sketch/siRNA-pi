@@ -155,7 +155,7 @@ test('ordinary v1 reads never migrate and validation writes require explicit mig
 test('explicit v1 migration retains a consistent same-directory v1 backup including committed WAL', t => {
   const f = fixture(t); const db = legacy(f);
   const registry = f.open({ migrate: true });
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 2);
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 3);
   assert.equal(registry.getProposal(ID).state, 'submitted');
   assert.equal(Object.hasOwn(registry.getProposal(ID), 'latestValidationId'), false);
   const backups = f.backups(); assert.equal(backups.length, 1);

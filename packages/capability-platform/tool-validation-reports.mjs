@@ -39,7 +39,7 @@ export function writeValidationFailure(proposalId,validationId,error,{root}){
     ...(error.containerId?{containerId:error.containerId}:{}),...(error.reportPath?{unregisteredReportPath:error.reportPath}:{})});
   return file;
 }
-function readBytes(file){
+export function readValidationReportBytes(file){
   const before=fs.lstatSync(file,{bigint:true});
   must(before.isFile()&&!before.isSymbolicLink()&&before.nlink===1n&&before.size<=BigInt(limit),'Report must be a bounded ordinary file with one link');
   const fd=fs.openSync(file,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW??0));
@@ -56,13 +56,13 @@ function readBytes(file){
 export function readLatestValidationReport(proposalId,{root,registry}){
   const proposal=registry.getProposal(proposalId);must(proposal,'Unknown proposal');
   const index=registry.latestValidation(proposalId);
-  if(!index){must(!proposal.latestValidationId&&!['verified','verification_failed'].includes(proposal.state),'Validation state has no matching report');return undefined;}
+  if(!index){must(!proposal.latestValidationId&&!['verified','verification_failed','approved'].includes(proposal.state),'Validation state has no matching report');return undefined;}
   const expected=location(root,proposalId,index.id);
   must(index.proposalId===proposalId&&index.reportPath===expected,'Registered report path or identity is outside its fixed root');
-  const bytes=readBytes(expected);must(hash(bytes)===index.reportSha256,'Validation report digest mismatch; report was modified');
+  const bytes=readValidationReportBytes(expected);must(hash(bytes)===index.reportSha256,'Validation report digest mismatch; report was modified');
   let report;try{report=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));}catch{throw new Error('Validation report must be valid UTF-8 JSON');}
   must(report&&report.protocolVersion==='sirna-tool-validation/v3'&&report.validationId===index.id&&report.proposalId===proposalId&&
     report.passed===index.passed&&report.artifactSha256===proposal.artifactSha256,'Validation report identity or conclusion differs from registration');
-  must(proposal.latestValidationId===index.id&&proposal.state===(index.passed?'verified':'verification_failed'),'Proposal state differs from latest validation');
+  must(proposal.latestValidationId===index.id&&(index.passed?['verified','approved'].includes(proposal.state):proposal.state==='verification_failed'),'Proposal state differs from latest validation');
   return {...index,report};
 }

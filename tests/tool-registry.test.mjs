@@ -191,7 +191,7 @@ test('read-only mode can query existing data but cannot register, and never crea
 test('new databases use the dedicated identity, schema, state constraint, foreign keys, and WAL', t => {
   const f = fixture(t); f.open(); const db = f.raw();
   assert.equal(db.prepare('PRAGMA application_id').get().application_id, 1397903433);
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 2);
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 3);
   assert.equal(db.prepare('PRAGMA journal_mode').get().journal_mode, 'wal');
   assert.throws(() => db.prepare(`INSERT INTO tool_proposals
     (id, tool_name, state, artifact_path, artifact_sha256, permission_profile, image_digest, created_at, updated_at)
@@ -200,7 +200,7 @@ test('new databases use the dedicated identity, schema, state constraint, foreig
   assert.equal(db.prepare('PRAGMA foreign_key_list(tool_events)').all()[0].table, 'tool_proposals');
 });
 
-for (const [applicationId, version] of [[0, 0], [1397903433, 3], [1, 1]]) {
+for (const [applicationId, version] of [[0, 0], [1397903433, 4], [1, 1]]) {
   test(`unknown database identity ${applicationId}/${version} is unchanged in both open modes`, t => {
     const f = fixture(t); const db = new DatabaseSync(f.databasePath);
     db.exec(`CREATE TABLE sentinel (value TEXT); INSERT INTO sentinel VALUES ('untouched');

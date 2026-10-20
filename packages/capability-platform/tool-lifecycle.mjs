@@ -2,10 +2,12 @@
 // lifecycle operations and are intentionally not wired into this entry point.
 import fs from 'node:fs';
 import path from 'node:path';
+import {isDeepStrictEqual} from 'node:util';
 import { checkToolProposal } from './tool-contract.mjs';
 import { createToolProposal, readToolProposal } from './tool-proposals.mjs';
 import { ToolRegistry } from './tool-registry.mjs';
 import { readLatestValidationReport } from './tool-validation-reports.mjs';
+import {loadApprovedToolPackage} from './tool-approved-packages.mjs';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 function checkedId(id) {
@@ -28,6 +30,7 @@ export function resolveToolLearningPaths(root,create=false) {
   const registryRoot=path.join(runtime,'tool-registry');
   const artifactsRoot=path.join(runtime,'tool-artifacts');
   const proposalsRoot=path.join(artifactsRoot,'proposals');
+  const approvedRoot=path.join(artifactsRoot,'approved');
   for(const target of [runtime,registryRoot,artifactsRoot,proposalsRoot]) {
     if(create&&!exists(target)) {
       try { fs.mkdirSync(target,{mode:0o700}); }
@@ -35,10 +38,11 @@ export function resolveToolLearningPaths(root,create=false) {
     }
     if(exists(target)) directory(target);
   }
-  return {proposalsRoot,databasePath:path.join(registryRoot,'registry.sqlite')};
+  if(exists(approvedRoot))directory(approvedRoot);
+  return {proposalsRoot,approvedRoot,databasePath:path.join(registryRoot,'registry.sqlite'),catalogPath:path.join(registryRoot,'active-tools.json')};
 }
-function flags(report) {
-  return {registered:true,executed:report?.executionPerformed===true,verified:report?.passed===true,approved:false,activated:false,runtimeArtifactVerified:report?.runtimeArtifactVerified===true};
+function flags(report,version) {
+  return {registered:true,executed:report?.executionPerformed===true,verified:report?.passed===true,approved:!!version,activated:version?.state==='active',agentCallable:false,runtimeArtifactVerified:report?.runtimeArtifactVerified===true};
 }
 function integrity(artifactSha256) {
   return {packageMatchesRegistration:true,sourceHashesMatch:true,artifactSha256};
@@ -72,6 +76,27 @@ export function listRegisteredToolProposals({root}={}) {
   finally { registry.close(); }
 }
 
+/** Bind a published package back to its registered proposal and latest evidence. */
+export function readRegisteredToolVersion(version,{root,registry}) {
+  if(!version||version.state!=='active'||version.runtimeState!=='retained')throw new Error('No active retained tool version');
+  const paths=resolveToolLearningPaths(root);
+  const proposal=registry.getProposal(version.proposalId);
+  if(!proposal||proposal.state!=='approved'||proposal.toolName!==version.toolName||proposal.imageDigest!==version.imageDigest||
+    proposal.artifactPath!==path.join(paths.proposalsRoot,proposal.id))throw new Error('Published version differs from its approved proposal');
+  const saved=readToolProposal(proposal.id,{proposalsRoot:paths.proposalsRoot,expectedArtifactSha256:proposal.artifactSha256});
+  const validation=readLatestValidationReport(proposal.id,{root,registry});
+  const pkg=loadApprovedToolPackage(version.packageDirectory,{approvedRoot:paths.approvedRoot,expectedPackageSha256:version.packageSha256});
+  const manifest=pkg.manifest;
+  if(manifest.id!==version.toolId||manifest.proposalId!==proposal.id||manifest.toolName!==version.toolName||manifest.version!==version.version||
+    pkg.approval.approvedBy!==version.approvedBy||pkg.approval.approvedAt!==version.approvedAt||
+    pkg.approval.verificationSha256!==validation.reportSha256||pkg.verification.validationId!==validation.id||
+    pkg.verification.artifactSha256!==proposal.artifactSha256)throw new Error('Published package differs from registered identity or validation');
+  for(const field of ['name','description','runtime','repeatabilityMode','dependencies','permissions','runtimeArtifact','scriptFile','scriptSha256','createdAt']){
+    if(!isDeepStrictEqual(manifest[field],saved.manifest[field]))throw new Error('Published manifest differs from submitted material');
+  }
+  return pkg;
+}
+
 export function getRegisteredToolProposal(id,{root}={}) {
   checkedId(id);
   const paths=resolveToolLearningPaths(root);
@@ -84,9 +109,11 @@ export function getRegisteredToolProposal(id,{root}={}) {
     const saved=readToolProposal(id,{proposalsRoot:paths.proposalsRoot,expectedArtifactSha256:row.artifactSha256});
     if(row.toolName!==saved.manifest.toolName||row.permissionProfile!==saved.manifest.permissions.profile||
       row.imageDigest!==saved.manifest.runtimeArtifact.imageDigest) throw new Error('Registry identity metadata does not match the proposal manifest');
-    if(!['submitted','verified','verification_failed'].includes(row.state)) throw new Error('This learning step only supports submitted or validated proposal records');
+    if(!['submitted','verified','verification_failed','approved'].includes(row.state)) throw new Error('This learning step only supports submitted, validated or approved proposal records');
     const validation=readLatestValidationReport(id,{root,registry});
+    const version=row.state==='approved'?registry.listToolVersions(row.toolName).find(item=>item.proposalId===id):undefined;
+    if(row.state==='approved')readRegisteredToolVersion(version,{root,registry});
     return {proposal:saved.manifest,registry:row,integrity:integrity(saved.artifactSha256),events:registry.listEvents(id),
-      ...(validation?{validation}:{}),...flags(validation?.report)};
+      ...(validation?{validation}:{}),...(version?{version}:{}),...flags(validation?.report,version)};
   } finally { registry.close(); }
 }
