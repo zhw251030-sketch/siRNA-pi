@@ -3,13 +3,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import { readBuildProposal } from './lib/tool-build-files.mjs';
 import { submitRegisteredToolProposal, listRegisteredToolProposals, getRegisteredToolProposal } from '../packages/capability-platform/tool-lifecycle.mjs';
+import { getLatestToolValidationReport } from '../packages/capability-platform/tool-validation-service.mjs';
 
 const root='/home/hanwen/Project/project/siNRA-pi';
 try {
   const [action,value,...extra]=process.argv.slice(2);
-  if(extra.length||!['submit','list','show'].includes(action)||
+  if(extra.length||!['submit','list','show','report'].includes(action)||
     (action==='list'?value!==undefined:typeof value!=='string'||value.startsWith('-'))) {
-    throw new Error('Usage: manage-tool-proposals.mjs submit <project-proposal.json> | list | show <proposal-UUID>');
+    throw new Error('Usage: manage-tool-proposals.mjs submit <project-proposal.json> | list | show <proposal-UUID> | report <proposal-UUID>');
   }
   if(process.platform!=='linux'||os.userInfo().username!=='hanwen'||process.cwd()!==root||fs.realpathSync(root)!==root) {
     throw new Error('Run as hanwen from the dedicated Linux project directory, without sudo');
@@ -17,6 +18,7 @@ try {
   const result=action==='submit'
     ? submitRegisteredToolProposal(readBuildProposal(value,{root}),{root})
     : action==='show' ? getRegisteredToolProposal(value,{root})
+    : action==='report' ? {validation:getLatestToolValidationReport(value,{root})??null}
       : {proposals:listRegisteredToolProposals({root}),limit:100,integrityChecked:false,
         executed:false,verified:false,approved:false,activated:false,runtimeArtifactVerified:false};
   console.log(JSON.stringify({ok:true,action,...result},null,2));

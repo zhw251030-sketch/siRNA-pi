@@ -25,7 +25,8 @@
 - 2026-10-20：第10A步完成工具提案合同预检：离线检查草稿字段、权限和测试约定，明确区分预检、实际验证和发布。Linux533项全通过；实际草稿通过、正式入口检查只缺真实运行产物。0模型请求，原10份会话元数据和3个容器保持。详见 [工具提案合同预检](docs/14-工具提案合同预检.md)。
 - 2026-10-20：第10B步完成真实工具产物构建：可信CLI将教学源码写入专用容器、冒烟、保存镜像，再在两个新容器复测，输出均为length4/gcFraction0.5；篡改拒绝及真实语法失败验收通过，临时容器已清理。详见 [构建真实工具运行产物](docs/15-构建真实工具运行产物.md)。
 - 2026-10-20：第10C步完成提案材料快照、SQLite登记与完整性读回。真实成品已登记为submitted；独立进程重开、材料摘要、事务回滚与篡改拒绝验收通过。Linux730通过/2项Windows专属跳过，0模型调用。详见 [工具提案登记与完整性](docs/16-工具提案登记与完整性.md)。
-- 当前从“网页封装”进入“工具封装”。已有固定工具、合同预检、构建/执行内核和提案登记；完整验证器、审批发布和自进化尚未实现。新工具运行容器声明内存/进程限制，CPU配额仍不可用；旧任务环境与配额不变，开机自启未配置。构建和登记CLI尚未接到网页或MCP。
+- 2026-10-20：第10D步完成已登记工具的独立验证、报告保存与状态更新。真实候选基准2/2、基线1/2，净增益1达到门槛；正式提案已成为verified。门槛不足、源码/镜像不一致与报告篡改负例通过。Linux813通过/2项Windows专属跳过，0模型调用。详见 [工具独立验证与报告](docs/17-工具独立验证与报告.md)。
+- 当前从“网页封装”进入“工具封装”。已有固定工具、合同预检、构建/执行内核、提案登记，以及Node/无依赖/离线范围的独立验证；审批发布、更多运行类型和自进化尚未实现。新工具运行容器声明内存/进程限制，CPU配额仍不可用；旧任务环境与配额不变，开机自启未配置。构建、登记和验证CLI尚未接到网页或MCP。
 
 安装位置、文件解释和验证记录见 [第 1 步 A：安装与运行 Pi](docs/01-安装与运行Pi.md)。服务器项目目录是 `/home/hanwen/Project/project/siNRA-pi/`，按用户指定拼写保留。
 
@@ -47,6 +48,8 @@ SDK 示例、逐段代码解释和实际结果见 [第 2 步：调用 Pi SDK 创
 | `npm run build:tool -- examples/04-tool-contract/proposal.draft.json` | 构建工具镜像、真实运行教学案例，保存带artifact的提案副本 | 否；会执行提案源码并创建容器/镜像 |
 | `npm run tools:proposals -- submit <项目内完整提案.json>` | 保存独立材料并新增submitted登记；重复提交会新增提案编号 | 否，也不执行候选/基线 |
 | `npm run tools:proposals -- list` / `show <提案UUID>` | 列出最近100条登记 / 重新核对一份材料并查看详情 | 否 |
+| `npm run validate:tool -- <提案UUID>` | 从登记材料重新执行验证，保存报告并更新verified/verification_failed；不是批准 | 否；会真实执行候选和基线并创建临时容器 |
+| `npm run tools:proposals -- report <提案UUID>` | 只读查看最新验证报告，核对报告摘要与登记关系 | 否 |
 | `npm run pi:sdk -- --check` | 检查 Pi SDK 会话配置 | 否 |
 | `sh scripts/check-docker-rootless.sh` | 服务器上的 Docker 前提检查，不启动或安装服务 | 否 |
 | `sh scripts/project-docker.sh info` | 检查项目 Docker 的实际模式、目录和能力 | 否 |
@@ -153,8 +156,14 @@ packages/capability-platform/tool-build-service.mjs    构建镜像、绑定源�
 scripts/build-tool-artifact.mjs                       可信宿主构建命令，尚未接入Agent
 scripts/lib/tool-build-files.mjs                      有界读取提案及保存私有构建证据
 packages/capability-platform/tool-proposals.mjs        独立材料快照、manifest、源文件与包摘要
-packages/capability-platform/tool-registry.mjs         SQLite提案与提交事件事务
-packages/capability-platform/tool-lifecycle.mjs        提交、列表与按ID完整性读回
+packages/capability-platform/tool-registry.mjs         SQLite提案、验证索引与状态/事件事务
+packages/capability-platform/tool-lifecycle.mjs        提交、列表与按ID核对材料/验证状态
+packages/capability-platform/tool-validation-static.mjs  执行范围和候选/基线静态扫描
+packages/capability-platform/tool-validation-runner.mjs  源码与镜像绑定、独立容器真实运行
+packages/capability-platform/tool-validation-service.mjs 七项关卡编排与候选/基线比较
+packages/capability-platform/tool-validation-reports.mjs 报告私有保存、摘要与完整性读回
+scripts/lib/tool-validation-guest.mjs                  容器内固定助手、执行结果与文件摘要
+scripts/validate-tool-proposal.mjs                     按提案编号启动真实独立验证
 scripts/manage-tool-proposals.mjs                     可信提交/查询CLI，不运行候选源码
 packages/agent-runtime/runtime-router.mjs       新任务走 Compose，旧 SDK 任务继续原上下文
 packages/agent-runtime/agent-compose-runtime.mjs 组织任务容器、模型运行与结果保存

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { checkToolProposal } from './tool-contract.mjs';
 import { createToolProposal, readToolProposal } from './tool-proposals.mjs';
 import { ToolRegistry } from './tool-registry.mjs';
+import { readLatestValidationReport } from './tool-validation-reports.mjs';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 function checkedId(id) {
@@ -20,7 +21,7 @@ function directory(filename) {
     throw new Error('Refusing a linked or redirected registry directory');
   }
 }
-function pathsFor(root,create=false) {
+export function resolveToolLearningPaths(root,create=false) {
   if(typeof root!=='string'||!path.isAbsolute(root)) throw new Error('An explicit absolute project root is required');
   root=path.resolve(root);directory(root);
   const runtime=path.join(root,'runtime');
@@ -36,8 +37,8 @@ function pathsFor(root,create=false) {
   }
   return {proposalsRoot,databasePath:path.join(registryRoot,'registry.sqlite')};
 }
-function flags() {
-  return {registered:true,executed:false,verified:false,approved:false,activated:false,runtimeArtifactVerified:false};
+function flags(report) {
+  return {registered:true,executed:report?.executionPerformed===true,verified:report?.passed===true,approved:false,activated:false,runtimeArtifactVerified:report?.runtimeArtifactVerified===true};
 }
 function integrity(artifactSha256) {
   return {packageMatchesRegistration:true,sourceHashesMatch:true,artifactSha256};
@@ -47,7 +48,7 @@ export function submitRegisteredToolProposal(input,{root}={}) {
   const preflight=checkToolProposal(input);
   if(!preflight.ok) throw new Error(`${preflight.code}: ${preflight.error}`);
   if(Object.hasOwn(input,'parent')) throw new Error('Parent versions are not supported until tool version management is implemented');
-  const paths=pathsFor(root,true);
+  const paths=resolveToolLearningPaths(root,true);
   const saved=createToolProposal(input,{proposalsRoot:paths.proposalsRoot});
   let registry;
   try {
@@ -64,7 +65,7 @@ export function submitRegisteredToolProposal(input,{root}={}) {
 }
 
 export function listRegisteredToolProposals({root}={}) {
-  const paths=pathsFor(root);
+  const paths=resolveToolLearningPaths(root);
   if(!exists(paths.databasePath)) return [];
   const registry=new ToolRegistry(paths.databasePath,{readOnly:true});
   try { return registry.listProposals(); }
@@ -73,7 +74,7 @@ export function listRegisteredToolProposals({root}={}) {
 
 export function getRegisteredToolProposal(id,{root}={}) {
   checkedId(id);
-  const paths=pathsFor(root);
+  const paths=resolveToolLearningPaths(root);
   if(!exists(paths.databasePath)) throw new Error('Unknown proposal');
   const registry=new ToolRegistry(paths.databasePath,{readOnly:true});
   try {
@@ -83,7 +84,9 @@ export function getRegisteredToolProposal(id,{root}={}) {
     const saved=readToolProposal(id,{proposalsRoot:paths.proposalsRoot,expectedArtifactSha256:row.artifactSha256});
     if(row.toolName!==saved.manifest.toolName||row.permissionProfile!==saved.manifest.permissions.profile||
       row.imageDigest!==saved.manifest.runtimeArtifact.imageDigest) throw new Error('Registry identity metadata does not match the proposal manifest');
-    if(row.state!=='submitted') throw new Error('This learning step only supports submitted proposal records');
-    return {proposal:saved.manifest,registry:row,integrity:integrity(saved.artifactSha256),events:registry.listEvents(id),...flags()};
+    if(!['submitted','verified','verification_failed'].includes(row.state)) throw new Error('This learning step only supports submitted or validated proposal records');
+    const validation=readLatestValidationReport(id,{root,registry});
+    return {proposal:saved.manifest,registry:row,integrity:integrity(saved.artifactSha256),events:registry.listEvents(id),
+      ...(validation?{validation}:{}),...flags(validation?.report)};
   } finally { registry.close(); }
 }

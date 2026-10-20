@@ -160,3 +160,19 @@ tool-lifecycle.mjs连接完整合同→材料→SQLite；list最多100条元数�
 新增125项：材料61、SQLite54、集成10。最终Linux732项=730通过/2项Windows专属跳过；Windows722通过/10平台或符号链接权限跳过。独立审查P2已修复且范围复审通过。本机中间一次旧HTTP测试fetch bad port：OS临时端口1024..15000与fetch禁用端口相交，单测及全套复跑通过；记录registration-local-bad-port.log/registration-port-diagnosis.md，未称已修复也未改系统端口设置。
 
 证据runtime/registration-{submitted,acceptance,linux-tests,sync}，详细解释docs/16-工具提案登记与完整性.md。继续main提交/GitHub/bundle同步，不更改参考或上级RSI。下一步从已登记提案ID出发建立独立验证报告及状态变化，逐步完成静态、语法/依赖、双次重复性、领域案例与基线净增益；审批、版本发布、自动封装和自进化仍未完成。
+
+以上为第10C步结束状态；以下为最新进度。
+
+2026-10-20：第10D步完成独立验证。tool-validation-static/runner/service/reports及固定guest助手分别负责范围/词法扫描、真实容器执行、七关卡编排与报告完整性。仅Node、无额外依赖、no_external_access、exact，领域/基准各1至10例、业务输入64KiB；其他范围显式拒绝。原sirna-tool-validation/v3主要报告合同保留，实际工作目录摘要额外核对并使用有明确长度边界的编码；与原镜像控制路径固定filesDigest标记有意不同。词法扫描不是安全证明，案例来自提案而非独立隐藏集。
+
+候选镜像核对标签和实际/opt/tool/main.mjs摘要；基线从登记源码进入独立固定Node底座。每次运行新容器，非root65534业务执行、无网络/宿主挂载/凭据/socket、只读根、1GiB内存/64进程/tmp64MiB，CPU配额仍不可用。固定root助手仅准备只读源码/助手和核对摘要。只清理得到且标签归属一致的容器，再确认不存在；Docker传输/来源/清理异常中止并保存诊断，不能伪装成基线低分。
+
+tool-registry schema2增加tool_validations/latest_validation_id，recordValidation事务更新报告索引/状态/最新ID/事件。已知v1只读不迁移，写入验证显式migrate:true，先VACUUM INTO一致备份（含已提交WAL，0600）再升级；未知schema拒绝。允许submitted/verified/verification_failed重验，approved/rejected拒绝；每次新报告ID，历史保留。报告独占写/fsync/0400，读回固定路径、普通单链接、大小、前后状态、SHA与DB/协议关系；报告与DB不是跨系统事务，异常保留可定位文件。
+
+CLI npm run validate:tool -- <proposalUUID>仅Linux/hanwen/唯一项目根/项目Docker；退出0通过、2完整验证未通过、1操作异常。npm run tools:proposals -- report <UUID>只读最新报告，show同时核对材料与报告。未接HTTP/MCP，未批准发布；manifest仍draft，verified只在登记状态。
+
+正式提案f742eea2-b025-4474-ae47-d6eab267c408，验证db1ef939-a129-4766-9a47-5b52917e927e，报告SHA42056952447cc598f627cb7bb780a195273d9d23351c2b957deac9fc53144e5a。8次业务运行/8独立容器，双烟测一致、领域2通过、候选基准2/2基线1/2净增1达到门槛，state=verified，approved/activated=false。原三材料哈希不变；v1备份44de245b-19ff-47a4-8c13-89526d25b84b仍原submitted+1事件，v2库1验证+2事件。独立负例runtime/validation-negative-7eQXFB：最低净增2则verification_failed；源/镜像不匹配在业务前拒绝；负例报告篡改拒绝，正式报告未变。
+
+新增83项，815项总测试：Linux813通过/2项Windows专属跳过，Windows805通过/10平台权限跳过，0失败。独立全审及范围复审通过，修复UUID跨模块合同、Docker传输错误误计基线、文件摘要编码歧义并补回归。证据runtime/validation-{acceptance,negative-acceptance,local-tests,linux-tests,sync}；文件教学docs/17-工具独立验证与报告.md。旧10会话哈希/3运行容器/凭据元数据不变，临时验证容器0，health就绪空闲，模型0。无系统变更/重启/镜像创建或删除；所有证据、备份和镜像保留。
+
+下一步：沿原仓库实现明确审批、正式工具版本、Agent发现/调用边界。不要把verified写成已批准/自动可用，不把提案案例成绩写成未见输入泛化或科研活性证明。持续main提交/GitHub推送/bundle同步，仅本学习项目；不改参考、上级研究库或agent_RSI_demo。

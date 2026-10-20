@@ -18,6 +18,7 @@
     "check:tool-contract": "node scripts/check-tool-contract.mjs",
     "build:tool": "node scripts/build-tool-artifact.mjs",
     "tools:proposals": "node scripts/manage-tool-proposals.mjs",
+    "validate:tool": "node scripts/validate-tool-proposal.mjs",
     "test": "node --test tests/*.test.mjs",
     "pi:version": "pi --version",
     "pi:help": "pi --help"
