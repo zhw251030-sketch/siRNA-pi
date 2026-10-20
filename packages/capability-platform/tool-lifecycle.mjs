@@ -2,6 +2,7 @@
 // lifecycle operations and are intentionally not wired into this entry point.
 import fs from 'node:fs';
 import path from 'node:path';
+import {createHash} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
 import { checkToolProposal } from './tool-contract.mjs';
 import { createToolProposal, readToolProposal } from './tool-proposals.mjs';
@@ -52,7 +53,16 @@ function integrity(artifactSha256) {
 export function submitRegisteredToolProposal(input,{root}={}) {
   const preflight=checkToolProposal(input);
   if(!preflight.ok) throw new Error(`${preflight.code}: ${preflight.error}`);
-  if(Object.hasOwn(input,'parent')) throw new Error('Parent versions are not supported until tool version management is implemented');
+  // Parent evidence must be resolved without creating even the registry roots.
+  const existingPaths=resolveToolLearningPaths(root);
+  let existingRegistry;
+  try {
+    if(exists(existingPaths.databasePath))existingRegistry=new ToolRegistry(existingPaths.databasePath,{readOnly:true});
+    if(!Object.hasOwn(input,'parent')&&existingRegistry?.listToolVersions(input.toolName).length) {
+      throw new Error('An existing formal tool requires an explicit parent version');
+    }
+    assertRegisteredToolParent(input,{root,registry:existingRegistry});
+  } finally { existingRegistry?.close(); }
   const paths=resolveToolLearningPaths(root,true);
   const saved=createToolProposal(input,{proposalsRoot:paths.proposalsRoot});
   let registry;
@@ -79,12 +89,14 @@ export function listRegisteredToolProposals({root}={}) {
 
 /** Bind a published package back to its registered proposal and latest evidence. */
 export function readRegisteredToolVersion(version,{root,registry}) {
-  if(!version||version.state!=='active'||version.runtimeState!=='retained')throw new Error('No active retained tool version');
+  if(!version||version.version!=='1.0.0'||version.state!=='active'||version.runtimeState!=='retained')throw new Error('No active retained first tool version');
   const paths=resolveToolLearningPaths(root);
   const proposal=registry.getProposal(version.proposalId);
   if(!proposal||proposal.state!=='approved'||proposal.toolName!==version.toolName||proposal.imageDigest!==version.imageDigest||
     proposal.artifactPath!==path.join(paths.proposalsRoot,proposal.id))throw new Error('Published version differs from its approved proposal');
   const saved=readToolProposal(proposal.id,{proposalsRoot:paths.proposalsRoot,expectedArtifactSha256:proposal.artifactSha256});
+  // Only original first-version packages can be formal parents in this step.
+  if(Object.hasOwn(saved.input,'parent'))throw new Error('A formal first-version proposal cannot itself have a parent');
   const validation=readLatestValidationReport(proposal.id,{root,registry});
   const pkg=loadApprovedToolPackage(version.packageDirectory,{approvedRoot:paths.approvedRoot,expectedPackageSha256:version.packageSha256});
   const manifest=pkg.manifest;
@@ -96,6 +108,23 @@ export function readRegisteredToolVersion(version,{root,registry}) {
     if(!isDeepStrictEqual(manifest[field],saved.manifest[field]))throw new Error('Published manifest differs from submitted material');
   }
   return pkg;
+}
+
+/** Resolve the complete formal first-version evidence without executing source. */
+export function assertRegisteredToolParent(input,{root,registry}={}) {
+  if(!Object.hasOwn(input,'parent'))return undefined;
+  const parent=input.parent;
+  if(!parent||parent.toolName!==input.toolName)throw new Error('parent must have the same toolName as the proposal');
+  if(parent.version!=='1.0.0')throw new Error('Only a registered parent version 1.0.0 is supported');
+  const version=registry?.getToolVersion(parent.toolName,parent.version);
+  if(!version)throw new Error('Unknown registered parent version');
+  const pkg=readRegisteredToolVersion(version,{root,registry});
+  if(input.baseline?.runtime!==pkg.manifest.runtime)throw new Error('Baseline runtime differs from the registered parent');
+  const baselineScriptSha256=createHash('sha256').update(input.baseline.script,'utf8').digest('hex');
+  if(baselineScriptSha256!==pkg.manifest.scriptSha256)throw new Error('Baseline source differs from the registered parent');
+  return {toolName:version.toolName,version:version.version,toolId:version.toolId,
+    packageSha256:version.packageSha256,imageDigest:version.imageDigest,scriptSha256:pkg.manifest.scriptSha256,
+    baselineScriptSha256,comparisonMode:'registered-parent-source'};
 }
 
 export function getRegisteredToolProposal(id,{root}={}) {
@@ -111,6 +140,7 @@ export function getRegisteredToolProposal(id,{root}={}) {
     if(row.toolName!==saved.manifest.toolName||row.permissionProfile!==saved.manifest.permissions.profile||
       row.imageDigest!==saved.manifest.runtimeArtifact.imageDigest) throw new Error('Registry identity metadata does not match the proposal manifest');
     if(!['submitted','verified','verification_failed','approved'].includes(row.state)) throw new Error('This learning step only supports submitted, validated or approved proposal records');
+    assertRegisteredToolParent(saved.input,{root,registry});
     const validation=readLatestValidationReport(id,{root,registry});
     const version=row.state==='approved'?registry.listToolVersions(row.toolName).find(item=>item.proposalId===id):undefined;
     if(row.state==='approved')readRegisteredToolVersion(version,{root,registry});

@@ -1,0 +1,51 @@
+{
+  "name": "靶序列统计与归一化碱基计数（父版本教学）",
+  "toolName": "summarize_target_sequence",
+  "description": "Normalize one target sequence or FASTA record and report length, GC fraction and A/C/G/T counts after U-to-T normalization. This teaching example does not predict siRNA activity.",
+  "parent": { "toolName": "summarize_target_sequence", "version": "1.0.0" },
+  "runtime": "node",
+  "script": "import fs from 'node:fs';\nconst envelope = JSON.parse(fs.readFileSync(0, 'utf8'));\nconst raw = envelope.input.sequence;\nif (typeof raw !== 'string') throw new Error('sequence must be text');\nconst sequence = raw.split(/\\r?\\n/).filter(line => !line.trimStart().startsWith('>')).join('').replace(/\\s/g, '').toUpperCase().replace(/U/g, 'T');\nif (!/^[ACGT]+$/.test(sequence)) throw new Error('unsupported or empty sequence');\nconst baseCounts = { A: 0, C: 0, G: 0, T: 0 };\nfor (const base of sequence) baseCounts[base]++;\nconst gcCount = baseCounts.G + baseCounts.C;\nprocess.stdout.write(JSON.stringify({ length: sequence.length, gcFraction: gcCount / sequence.length, baseCounts }));\n",
+  "repeatabilityMode": "exact",
+  "smokeInput": { "sequence": "ACGT" },
+  "dependencies": [],
+  "testCases": [
+    {
+      "name": "DNA retains length and GC and adds canonical base counts",
+      "input": { "sequence": "ACGT" },
+      "expectedOutput": { "length": 4, "gcFraction": 0.5, "baseCounts": { "A": 1, "C": 1, "G": 1, "T": 1 } }
+    },
+    {
+      "name": "RNA U contributes to normalized T count",
+      "input": { "sequence": "AACCGGGUUUA" },
+      "expectedOutput": { "length": 11, "gcFraction": 0.45454545454545453, "baseCounts": { "A": 3, "C": 2, "G": 3, "T": 3 } }
+    },
+    {
+      "name": "FASTA lowercase multiline RNA keeps normalization",
+      "input": { "sequence": ">target\nggc\ncau\n" },
+      "expectedOutput": { "length": 6, "gcFraction": 0.6666666666666666, "baseCounts": { "A": 1, "C": 2, "G": 2, "T": 1 } }
+    }
+  ],
+  "baseline": {
+    "runtime": "node",
+    "script": "import fs from 'node:fs';\nconst envelope = JSON.parse(fs.readFileSync(0, 'utf8'));\nconst raw = envelope.input.sequence;\nif (typeof raw !== 'string') throw new Error('sequence must be text');\nconst sequence = raw.split(/\\r?\\n/).filter(line => !line.trimStart().startsWith('>')).join('').replace(/\\s/g, '').toUpperCase().replace(/U/g, 'T');\nif (!/^[ACGT]+$/.test(sequence)) throw new Error('unsupported or empty sequence');\nconst gcCount = [...sequence].filter(base => base === 'G' || base === 'C').length;\nprocess.stdout.write(JSON.stringify({ length: sequence.length, gcFraction: gcCount / sequence.length }));\n"
+  },
+  "benchmarkCases": [
+    {
+      "name": "preserve original length and GC contract",
+      "input": { "sequence": "ACGT" },
+      "expectedOutput": { "length": 4, "gcFraction": 0.5 }
+    },
+    {
+      "name": "provide exact normalized counts for RNA",
+      "input": { "sequence": "AACCGGGUUUA" },
+      "expectedOutput": { "length": 11, "gcFraction": 0.45454545454545453, "baseCounts": { "A": 3, "C": 2, "G": 3, "T": 3 } }
+    },
+    {
+      "name": "provide exact normalized counts for FASTA",
+      "input": { "sequence": ">target\nggc\ncau\n" },
+      "expectedOutput": { "length": 6, "gcFraction": 0.6666666666666666, "baseCounts": { "A": 1, "C": 2, "G": 2, "T": 1 } }
+    }
+  ],
+  "minNetGain": 1,
+  "permissions": { "profile": "no_external_access" }
+}

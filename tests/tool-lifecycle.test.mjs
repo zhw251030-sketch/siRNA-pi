@@ -40,7 +40,7 @@ test('querying an unused project neither creates a registry nor a runtime direct
   assert.deepEqual(fs.readdirSync(root),[]);
 });
 
-test('incomplete proposals and unsupported parent references leave no persistent state',t=>{
+test('incomplete proposals and unknown parent references leave no persistent state',t=>{
   const root=temporary(t);
   assert.throws(()=>submitRegisteredToolProposal(draft,{root}),/runtimeArtifact/);
   assert.throws(()=>submitRegisteredToolProposal({...input(),parent:{toolName:draft.toolName,version:'1.0.0'}},{root}),/parent|version/i);

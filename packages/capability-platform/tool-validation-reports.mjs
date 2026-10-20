@@ -3,6 +3,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {isDeepStrictEqual} from 'node:util';
+import {readToolProposal} from './tool-proposals.mjs';
+import {resolveToolLearningPaths,assertRegisteredToolParent} from './tool-lifecycle.mjs';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const limit=16*1024*1024;
@@ -64,5 +67,15 @@ export function readLatestValidationReport(proposalId,{root,registry}){
   must(report&&report.protocolVersion==='sirna-tool-validation/v3'&&report.validationId===index.id&&report.proposalId===proposalId&&
     report.passed===index.passed&&report.artifactSha256===proposal.artifactSha256,'Validation report identity or conclusion differs from registration');
   must(proposal.latestValidationId===index.id&&(index.passed?['verified','approved'].includes(proposal.state):proposal.state==='verification_failed'),'Proposal state differs from latest validation');
+  // A failed material-integrity diagnostic remains readable even when the
+  // material is damaged. All other reports must bind back to intact material.
+  if(!(report.passed===false&&report.artifactIntegrityPassed===false)) {
+    const paths=resolveToolLearningPaths(root);
+    must(proposal.artifactPath===path.join(paths.proposalsRoot,proposalId),'Registered artifact path is outside its fixed proposal root');
+    const saved=readToolProposal(proposalId,{proposalsRoot:paths.proposalsRoot,expectedArtifactSha256:proposal.artifactSha256});
+    const parentComparison=assertRegisteredToolParent(saved.input,{root,registry});
+    must(parentComparison?isDeepStrictEqual(report.parentComparison,parentComparison):!Object.hasOwn(report,'parentComparison'),
+      'Validation report parent binding differs from the registered parent');
+  }
   return {...index,report};
 }

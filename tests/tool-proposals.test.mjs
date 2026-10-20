@@ -201,7 +201,7 @@ for (const [label, change] of [
   ['missing artifact', input => { delete input.runtimeArtifact; }],
   ['incomplete contract', input => { delete input.smokeInput; }],
   ['invalid field', input => { input.toolName = 'Bad Name'; }],
-  ['parent relationship', input => { input.parent = { toolName: 'prior_tool', version: '1.0.0' }; }],
+  ['mismatched parent tool name', input => { input.parent = { toolName: 'prior_tool', version: '1.0.0' }; }],
   ['oversized source', input => { input.script = 'x'.repeat(200001); }],
   ['oversized baseline', input => { input.baseline.script = 'x'.repeat(200001); }],
   ['oversized manifest', input => { input.smokeInput.large = 'x'.repeat(1024 * 1024); }],

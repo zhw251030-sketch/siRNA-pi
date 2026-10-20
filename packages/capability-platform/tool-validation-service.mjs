@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
+import {isDeepStrictEqual} from 'node:util';
 import {ToolRegistry} from './tool-registry.mjs';
-import {resolveToolLearningPaths} from './tool-lifecycle.mjs';
+import {resolveToolLearningPaths,assertRegisteredToolParent} from './tool-lifecycle.mjs';
 import {readToolProposal} from './tool-proposals.mjs';
 import {assertValidationSupported,checkValidationSource} from './tool-validation-static.mjs';
 import {validationCasePassed,validationRunsRepeatable} from './tool-validation.mjs';
@@ -24,11 +25,12 @@ export async function validateRegisteredToolProposal(id,{root,runner}={}){
   const paths=resolveToolLearningPaths(root);
   must(fs.existsSync(paths.databasePath),'Unknown proposal');
   must(runner&&typeof runner.checkSources==='function'&&typeof runner.run==='function','Explicit validation runner required');
-  let registry=new ToolRegistry(paths.databasePath,{readOnly:true});let row;let saved;
+  let registry=new ToolRegistry(paths.databasePath,{readOnly:true});let row;let saved;let parentComparison;
   try{
     row=registry.getProposal(id);must(row,'Unknown proposal');
     must(['submitted','verification_failed','verified'].includes(row.state),`Cannot validate proposal state ${row.state}`);
     saved=readToolProposal(id,{proposalsRoot:paths.proposalsRoot,expectedArtifactSha256:row.artifactSha256});identity(row,saved,paths);
+    parentComparison=assertRegisteredToolParent(saved.input,{root,registry});
     assertValidationSupported(saved.input);
   }finally{registry.close();}
   const validationId=randomUUID();let reportPath;
@@ -65,6 +67,10 @@ export async function validateRegisteredToolProposal(id,{root,runner}={}){
     const candidateScore=benchmarks.filter(x=>x.candidatePassed).length;const baselineScore=benchmarks.filter(x=>x.baselinePassed).length;
     const netGain=candidateScore-baselineScore;const minNetGain=manifest.minNetGain??1;
     const benchmarkGate={candidateScore,baselineScore,netGain,minNetGain,passed:benchmarks.length>0&&netGain>=minNetGain};
+    // Re-resolve after every awaited boundary has completed. A lost or changed
+    // parent is infrastructure failure, never a successful comparison.
+    const currentParent=assertRegisteredToolParent(input,{root,registry});
+    must(isDeepStrictEqual(currentParent,parentComparison),'Registered parent binding changed during validation');
     let artifactIntegrityPassed=true;
     try{
       const current=registry.getProposal(id);must(current&&current.artifactSha256===row.artifactSha256,'Registry material identity changed');
@@ -77,6 +83,7 @@ export async function validateRegisteredToolProposal(id,{root,runner}={}){
       staticCheck,syntaxChecks,dependencyChecks,repeatability,domainCases,domainGatePassed,benchmarks,benchmarkGate,passed,
       runtimeArtifactVerified:checked.runtimeArtifactVerified===true,executionPerformed:executionCount>0,executionCount,
       executionPolicy:checked.executionPolicy,
+      ...(parentComparison?{parentComparison}:{}),
       scope:{runtime:'node',permissionProfile:'no_external_access',dependencies:'none declared',filesDigest:'actual isolated work directory; temporary files outside it are excluded',cpuQuota:false},
       ...(artifactIntegrityPassed?{}:{artifactIntegrityError:'Registered material could not be verified after execution; artifactSha256 identifies the original registered snapshot'})};
     const persisted=writeValidationReport(report,{root});reportPath=persisted.reportPath;

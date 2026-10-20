@@ -26,7 +26,9 @@ const inputFields = [
 function requireContract(input) {
   const result = checkToolProposal(input);
   if (!result.ok) throw new Error(result.error);
-  if (Object.hasOwn(input, 'parent')) throw new Error('parent proposals are not supported');
+  if (Object.hasOwn(input, 'parent') && input.parent.toolName !== input.toolName) {
+    throw new Error('parent must have the same toolName as the proposal');
+  }
 }
 
 function requireRoot(proposalsRoot) {
@@ -108,7 +110,7 @@ function requireManifest(manifest, id) {
   if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) throw new Error('invalid proposal manifest');
   const fields = Object.keys(manifest);
   if (manifestFields.some(field => !Object.hasOwn(manifest, field)) ||
-      fields.some(field => !manifestFields.includes(field) && field !== 'minNetGain')) {
+      fields.some(field => !manifestFields.includes(field) && !['minNetGain', 'parent'].includes(field))) {
     throw new Error('manifest must contain exactly the proposal protocol fields');
   }
   if (manifest.protocolVersion !== protocolVersion || manifest.id !== id ||
@@ -180,6 +182,7 @@ export function readToolProposal(id, { proposalsRoot, expectedArtifactSha256 } =
     input.script = utf8(files[manifest.scriptFile]);
     input.baseline = { runtime: manifest.baselineRuntime, script: utf8(files[manifest.baselineScriptFile]) };
     if (Object.hasOwn(manifest, 'minNetGain')) input.minNetGain = manifest.minNetGain;
+    if (Object.hasOwn(manifest, 'parent')) input.parent = manifest.parent;
     requireContract(input);
     // Recheck every file after the whole package has been read as well: an
     // earlier file can change while a later file is being read.
@@ -217,6 +220,7 @@ export function createToolProposal(input, { proposalsRoot } = {}) {
       baselineScriptFile: `baseline.${extensions[snapshot.baseline.runtime]}`,
       baselineScriptSha256: hash(baseline), createdAt: new Date().toISOString(),
       ...(Object.hasOwn(snapshot, 'minNetGain') ? { minNetGain: snapshot.minNetGain } : {}),
+      ...(Object.hasOwn(snapshot, 'parent') ? { parent: snapshot.parent } : {}),
     };
     const manifestBytes = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
     if (manifestBytes.length > manifestLimit) throw new Error('proposal manifest exceeds 1 MiB');

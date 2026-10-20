@@ -38,6 +38,7 @@ export function approveRegisteredToolProposal(id,approvedBy,{root}={}){
   approvedBy=approvedBy.trim();
   // Read-only preflight must reject bad evidence before schema or package writes.
   const detail=getRegisteredToolProposal(id,{root});
+  must(!Object.hasOwn(detail.proposal,'parent'),'Parent proposals cannot be approved in this learning step');
   must(['verified','approved'].includes(detail.registry.state)&&detail.validation?.passed===true,'Only a verified proposal with a passing validation can be approved');
   const {paths,registry}=open(root,{migrate:true});let published,version;
   try{

@@ -29,7 +29,8 @@
 - 2026-10-20：第10E步完成显式批准、首个正式版本包、SQLite版本事务与工具目录。summarize_target_sequence的1.0.0已批准并在目录中active；原源码/报告字节不变，重复批准不新增版本或事件，损坏目录恢复及篡改拒绝通过。Linux916通过/2项Windows专属跳过，0候选执行/模型调用。详见 [工具批准与正式版本](docs/18-工具批准与正式版本.md)。
 - 2026-10-21：第10F步完成正式工具发现、受控调用、持久审计和宿主stdio MCP。真实两次新输入得到10/0.4及6/(2/3)，摘要/版本/实际策略/清理通过；三个错误参数在执行前拒绝。Linux940通过/2跳过，0模型请求，旧任务保持。详见 [正式工具发现调用与审计](docs/19-正式工具发现调用与审计.md)。
 - 2026-10-21：第10G步接通新网页guest→远程MCP→后端正式工具，逐轮凭证绑定任务/Compose运行/调用审计，真实适配器动态刷新通过。网页6模型响应/6次Pi操作，其中1次正式调用，输出11及5/11；结束后归档和下载一致，旧10会话/2guest保持。Pi自由解释另有碱基计数错误，原记录保留；链路验收不认证整段解释。详见 [网页调用正式工具与任务审计](docs/20-网页调用正式工具与任务审计.md)。
-- 当前hostMcpCallable=true，新网页任务webAgentCallable=true；旧guest保留原版本并明确不支持新正式工具。974测试：Linux972通过/2跳过，Windows961通过/13跳过。下一步学习parent版本迭代、验证和切换/回退；尚无自动自进化。正式调用与审计已接网页，工具提交/审批仍用可信CLI。CPU配额仍不可用，开机自启未配置。
+- 2026-10-21：第10H步完成parent改进提案与真实父版本源码绑定。新增归一化碱基计数候选，真实独立基准候选3/3、父源码1/3、净增2，已成为verified；这衡量新增字段合同，不是泛化或生物预测效果。正式1.0.0仍active，尚无1.0.1；0模型调用。详见 [父版本提案与真实基线比较](docs/21-父版本提案与真实基线比较.md)。
+- 当前hostMcpCallable=true，新网页任务webAgentCallable=true；旧guest保留原版本并明确不支持新正式工具。995测试：Linux993通过/2跳过，Windows982通过/13跳过。下一步学习多版本批准、切换/回退；尚无自动自进化。正式调用与审计已接网页，工具提交/审批仍用可信CLI。CPU配额仍不可用，开机自启未配置。
 
 安装位置、文件解释和验证记录见 [第 1 步 A：安装与运行 Pi](docs/01-安装与运行Pi.md)。服务器项目目录是 `/home/hanwen/Project/project/siNRA-pi/`，按用户指定拼写保留。
 
@@ -53,6 +54,7 @@ SDK 示例、逐段代码解释和实际结果见 [第 2 步：调用 Pi SDK 创
 | `npm run tools:proposals -- list` / `show <提案UUID>` | 列出最近100条登记 / 重新核对一份材料并查看详情 | 否 |
 | `npm run validate:tool -- <提案UUID>` | 从登记材料重新执行验证，保存报告并更新verified/verification_failed；不是批准 | 否；会真实执行候选和基线并创建临时容器 |
 | `npm run tools:proposals -- report <提案UUID>` | 只读查看最新验证报告，核对报告摘要与登记关系 | 否 |
+| `node scripts/verify-parent-tool-proposal.mjs 4530af22-d8d7-42f0-ac75-fec6ce851466` | 只读复核第10H步真实候选、父源码字节、比较报告及业务容器清理 | 否，也不重新执行工具 |
 | `npm run tools:proposals -- approve <提案UUID> "<批准人>"` | 显式批准已验证提案、生成首个1.0.0并写版本目录；重复批准核对原版本 | 否，也不执行候选 |
 | `npm run tools:proposals -- versions` / `version <工具名> 1.0.0` | 只读版本列表 / 核对正式包与来源证据 | 否 |
 | `npm run tools:proposals -- catalog` / `catalog-rebuild` | 核对当前目录 / 显式从登记和正式包重建目录 | 否 |

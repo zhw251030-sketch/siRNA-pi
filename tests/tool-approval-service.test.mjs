@@ -7,7 +7,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {ToolRegistry} from '../packages/capability-platform/tool-registry.mjs';
 import {submitRegisteredToolProposal,getRegisteredToolProposal} from '../packages/capability-platform/tool-lifecycle.mjs';
 import {getLatestToolValidationReport} from '../packages/capability-platform/tool-validation-service.mjs';
-import {approvalFixture,writable,verifyFixtureProposal} from './helpers/approval-fixture.mjs';
+import {approvalFixture,writable} from './helpers/approval-fixture.mjs';
 const service=await import('../packages/capability-platform/tool-approval-service.mjs').catch(error=>{
   if(error.code==='ERR_MODULE_NOT_FOUND'&&error.message.includes('tool-approval-service.mjs'))return {};throw error;
 });
@@ -78,14 +78,11 @@ test('database event failure retains an unregistered package and rolls back prop
   assert.equal(registry.getProposal(id).state,'verified');assert.deepEqual(registry.listToolVersions(),[]);
   assert.equal(registry.listEvents(id).length,2);registry.close();
 });
-test('a second verified proposal cannot silently replace the first version of the same name',async t=>{
+test('a second proposal without a parent cannot silently replace the first formal tool',async t=>{
   const {root,id,input}=await approvalFixture(t);await service.approveRegisteredToolProposal(id,actor,{root});
-  const other=submitRegisteredToolProposal(input,{root});
-  await verifyFixtureProposal(root,other,input);
-  assert.equal(getRegisteredToolProposal(other.proposal.id,{root}).verified,true);
+  assert.throws(()=>submitRegisteredToolProposal(input,{root}),/parent/i);
   const registry=new ToolRegistry(path.join(root,'runtime/tool-registry/registry.sqlite'),{readOnly:true});
   assert.equal(registry.getActiveTool(input.toolName).proposalId,id);registry.close();
-  await assert.rejects(async()=>service.approveRegisteredToolProposal(other.proposal.id,actor,{root}),/already exists|parent/i);
   assert.equal(service.listRegisteredToolVersions({root}).length,1);
 });
 test('approved package modification blocks repeat approval and proposal details',async t=>{

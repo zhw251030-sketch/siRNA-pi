@@ -224,3 +224,19 @@ Pi最后自由解释错误写C3/U2以及3+3=5，实际A3/C2/G3/U3；工具JSON/�
 新增32项，974测试：Windows961通过/13跳过，Linux972通过/2跳过，均0失败；独立审查两P2（漏启relay、pending取消误判）已修复复核。冻结前并行poll-close一次失败，冻结后全套通过。后续网页/文件24项、metadata15项定向回归通过。脚本verify-compose-approved-tool.mjs <taskId> ended只读验收；verify-guest-approved-mcp.mjs只在专用无模型容器中运行。私有证据runtime/web-approved-{state-before,network,completed,ended,adapter-check,local-tests,linux-tests,sync}与截图；逐文件说明docs/20-网页调用正式工具与任务审计.md。
 
 当前hostMcpCallable=true，新网页任务webAgentCallable=true。下一步沿原仓库完成parent版本关系、候选与原版比较、版本发布/切换及回退，再进入受控改进循环。文件传输、更多运行类型、自动工具构建/提案、长期多用户鉴权、崩溃恢复/孤立容器清理仍未实现。继续main同步，只改siRNA-pi，不改上级RSI项目和研究阶段。
+
+以上为第10G步历史；以下为当前状态。
+
+2026-10-21：第10H步完成parent改进提案及真实父源码比较。tool-proposals往返保留可选同名parent并纳入材料SHA，旧无parent包字节不变。tool-lifecycle新增assertRegisteredToolParent，严格读回已批准active/retained 1.0.0的包、源提案、验证报告及批准关系，要求baseline runtime/sourceSHA与其一致。已有同名正式工具的新提交必须带parent，在材料/登记写入前拒绝错误绑定。只支持首个父版本；readRegisteredToolVersion拒绝parent来源的正式包，防止递归读回循环。未迁移数据库，schema仍3；关系目前保存在manifest和报告，不称已添加registry parent列。
+
+tool-validation-service运行前后解析完整parentComparison并比较toolId、包/镜像/源码等全部身份；结束时换成另一份自洽有效包也拒绝。正常报告读回重查材料和父绑定；passed=false且artifactIntegrityPassed=false的旧损坏材料诊断可读，不等于完整性认证。approve在任何写入前明确拒绝parent提案。原仓库只要求父关系存在，baseline可由提交者提供；我们额外绑定父源码，不能说原仓库已自动保证同样关系。baseline在固定验证基座中执行父源码，非直接执行父OCI镜像。
+
+examples/05-parent-tool-proposal增加baseCounts A/C/G/T，沿用FASTA/空白清理、转大写及U→T。AACCGGGUUUA输出length11、gcFraction5/11、A3/C2/G3/T3；T包含原U，非原始RNA计数。baseline是example04的candidate源码，不是更弱的baseline。三个基准候选3/3、父源码1/3、净增2，后两项要求新字段；不表示旧GC计算错误、独立泛化、生物有效性或模型解释已修复。没有调用模型。
+
+真实build d09c8565-156f-466e-927b-86810119b6f5，候选镜像sha256:c2a82b28889e5ccba46baa68647422614be1467c6e312ec2bced38c6ce94aa47；提案4530af22-d8d7-42f0-ac75-fec6ce851466、验证d998793a-5021-460a-9276-6d2adff6647c。提案包SHA73c8c245114ee3d2ef2dbc3c584add29693d73b2d9d149c87b937706119084af，报告SHA6c643791ecd07d4f13359a5811544d33d619932d4314e9dbe7f5954e1fab266e。parent及baseline源码SHA均3bb9f0ca3237100e9ceb7e182939ed731fc6a68b9f1c1251bf6ffb577193d8ac，独立逐字节核对通过。
+
+候选当前verified，未approved/active，未产生1.0.1。网页继续使用原toolId977b9593…/1.0.0/包4e259ca6…/镜像e800a6bd…。4次构建业务、11次验证业务、2次语法检查完成，17个临时容器均移除。原9材料文件、全部旧registry行、catalog、11会话元数据、4运行容器和凭据元数据保持；只新增1提案/1验证/2事件。没有重启服务、系统改动或新正式工具调用。
+
+新增21测试，总995：Windows982通过/13跳过，Linux993通过/2跳过，0失败。第一次错误裸node --test误扫ignored runtime历史/供应商测试，45失败日志保留；按package.json tests/*.test.mjs范围重跑通过，不为调用范围错误改产品代码/装依赖。Task1独立spec/quality审查通过。只读scripts/verify-parent-tool-proposal.mjs <提案UUID>可重复验收；runtime/parent-tool-ops.mjs的build/submit/validate为一次性实际写入，不重跑。私有parent-tool-{state-before,build,submit,validate,acceptance,local-tests,linux-tests,sync}保存证据，详细教学docs/21-父版本提案与真实基线比较.md。
+
+下一步按原仓库实现多版本批准及切换/回退：保存parent版本关系、分配1.0.1、旧active转inactive并保留，完善事务及历史完整性读回后再切换目录。尚未完成自动提出/改写候选、自动批准、降级自动回退或自进化有效性验证。继续main同步，仅siRNA-pi；不要改上级agent_RSI_demo研究摘要或旧失败轨迹。
