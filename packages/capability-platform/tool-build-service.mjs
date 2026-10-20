@@ -162,6 +162,11 @@ function verifyImage(image, artifact) {
     createdAt: artifact.createdAt, buildSessionId: artifact.buildSessionId };
 }
 
+// Shared trusted primitives: the interactive builder uses the same container,
+// ownership and runtime-image checks as the original one-shot CLI.
+export const toolBuildRuntime = Object.freeze({jsonCopy,object,controls,configuration,inspectPolicy,cleanup,
+  noVolumes,imageSummary,labels,verifyImage,artifactData,WRITE_SOURCE,READ_HASH});
+
 export async function buildToolArtifact(proposal, { docker, sessionId = randomUUID(), onEvent = async () => {}, timeoutMs = 10000 } = {}) {
   const preflight = checkToolProposal(proposal, { requireRuntimeArtifact: false });
   must(preflight.ok, preflight.error ?? 'Invalid tool proposal');

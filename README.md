@@ -31,7 +31,8 @@
 - 2026-10-21：第10G步接通新网页guest→远程MCP→后端正式工具，逐轮凭证绑定任务/Compose运行/调用审计，真实适配器动态刷新通过。网页6模型响应/6次Pi操作，其中1次正式调用，输出11及5/11；结束后归档和下载一致，旧10会话/2guest保持。Pi自由解释另有碱基计数错误，原记录保留；链路验收不认证整段解释。详见 [网页调用正式工具与任务审计](docs/20-网页调用正式工具与任务审计.md)。
 - 2026-10-21：第10H步完成parent改进提案与真实父版本源码绑定。新增归一化碱基计数候选，真实独立基准候选3/3、父源码1/3、净增2，已成为verified；这衡量新增字段合同，不是泛化或生物预测效果。正式1.0.0仍active，尚无1.0.1；0模型调用。详见 [父版本提案与真实基线比较](docs/21-父版本提案与真实基线比较.md)。
 - 2026-10-21：第10I步完成1.0.1正式发布、1.0.0人工回退及恢复1.0.1。旧包/报告/镜像保留；同一MCP客户端三次真实调用及版本审计通过。schema4保存版本历史及父关系；0模型/构建/重新验证。1023测试：Linux1021通过/2跳过，Windows1010通过/13跳过。初次Linux测试隔离问题提前迁移数据库，影响核查、修复和复审完整记录见 [工具版本发布与人工回退](docs/22-工具版本发布与人工回退.md)。
-- 当前hostMcpCallable=true，新网页任务webAgentCallable=true；旧guest保留原镜像并明确不支持新正式工具。当前正式工具为1.0.1，本轮没有新网页模型对话。下一步学习Agent如何发起工具构建/提案协调流程；尚无自动自进化。工具提交/审批仍用可信CLI。CPU配额仍不可用，开机自启未配置。
+- 2026-10-21：第10J步完成六个Agent构建/提交操作及独立宿主MCP。真实协议完成数值工具构建、洁净源码打包和submitted登记，重复请求保持同一镜像/提案，5个负例及5容器清理核验通过；0模型/独立验证/批准。最终Linux1041项：1039通过/2跳过；初次测试清理失败及修正保留记录。详见 [Agent构建工具与提交候选](docs/23-Agent构建工具与提交候选.md)。
+- 当前正式工具hostMcpCallable=true，新网页任务webAgentCallable=true；原工具保持1.0.1。新增构建接口仅宿主MCP可用，尚未接网页Pi；新数值候选未验证/批准，不在正式目录。下一步连接网页任务身份与远程构建，再接Curator协调器；尚无自动自进化。批准继续使用可信CLI。CPU配额仍不可用，开机自启未配置。
 
 安装位置、文件解释和验证记录见 [第 1 步 A：安装与运行 Pi](docs/01-安装与运行Pi.md)。服务器项目目录是 `/home/hanwen/Project/project/siNRA-pi/`，按用户指定拼写保留。
 
@@ -55,7 +56,8 @@ SDK 示例、逐段代码解释和实际结果见 [第 2 步：调用 Pi SDK 创
 | `npm run tools:proposals -- list` / `show <提案UUID>` | 列出最近100条登记 / 重新核对一份材料并查看详情 | 否 |
 | `npm run validate:tool -- <提案UUID>` | 从登记材料重新执行验证，保存报告并更新verified/verification_failed；不是批准 | 否；会真实执行候选和基线并创建临时容器 |
 | `npm run tools:proposals -- report <提案UUID>` | 只读查看最新验证报告，核对报告摘要与登记关系 | 否 |
-| `node scripts/verify-tool-version-release.mjs` | 只读复核第10I步发布、回退、恢复的固定完成状态及原始证据 | 否，也不重新执行工具 |
+| `node scripts/verify-agent-tool-builder.mjs` | 只读复核第10J步真实构建/候选提交及旧状态保留；第10I检查固定旧提案总数，现不再适用 | 否，也不重新执行工具 |
+| `node scripts/tool-builder-mcp.mjs` | 启动可信宿主的六操作构建MCP；供协议客户端使用，尚未配置到网页guest | 启动不调用模型；收到构建/提交call会产生相应容器/镜像/提案 |
 | `npm run tools:proposals -- approve <提案UUID> "<批准人>"` | 显式批准已验证提案；首版1.0.0，后续分配新patch并启用；重复批准不重新激活历史版本 | 否，也不执行候选 |
 | `npm run tools:proposals -- rollback <工具名> <版本> "<操作人>" "<原因>"` | 人工切换到已批准且保留的版本，核对证据、记事件并刷新目录 | 否，也不重新验证或执行工具 |
 | `npm run tools:proposals -- versions` / `version <工具名> <版本>` | 只读版本列表 / 核对正式包与来源证据 | 否 |
@@ -165,6 +167,12 @@ examples/04-tool-contract/                      未构建运行产物的教学�
 packages/capability-platform/docker-engine-client.mjs  显式连接项目Docker的程序接口
 packages/capability-platform/tool-build-service.mjs    构建镜像、绑定源码、按成品执行案例
 scripts/build-tool-artifact.mjs                       可信宿主构建命令，尚未接入Agent
+packages/capability-platform/tool-build-sessions.mjs   交互式构建会话、非root调试、洁净打包、候选提交
+packages/domain/sirna-tools/tool-builder-tools.mjs     六个Agent构建/提案工具名称、参数与执行适配
+apps/mcp/tool-builder-server.mjs                       独立宿主构建MCP及关闭排空
+scripts/tool-builder-mcp.mjs                           受守卫的宿主MCP启动入口
+scripts/verify-agent-tool-builder.mjs                  第10J固定完成状态的只读复核
+examples/06-agent-tool-build/                          人为准备的数值汇总构建样例
 scripts/lib/tool-build-files.mjs                      有界读取提案及保存私有构建证据
 packages/capability-platform/tool-proposals.mjs        独立材料快照、manifest、源文件与包摘要
 packages/capability-platform/tool-registry.mjs         SQLite提案、验证索引与状态/事件事务
@@ -236,6 +244,7 @@ docs/13-第一个MCP工具.md       固定候选枚举工具、MCP与真实网�
 docs/14-工具提案合同预检.md   工具提交材料、字段与结果判据
 docs/15-构建真实工具运行产物.md 源码、构建容器、成品镜像与执行证据
 docs/16-工具提案登记与完整性.md 材料快照、数据库、状态和篡改检测
+docs/23-Agent构建工具与提交候选.md 六个构建操作、洁净打包、真实MCP验收与边界
 docs/superpowers/plans/      安装步骤与执行记录
 ```
 

@@ -1,0 +1,24 @@
+{
+  "name": "数值列表汇总（Agent 构建教学）",
+  "toolName": "summarize_numeric_values",
+  "description": "Report count, sum and mean for 1 to 100 finite numeric values. This is a controlled tool-building example, not a scientific model.",
+  "runtime": "node",
+  "script": "import fs from 'node:fs';\nconst {input} = JSON.parse(fs.readFileSync(0, 'utf8'));\nconst values = input.values;\nif (!Array.isArray(values) || values.length < 1 || values.length > 100 || !values.every(v => typeof v === 'number' && Number.isFinite(v))) throw new Error('values must contain 1 to 100 finite numbers');\nconst sum = values.reduce((a, b) => a + b, 0);\nif (!Number.isFinite(sum)) throw new Error('sum must be finite');\nprocess.stdout.write(JSON.stringify({count: values.length, sum, mean: sum / values.length}));\n",
+  "repeatabilityMode": "exact",
+  "smokeInput": {"values": [2, 4, 6]},
+  "dependencies": [],
+  "testCases": [
+    {"name": "positive values", "input": {"values": [2, 4, 6]}, "expectedOutput": {"count": 3, "sum": 12, "mean": 4}},
+    {"name": "zero sum", "input": {"values": [-2, 2]}, "expectedOutput": {"count": 2, "sum": 0, "mean": 0}}
+  ],
+  "baseline": {
+    "runtime": "node",
+    "script": "import fs from 'node:fs';\nconst {input} = JSON.parse(fs.readFileSync(0, 'utf8'));\nconst values = input.values;\nprocess.stdout.write(JSON.stringify({count: values.length, sum: values.reduce((a, b) => a + b, 0), mean: 0}));\n"
+  },
+  "benchmarkCases": [
+    {"name": "zero mean", "input": {"values": [-2, 2]}, "expectedOutput": {"count": 2, "sum": 0, "mean": 0}},
+    {"name": "nonzero mean", "input": {"values": [2, 4, 6]}, "expectedOutput": {"count": 3, "sum": 12, "mean": 4}}
+  ],
+  "minNetGain": 1,
+  "permissions": {"profile": "no_external_access"}
+}

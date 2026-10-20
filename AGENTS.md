@@ -252,3 +252,15 @@ examples/05-parent-tool-proposal增加baseCounts A/C/G/T，沿用FASTA/空白清
 当前只读验收node scripts/verify-tool-version-release.mjs，检查本轮固定最终状态；未来发布后旧固定状态验收可能不再适用。第10H验收要求旧verified/active1.0.0，发布后不可继续要求它通过，不重写旧证据。私有runtime/version-release-{state-before,exercise,acceptance,restart,early-migration-check}及三个call文件保存本轮证据；新学习说明docs/22-工具版本发布与人工回退.md。文件系统/SQLite/catalog不是全局原子事务，已提交后catalog失败要显式catalog-rebuild；维护仍要求空闲，执行前后检查不等于所有进程共享原子锁。
 
 下一步对照原仓库tool-curation协调器与tool-builder，学习由Agent发起工具构建/候选提交，并保留人的批准边界。尚无自动提出/修改/循环改进、自动降级或科研有效性证明。继续个人main同步，唯一远端目录不变，不改上级RSI项目。
+
+以上为第10I步历史；以下为当前状态。
+
+2026-10-21：第10J步完成六个原名构建/提案工具的独立宿主stdio MCP。tool-build-sessions.mjs管理本实例UUIDv4会话，5分钟闲置TTL、最多4占用资源/32总会话，忙碌拒绝，关闭/EOF/SIGTERM排空清理。未知创建/清理结果明确记录并占容量，不猜容器ID，不自动孤立容器清理或进程重启恢复。write只允许/opt/tool/main.mjs、有效UTF-8且≤200000字节；run字符串≤20000字节、100..30000ms，默认10秒，非root65534执行、合并输出≤65536字节。超时/传输/超限终止会话，非0退出仍可修改。受控root helper只写root持有的申报源码；任意命令不以root执行。
+
+finalize要求写入后成功调试，但不等于独立验证。先停止移除可变容器，再在固定底座的新容器只写申报源码，语法/摘要核对、停止后commit并检查身份。显式单源码洁净打包子集，不等同原仓库可安装依赖/保存任意rootfs。复用tool-build-service.mjs的frozen helper，不改变旧CLI行为。propose必须同实例真实artifact、源码逐字匹配、合同/parent合法；只复用原登记服务写submitted，无验证/批准。相同finalize/propose保持同一身份；冲突或不确定失败禁止盲目重复。登记actor仍local-cli兼容标签，构建session/proposal关联在私有日志，尚无网页task身份。
+
+真实session24b84fa1-4091-4fed-80f1-a2cbb0d02976，提案f94f2783-6dd5-4dfe-b725-3efd24764cc2，工具summarize_numeric_values仅submitted。镜像sha256:ef051b2a755d16a5b30d4ae7bc2a811449fb403857383f07ebbde7a684152e7c；提案包SHA9307b48a4507472f87239aa925920013483ab5a5b4c5922717f6e1ace11694a4；源码SHA52007e56223c16bf91ae3a495c8cba11e80d805c83ea7a32e8622057d026b406。同一MCP14调用含5负例，调试[2,4,6]→3/12/4，独立成品[-2,2]→2/0/0。检查成品时无tmpfs遮挡，源码SHA匹配且debug marker不存在。5临时容器全部移除、恰好1镜像保留，原镜像集合不减；第二会话0a2125fd-17eb-4d2c-a7a0-450db33b3d35已取消。新增1proposal/1event、0validation/versions/正式调用，原active1.0.1不变。旧18材料/12审计/11会话/4运行容器及任务表/目录/凭据元数据保持。模型0，不重启服务，不改系统。
+
+新增18测试，Windows全套1041：1028pass/13skip；Linux初次1037pass/2fail/2skip，两新测试after hook删除只读临时材料EACCES，正文已通过。仅测试夹具增加限定os.tmpdir直接子根、前缀/realpath检查、不跟随链接及解锁清理；产品权限未改。修正后Windows18定向全通过、Linux47相关全通过；最终Linux1041项1039pass/2skip，0fail。初次日志与两失败临时目录保留。聚焦检查后私有spawnSync收尾复用过期HTTP连接失败，独立只读重查确认服务/旧状态正常，健康请求改Connection:close，最终回归及保留检查通过。Task1独立审查通过，Task2操作复审通过；异常诊断落盘、stderr受控处理、同步tar覆盖前核对均修正。只读scripts/verify-agent-tool-builder.mjs验收已通过。
+
+最新教学docs/23-Agent构建工具与提交候选.md，例子examples/06-agent-tool-build是人为样例，故意mean=0基线未执行，不称强基线或性能结果。私有runtime/agent-builder-{state-before,exercise,acceptance,fresh-run,inspection,linux-tests,linux-final}及runtime/tool-builds/<sessionId>保存证据；一次性exercise不可当只读检查重跑。10I固定旧proposal数量的检查不再适用，不修改旧历史证据。当前正式工具网页链路仍可用，但新构建MCP尚未接Pi/网页/Curator。下一步按原远程控制端接任务归属/凭证与构建会话，真实Pi验收后再接Curator；无自动提议/改写/独立验证/批准/自进化有效性。继续个人main同步，唯一远端目录不变，只改siRNA-pi。
