@@ -16,6 +16,7 @@
     "verify:sdk-task": "node scripts/verify-first-task.mjs --sdk",
     "verify:web-task": "node scripts/verify-first-task.mjs --web",
     "check:tool-contract": "node scripts/check-tool-contract.mjs",
+    "build:tool": "node scripts/build-tool-artifact.mjs",
     "test": "node --test tests/*.test.mjs",
     "pi:version": "pi --version",
     "pi:help": "pi --help"

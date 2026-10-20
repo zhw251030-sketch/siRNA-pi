@@ -132,3 +132,17 @@ Linux 用目录描述符锚定逐层读取，拒绝符号链接、硬链接、�
 新增126项专测，原RPC超时测试分成两种明确情形，生产停止代码未改。最终Linux533通过/0跳过，Windows529通过/4项Linux专属跳过。两地实际CLI结果一致；服务器10份会话元数据哈希、3个运行容器ID/镜像、凭据文件元数据保持，health就绪空闲。0模型请求，不读真实凭据内容，不构建镜像，不重启服务。日志在runtime/contract-preflight-*，详见docs/14-工具提案合同预检.md。
 
 当前下一步：为工具建立真实可追溯的运行产物，再登记提案、在专用环境实际验证、批准并暴露版本；这些尚未实现。现有MCP仍只有固定候选枚举工具，预检CLI未接到网页或MCP服务；不要把“字段通过”写成verified/approved或自进化完成。
+
+以上为第10A步结束状态；以下为最新进度。
+
+2026-10-20：第10B步完成真实工具构建与成品案例执行。docker-engine-client.mjs通过显式项目socket调用Docker API v1.43；tool-build-service.mjs只接受node/无依赖/no_external_access/exact/最多10案例的草稿，输入JSON最多64KiB，源码沿合同200000字节并分块上传。固定已存在Pi1.2.0 ImageID e34a8f3f…作为Node底座，不启动Pi或模型。源码写入/语法/读回哈希/非root冒烟后stop→commit，候选baseline不写入镜像；按成品真实ImageID为每例创建独立运行容器。artifact沿原六字段，没有filesDigest或完整验证声明。
+
+构建与运行配置1GiB内存/64进程、CapDrop ALL、no-new-privileges、无网络/宿主bind/凭据/socket；运行非root65534、readonly根、64MiB临时/tmp。CPU配额仍不可用。实际inspect检查配置；固定命令/平台/会话/时间/源码与基座标签绑定。不是任意敌对代码的完整沙箱，只供可信CLI运行已审阅教学源码，尚未接HTTP/MCP构建工具。
+
+入口npm run build:tool -- examples/04-tool-contract/proposal.draft.json，仅允许Linux/hanwen/唯一项目根。scripts/lib/tool-build-files.mjs有界读取和保存runtime/tool-builds/<UUID>私有证据；proposal.json最后发布，不改草稿、不覆盖旧记录。语法和smoke失败先保存exit/stdout/stderr，再抛错并清理。只移除本调用获得且标签归属核对的容器，保留镜像；清理未确认时报错带ID。SIGKILL/主机崩溃恢复与TTL清理服务尚未实现，不得全局扫删容器。
+
+真实成功构建7e0aa187-6c67-46b6-8c5f-7b2e4f5351ea，镜像sha256:e800a6bdb8139da0fb8026a838744a748990a314a025435f5f0a20572ea2ec18，源码哈希3bb9f0ca3237100e9ceb7e182939ed731fc6a68b9f1c1251bf6ffb577193d8ac。冒烟和两个成品新容器案例均length4/gcFraction0.5；完整字段预检通过，仍registered/approved/activated/verified=false。两个篡改输入拒绝；真实语法失败2a997147-af94-4e6b-a736-9b850370ad37保留SyntaxError、无commit/成功提案。临时容器0，旧10会话哈希/3容器/凭据元数据不变，health就绪空闲，模型请求0。
+
+新增74项测试，最终Linux607通过/0跳过，Windows603通过/4项Linux专属跳过；独立审查与范围限定复审通过。私有证据runtime/tool-artifact-{acceptance,state-before,linux-tests,sync}及runtime/tool-builds，逐文件解释docs/15-构建真实工具运行产物.md。现有服务无须重启，继续main提交/GitHub推送/bundle服务器同步，不修改参考库或上级RSI。
+
+当前下一步：对照tool-lifecycle学习提案登记、完整独立验证与状态流转，再接批准版本和Agent发现/调用。当前只有构建/执行内核与教学案例证据，基线净增益、双次重复性完整门禁、审批、发布及自进化仍未实现。

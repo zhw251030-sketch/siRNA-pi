@@ -23,7 +23,8 @@
 - 2026-10-20：后续补齐第8步真实成功验收，上传values.csv后3次工具调用得到3/27/9，结束后归档、工作区、HTTP字节一致。原529失败任务保留。
 - 2026-10-20：第9步接入首个固定MCP工具 `enumerate_sirna_candidates`。真实网页7响应/6工具，完成MCP业务调用、保存和重读4条候选；结束后下载字节一致。Linux406项测试通过，旧任务保留。详细实现、真实验收和部署问题见 [第一个MCP工具](docs/13-第一个MCP工具.md)。
 - 2026-10-20：第10A步完成工具提案合同预检：离线检查草稿字段、权限和测试约定，明确区分预检、实际验证和发布。Linux533项全通过；实际草稿通过、正式入口检查只缺真实运行产物。0模型请求，原10份会话元数据和3个容器保持。详见 [工具提案合同预检](docs/14-工具提案合同预检.md)。
-- 当前从“网页封装”进入“工具封装”。已提供透明预筛选工具及提案预检，登记数据库、隔离验证、审批发布和自进化仍未实现；资源配额、开机自启仍未实现。旧任务保留原环境，第9步工具在新任务中使用。
+- 2026-10-20：第10B步完成真实工具产物构建：可信CLI将教学源码写入专用容器、冒烟、保存镜像，再在两个新容器复测，输出均为length4/gcFraction0.5；篡改拒绝及真实语法失败验收通过，临时容器已清理。详见 [构建真实工具运行产物](docs/15-构建真实工具运行产物.md)。
+- 当前从“网页封装”进入“工具封装”。已有固定工具、提案预检及工具构建/执行内核；登记数据库、完整验证器、审批发布和自进化尚未实现。新工具运行容器声明内存/进程限制，CPU配额仍不可用；旧任务环境与配额不变，开机自启未配置。构建CLI尚未接到网页或MCP。
 
 安装位置、文件解释和验证记录见 [第 1 步 A：安装与运行 Pi](docs/01-安装与运行Pi.md)。服务器项目目录是 `/home/hanwen/Project/project/siNRA-pi/`，按用户指定拼写保留。
 
@@ -42,6 +43,7 @@ SDK 示例、逐段代码解释和实际结果见 [第 2 步：调用 Pi SDK 创
 | `npm run web` | 启动 `apps/api/bootstrap.mjs`；只监听 `127.0.0.1:3000` | 启动不调用；网页发送消息后调用 |
 | `npm test` | 运行离线行为测试 | 否 |
 | `npm run check:tool-contract -- examples/04-tool-contract/proposal.draft.json --draft` | 检查教学草稿；去掉`--draft`会指出尚缺真实运行产物 | 否，也不执行提案代码 |
+| `npm run build:tool -- examples/04-tool-contract/proposal.draft.json` | 构建工具镜像、真实运行教学案例，保存带artifact的提案副本 | 否；会执行提案源码并创建容器/镜像 |
 | `npm run pi:sdk -- --check` | 检查 Pi SDK 会话配置 | 否 |
 | `sh scripts/check-docker-rootless.sh` | 服务器上的 Docker 前提检查，不启动或安装服务 | 否 |
 | `sh scripts/project-docker.sh info` | 检查项目 Docker 的实际模式、目录和能力 | 否 |
@@ -143,6 +145,10 @@ packages/capability-platform/tool-contract.mjs   工具提案字段、权限、�
 packages/capability-platform/tool-validation.mjs 已有结果的匹配与重复性判据，不执行工具
 scripts/check-tool-contract.mjs                 只读JSON的离线预检命令
 examples/04-tool-contract/                      未构建运行产物的教学提案草稿
+packages/capability-platform/docker-engine-client.mjs  显式连接项目Docker的程序接口
+packages/capability-platform/tool-build-service.mjs    构建镜像、绑定源码、按成品执行案例
+scripts/build-tool-artifact.mjs                       可信宿主构建命令，尚未接入Agent
+scripts/lib/tool-build-files.mjs                      有界读取提案及保存私有构建证据
 packages/agent-runtime/runtime-router.mjs       新任务走 Compose，旧 SDK 任务继续原上下文
 packages/agent-runtime/agent-compose-runtime.mjs 组织任务容器、模型运行与结果保存
 packages/agent-runtime/agent-compose-rpc.mjs     使用正式双向 RPC、认证、截止时间和 EOF
@@ -196,6 +202,9 @@ docs/09-网页接入AgentCompose.md 网页正式 RPC、执行事件、同会话�
 docs/10-停止运行与结束任务.md   停止请求、确认终态、保留文件并释放容器
 docs/11-网页查看任务文件.md     文件列表、文本预览与下载
 docs/12-上传资料与任务文件归档.md 上传、独立资料区和执行同步
+docs/13-第一个MCP工具.md       固定候选枚举工具、MCP与真实网页验收
+docs/14-工具提案合同预检.md   工具提交材料、字段与结果判据
+docs/15-构建真实工具运行产物.md 源码、构建容器、成品镜像与执行证据
 docs/superpowers/plans/      安装步骤与执行记录
 ```
 
