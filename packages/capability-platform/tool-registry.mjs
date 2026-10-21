@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { types } from 'node:util';
 import {toolVersion,versionParts,earlierParent,maintenanceText} from './tool-version.mjs';
+import {repairSource,repairAssociation,assertRepairPredecessor} from './tool-repair-contract.mjs';
 
 const APPLICATION_ID = 1397903433;
 const SCHEMA_VERSION = 4;
@@ -384,14 +385,26 @@ export class ToolRegistry {
     const db = this.#connection();
     must(!this.#readOnly, 'Tool registry is read-only');
     const input = proposalInput(value);
-    const settings = plainData(options, ['actor'], [], 'registration options');
+    const settings = plainData(options, ['actor','taskContext','repair'], [], 'registration options');
     const actor = settings.actor === undefined ? 'local-cli' : settings.actor;
     must(typeof actor === 'string' && actor.trim().length > 0 && actor.length <= 128 &&
       !/[\u0000-\u001f\u007f]/.test(actor), 'actor must be nonempty short text without control characters');
     const createdAt = new Date().toISOString();
-    const details = JSON.stringify({ proposalId: input.id, artifactSha256: input.artifactSha256 });
+    const source=settings.taskContext===undefined?undefined:repairSource(settings.taskContext);
+    const repair=settings.repair===undefined?undefined:repairAssociation(settings.repair);
+    must(!source||actor==='web-agent','Source requires web-agent actor');
+    must(!repair||!!source,'Repair requires source');
+    const details = JSON.stringify({ proposalId: input.id, artifactSha256: input.artifactSha256,...(source?{source}:{}),...(repair?{repair}:{}) });
     db.exec('BEGIN IMMEDIATE');
     try {
+      if(repair){
+        must(!this.getRepairReplacement(repair.requestId),'Repair ticket already has a replacement');
+        const previous=this.getProposal(repair.previousProposalId),events=this.listEvents(repair.previousProposalId).filter(e=>e.eventType==='proposal_submitted');
+        must(previous&&previous.toolName===input.toolName&&events.length===1&&events[0].actor==='web-agent'&&events[0].details.proposalId===previous.id&&events[0].toolName===previous.toolName&&events[0].details.artifactSha256===previous.artifactSha256,'Invalid repair predecessor');
+        const prior=events[0].details.repair===undefined?null:repairAssociation(events[0].details.repair);
+        must(repair.previousProposalId!==input.id&&repair.rootProposalId!==input.id,'Cyclic repair association');
+        assertRepairPredecessor(repair,{rootProposalId:prior?.rootProposalId??previous.id,attempt:prior?.attempt??0},source,repairSource(events[0].details.source));
+      }
       db.prepare(`INSERT INTO tool_proposals
         (id, tool_name, state, artifact_path, artifact_sha256, permission_profile, image_digest, created_at, updated_at)
         VALUES (?, ?, 'submitted', ?, ?, ?, ?, ?, ?)`)
@@ -621,6 +634,13 @@ export class ToolRegistry {
     return db.prepare('SELECT * FROM tool_events WHERE proposal_id = ? ORDER BY id ASC').all(id)
       .map(row => ({ id: row.id, proposalId: row.proposal_id, eventType: row.event_type,
         actor: row.actor, toolName: row.tool_name, details: JSON.parse(row.details_json), createdAt: row.created_at }));
+  }
+
+  getRepairReplacement(requestId) {
+    must(typeof requestId==='string'&&/^auto-tool-repair:[a-f0-9-]{36}$/.test(requestId),'Invalid repair request key');
+    const rows=this.#connection().prepare("SELECT proposal_id FROM tool_events WHERE event_type='proposal_submitted' AND json_extract(details_json,'$.repair.requestId')=?").all(requestId);
+    must(rows.length<=1,'Ambiguous repair replacement');
+    return rows.length?{proposalId:rows[0].proposal_id}:null;
   }
 
   close() {

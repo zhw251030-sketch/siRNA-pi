@@ -10,6 +10,8 @@ import { ToolRegistry } from './tool-registry.mjs';
 import { readLatestValidationReport } from './tool-validation-reports.mjs';
 import {loadApprovedToolPackage} from './tool-approved-packages.mjs';
 import {toolVersion,earlierParent} from './tool-version.mjs';
+import {repairSource,repairAssociation,assertRepairContract,assertRepairPredecessor} from './tool-repair-contract.mjs';
+import {getToolProposalSource} from './tool-proposal-source.mjs';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 function checkedId(id) {
@@ -51,10 +53,16 @@ function integrity(artifactSha256) {
   return {packageMatchesRegistration:true,sourceHashesMatch:true,artifactSha256};
 }
 
-export function submitRegisteredToolProposal(input,{root,actor='local-cli'}={}) {
+export function submitRegisteredToolProposal(input,{root,actor='local-cli',taskContext,repair}={}) {
   if(!['local-cli','web-agent'].includes(actor))throw new TypeError('Invalid proposal actor');
   const preflight=checkToolProposal(input);
   if(!preflight.ok) throw new Error(`${preflight.code}: ${preflight.error}`);
+  if(taskContext!==undefined){taskContext=repairSource(taskContext);if(actor!=='web-agent')throw new Error('Source requires web-agent actor');}
+  if(repair!==undefined){
+    repair=repairAssociation(repair);if(!taskContext)throw new Error('Repair requires task source');
+    const previous=getToolProposalSource(repair.previousProposalId,{root});
+    assertRepairPredecessor(repair,previous,taskContext,previous.source);assertRepairContract(previous.input,input);
+  }
   // Parent evidence must be resolved without creating even the registry roots.
   const existingPaths=resolveToolLearningPaths(root);
   let existingRegistry;
@@ -73,7 +81,7 @@ export function submitRegisteredToolProposal(input,{root,actor='local-cli'}={}) 
     const row=registry.registerProposal({id:saved.manifest.id,toolName:saved.manifest.toolName,
       artifactPath:saved.artifactPath,artifactSha256:saved.artifactSha256,
       permissionProfile:saved.manifest.permissions.profile,imageDigest:saved.manifest.runtimeArtifact.imageDigest},
-    {actor});
+    {actor,...(taskContext?{taskContext}:{}),...(repair?{repair}:{})});
     return {proposal:saved.manifest,registry:row,integrity:integrity(saved.artifactSha256),...flags()};
   } catch(error) {
     const failure=new Error(`Proposal material saved but registration failed: ${error.message}`,{cause:error});

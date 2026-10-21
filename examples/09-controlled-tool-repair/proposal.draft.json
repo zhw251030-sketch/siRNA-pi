@@ -1,0 +1,106 @@
+{
+  "name": "数值范围单轮修订教学候选",
+  "toolName": "summarize_numeric_range_repair",
+  "description": "Intentionally faulty teaching root for one controlled repair turn. Assumes sorted input; not a production tool.",
+  "runtime": "node",
+  "script": "import fs from 'node:fs';\nconst {input} = JSON.parse(fs.readFileSync(0, 'utf8'));\nconst values = input.values;\nif (!Array.isArray(values) || values.length < 1 || values.length > 100 || !values.every(v => typeof v === 'number' && Number.isFinite(v))) throw new Error('values must contain 1 to 100 finite numbers');\nconst min = values[0], max = values[values.length - 1];\nconst range = max - min;\nif (!Number.isFinite(range)) throw new Error('range must be finite');\nprocess.stdout.write(JSON.stringify({count: values.length, min, max, range}));\n",
+  "repeatabilityMode": "exact",
+  "smokeInput": {
+    "values": [
+      -2,
+      0,
+      5
+    ]
+  },
+  "dependencies": [],
+  "testCases": [
+    {
+      "name": "unordered positive values",
+      "input": {
+        "values": [
+          6,
+          2,
+          4
+        ]
+      },
+      "expectedOutput": {
+        "count": 3,
+        "min": 2,
+        "max": 6,
+        "range": 4
+      }
+    },
+    {
+      "name": "single negative value",
+      "input": {
+        "values": [
+          -3
+        ]
+      },
+      "expectedOutput": {
+        "count": 1,
+        "min": -3,
+        "max": -3,
+        "range": 0
+      }
+    },
+    {
+      "name": "ordered values",
+      "input": {
+        "values": [
+          -2,
+          0,
+          5
+        ]
+      },
+      "expectedOutput": {
+        "count": 3,
+        "min": -2,
+        "max": 5,
+        "range": 7
+      }
+    }
+  ],
+  "baseline": {
+    "runtime": "node",
+    "script": "import fs from 'node:fs';\nconst {input} = JSON.parse(fs.readFileSync(0, 'utf8'));\nconst values = input.values;\nconst min = values[0], max = values[values.length - 1];\nprocess.stdout.write(JSON.stringify({count: values.length, min, max, range: max - min}));\n"
+  },
+  "benchmarkCases": [
+    {
+      "name": "ordered example",
+      "input": {
+        "values": [
+          -2,
+          0,
+          5
+        ]
+      },
+      "expectedOutput": {
+        "count": 3,
+        "min": -2,
+        "max": 5,
+        "range": 7
+      }
+    },
+    {
+      "name": "unordered example",
+      "input": {
+        "values": [
+          6,
+          2,
+          4
+        ]
+      },
+      "expectedOutput": {
+        "count": 3,
+        "min": 2,
+        "max": 6,
+        "range": 4
+      }
+    }
+  ],
+  "minNetGain": 1,
+  "permissions": {
+    "profile": "no_external_access"
+  }
+}

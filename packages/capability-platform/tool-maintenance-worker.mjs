@@ -7,12 +7,12 @@ import {getToolRepairFeedback} from './tool-repair-feedback.mjs';
 
 // One trusted web process owns this worker. A restart never assumes an unknown
 // Docker execution is safe to repeat. Other maintenance CLIs remain manual.
-export function createToolMaintenance({root,store,validate,onError=()=>{}}){
+export function createToolMaintenance({root,store,validate,canValidate=()=>true,onError=()=>{}}){
   let started=false,accepting=true,pump=null,wakeRequested=false;
   function proposal(id){maintenanceId(id);const {databasePath}=resolveToolLearningPaths(root);let found;
     if(fs.existsSync(databasePath)){const registry=new ToolRegistry(databasePath,{readOnly:true});try{found=registry.getProposal(id);}finally{registry.close();}}
     if(!found)throw new ToolMaintenanceError(404,'没有找到这个候选。');return found;}
-  function ready(id){const p=proposal(id);if(!['submitted','verification_failed'].includes(p.state))throw new ToolMaintenanceError(409,'此候选当前不可排队验证。');
+  function ready(id){if(!canValidate(id))throw new ToolMaintenanceError(409,'此候选正在修订，暂不能验证。');const p=proposal(id);if(!['submitted','verification_failed'].includes(p.state))throw new ToolMaintenanceError(409,'此候选当前不可排队验证。');
     // Material, source hashes, registry identity and any parent/latest evidence
     // are checked by the established reader, never by browser assertions.
     getRegisteredToolProposal(id,{root});return p;
@@ -30,6 +30,7 @@ export function createToolMaintenance({root,store,validate,onError=()=>{}}){
   return {
     start(){if(!started){store.interruptRunning();started=true;if(store.halted())accepting=false;wake();}return Promise.resolve();},
     status(){return {accepting:accepting&&!store.halted(),halted:store.halted()};},
+    latest(id){proposal(id);return store.latest(id);},
     enqueue(id,requestId){if(!accepting)throw new ToolMaintenanceError(503,'Maintenance is stopping');maintenanceId(id);maintenanceId(requestId);
       const previous=store.getByRequest(requestId);
       // A retry still receives its original result if validation already changed

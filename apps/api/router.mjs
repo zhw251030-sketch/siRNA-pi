@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import { TaskMessageService, TaskMessageSubmissionError } from "../../packages/task-core/task-message-service.mjs";
 import { WorkspaceFileError } from "../../packages/task-core/workspace.mjs";
 import { ToolMaintenanceError } from "../../packages/capability-platform/tool-maintenance-store.mjs";
+import { ToolRepairError } from "../../packages/capability-platform/tool-repair-service.mjs";
 
 const staticFiles = new Map([
   ["/", ["index.html", "text/html; charset=utf-8"]],
@@ -50,8 +51,8 @@ async function readBody(request, maxBytes=1048576) {
 
 // HTTP only coordinates transport. Task state and runtime execution stay in
 // their own packages, matching the reference repository's responsibility split.
-export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolMaintenance } = {}) {
-  const taskMessages = new TaskMessageService({ taskStore, agentRuntime, workspaceFiles });
+export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolMaintenance, toolRepair, taskMessages: sharedTaskMessages } = {}) {
+  const taskMessages = sharedTaskMessages ?? new TaskMessageService({ taskStore, agentRuntime, workspaceFiles });
   const activeTurns = new Set();
   const track = (operation) => {
     activeTurns.add(operation);
@@ -86,8 +87,17 @@ export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolM
         return reply(response, 410, { error: "Unbound chat sessions are disabled; use the task-scoped /v1/tasks API" });
       }
       if (request.method === "GET" && pathname === "/v1/tasks") return reply(response, 200, { tasks: taskStore.listTasks() });
-      const proposalRoute=/^\/v1\/tool-proposals(?:\/([^/]+)\/(validate|validation-summary|repair-feedback))?$/.exec(pathname);
+      const proposalRoute=/^\/v1\/tool-proposals(?:\/([^/]+)\/(validate|validation-summary|repair-feedback|repair-status|repair))?$/.exec(pathname);
       if(proposalRoute){
+        if(['repair-status','repair'].includes(proposalRoute[2])){
+          if(!toolRepair)return reply(response,503,{error:'候选修订服务尚未配置。'});
+          if(request.method==='GET'&&proposalRoute[2]==='repair-status')return reply(response,200,toolRepair.status(proposalRoute[1]));
+          if(request.method==='POST'&&proposalRoute[2]==='repair'){
+            const body=await readBody(request,4096);
+            if(Object.keys(body).length!==2||!Object.hasOwn(body,'validationId')||!Object.hasOwn(body,'reportSha256'))invalid('修订请求只接受 validationId 和 reportSha256。');
+            const result=await toolRepair.start(proposalRoute[1],body);return reply(response,result.deduplicated?200:202,result);
+          }
+        }
         if(!toolMaintenance)return reply(response,503,{error:'候选验证服务尚未配置。'});
         if(request.method==='GET'&&!proposalRoute[1])return reply(response,200,{proposals:toolMaintenance.list(),maintenance:toolMaintenance.status()});
         if(request.method==='GET'&&proposalRoute[2]==='validation-summary')return reply(response,200,{summary:toolMaintenance.summary(proposalRoute[1])});
@@ -188,7 +198,7 @@ export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolM
       reply(response, 404, { error: "没有这个页面或接口。" });
     } catch (error) {
       if (!response.headersSent && !response.destroyed) {
-        const known = error instanceof TaskMessageSubmissionError || error instanceof WorkspaceFileError || error instanceof ToolMaintenanceError;
+        const known = error instanceof TaskMessageSubmissionError || error instanceof WorkspaceFileError || error instanceof ToolMaintenanceError || error instanceof ToolRepairError;
         reply(response, known ? error.statusCode : 500,
           { error: known ? error.message : "服务处理失败，请检查项目内运行记录。" });
       } else if (!response.destroyed) response.end();
@@ -197,6 +207,6 @@ export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolM
   server.requestTimeout = 15000;
   server.headersTimeout = 10000;
   // HTTP connections and accepted agent turns have different lifetimes.
-  server.waitForTaskCompletion = () => Promise.allSettled([...activeTurns]);
+  server.waitForTaskCompletion = () => Promise.allSettled([...activeTurns,...(toolRepair?[toolRepair.drain()]:[])]);
   return server;
 }

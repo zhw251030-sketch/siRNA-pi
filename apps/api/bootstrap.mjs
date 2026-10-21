@@ -20,6 +20,9 @@ import { createTaskToolBuilders } from "../../packages/capability-platform/task-
 import { ToolMaintenanceStore } from "../../packages/capability-platform/tool-maintenance-store.mjs";
 import { createToolMaintenance } from "../../packages/capability-platform/tool-maintenance-worker.mjs";
 import { createMaintenanceValidator } from "../../packages/capability-platform/tool-maintenance-validation.mjs";
+import { TaskMessageService } from "../../packages/task-core/task-message-service.mjs";
+import { ToolRepairStore } from "../../packages/capability-platform/tool-repair-store.mjs";
+import { createToolRepair } from "../../packages/capability-platform/tool-repair-service.mjs";
 
 process.umask(0o077);
 const directory = path.join(projectRoot, "runtime", "tasks");
@@ -34,7 +37,11 @@ if (fs.realpathSync(dockerSocket) !== dockerSocket || !fs.lstatSync(dockerSocket
 const docker = new DockerEngineClient(dockerSocket);
 const runner = createDockerValidationRunner({ docker, purpose: 'approved-call' });
 const toolCallLeases = createToolCallLeases();
-const builders = createTaskToolBuilders({root: projectRoot,docker});
+let toolRepair;
+const builders = createTaskToolBuilders({root: projectRoot,docker,registrationPolicy:(input,context)=>{
+  if(!toolRepair)throw new Error('Tool repair admission is unavailable');
+  return toolRepair.registration(input,context);
+}});
 const toolsServer = createAgentToolsServer({ leases: toolCallLeases, builders,
   discover: ({taskContext}) => discoverApprovedTools({ root: projectRoot, runner, taskContext }) });
 await listenToolSocket(toolsServer, {root: projectRoot});
@@ -43,28 +50,35 @@ const agentRuntime = new RuntimeRouter({ compose, legacy: new LocalPiRuntime() }
 const taskStore = new TaskStore(database);
 const recovered = taskStore.recoverInterruptedTasks();
 const workspaceFiles = new TaskFiles({ root: projectRoot, agentRuntime });
+const taskMessages=new TaskMessageService({taskStore,agentRuntime,workspaceFiles});
 const maintenanceStore=new ToolMaintenanceStore({root:projectRoot});
 const toolMaintenance=createToolMaintenance({root:projectRoot,store:maintenanceStore,validate:createMaintenanceValidator({root:projectRoot,docker}),
+  canValidate:id=>!toolRepair?.active(id),
   onError:()=>console.error('候选验证执行失败，请检查项目内私有运行记录。')});
-const server = createAppServer({ taskStore, agentRuntime, workspaceFiles, toolMaintenance });
+const repairStore=new ToolRepairStore({root:projectRoot});
+toolRepair=createToolRepair({root:projectRoot,store:repairStore,taskStore,taskMessages,agentRuntime,maintenance:toolMaintenance});
+const server = createAppServer({ taskStore, agentRuntime, workspaceFiles, taskMessages, toolMaintenance, toolRepair });
 server.listen(3000, "127.0.0.1", () => {
   // Never recover or claim jobs until this instance owns the listening socket.
-  toolMaintenance.start();
+  toolRepair.recover();toolMaintenance.start();
   console.log(`siRNA-pi: http://127.0.0.1:3000/ ; runtime=agent-compose ; recovered=${recovered.length}`);
 });
-server.on("error", async () => { console.error("网页服务启动失败，请检查端口与项目配置。"); process.exitCode = 1; await toolMaintenance.stop(); maintenanceStore.close(); toolsServer.close(); taskStore.close(); rpc.close(); });
+server.on("error", async () => { console.error("网页服务启动失败，请检查端口与项目配置。"); process.exitCode = 1; await toolRepair.stop();await toolMaintenance.stop();repairStore.close(); maintenanceStore.close(); toolsServer.close(); taskStore.close(); rpc.close(); });
 // Deployment stops an idle server. Let any accepted HTTP turn finish on normal shutdown.
 async function shutdown(){
   // stop() synchronously closes acceptance/claiming before HTTP drains; its
   // promise settles only after the current validator and durable job finish.
   const maintenanceDrain=toolMaintenance.stop();
+  const repairDrain=toolRepair.stop();
   server.close(async () => {
   await maintenanceDrain;
+  await repairDrain;
   await server.waitForTaskCompletion();
   await new Promise(resolve => toolsServer.close(resolve));
   await toolsServer.waitForCalls();
   taskStore.close();
   maintenanceStore.close();
+  repairStore.close();
   rpc.close();
   process.exit(0);
   });

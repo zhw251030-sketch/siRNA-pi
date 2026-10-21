@@ -304,3 +304,17 @@ schema4，当前5proposals/4validations/2versions/13events；旧25材料/25构�
 Linux修复前完整1111项1109pass/2skip，0fail。Windows两次完整串行均1111项1097pass/1fail/13skip，分别旧web临时端口bad port和旧workspace rename EPERM；单文件复查web7pass、workspace14pass/3skip，根因未确认、原日志保留。仅UI修复后两地64相关测试全通过；后续展示数量文案由23网页用例覆盖，不宣称最终全套Windows通过。Node既有实验API警告保留，未屏蔽旧测试。
 
 最新学习文档docs/26-验证失败反馈与修订说明.md；固定只读复核scripts/verify-web-tool-feedback.mjs依赖runtime/feedback-{state,state-before,build}，未来新增状态后勿改历史迎合总数。私有feedback-{tests-01,fix-tests-01,acceptance-01,acceptance-02}及task-review记录证据；本机feedback-browser.png为页面截图。10L旧总数断言已不适用。原参考67d2754的tool-repair-prompt→sendAutomatedRepair→tool-automation尚只完成前段反馈准备；下一步持久可信来源绑定、固定请求去重、修订派发、替代谱系与次数预算，再接真正Curator。没有自主修订/自进化效果结论。个人main持续同步，唯一远端项目根不变。
+
+以上为第10M步历史；以下为当前状态。
+
+2026-10-21：第10N步完成可信来源绑定和显式单轮修订代码。proposal_submitted事件同事务保存五项激活lease身份，旧CLI来源仍null不回填，registry保持schema4。独立runtime/tool-repair/repairs.sqlite schema1在派发前保存原提案/完整报告/完整提示及哈希，固定auto-tool-repair:<proposalId>跨重启去重；GET只读提示，POST再次核实时Compose/空闲/维护状态。复用聊天同一TaskMessageService，停止接收后排空，只有成功监听owner恢复，未知/中断不重发。提交时核当前task/session/run/消息ticket；冻结toolName/runtime/依赖/权限/测试/基线/minNetGain/parent，只改源码等并必须新build；事务内每请求唯一替代。根0、替代最多3层，是谱系深度而非模型/token/费用全局预算；不自动验证/批准。原参考自动协调、header/唯一活跃来源及同名替代识别与个人严格lease/ticket/frozencontract有意不同。
+
+网页增加来源、链次、显式请求和新候选入口，回执未知不重放；修订未知与验证互斥，未确认验证UUID在重载后继续阻止修订、存储失败闭合。后端34新行为用例，UI38项通过；审查发现unknownvalidation门禁已RED/GREEN修复并限定复审。最终Windows1170项1157pass/13平台skip，Linux1170项1168pass/2skip，0fail。此前本轮Windows01在UI最终修复前1168项通过，不能混为最终总数。个人源码仍无新依赖/镜像/系统变更。
+
+真实教学仅1根构建+1修订轮。task245a0189-ed75-4d88-8305-cc4a0a44eb03，executionc35692f2-01f1-4845-a481-fb084b9f61ec。根proposal b1bf4288-e3dd-4552-906d-f1ba1e4991f0，buildcea3258f-a2fe-4661-8045-33d175ad6322；独立validation872f96e1-6dcc-4f4e-a036-6b2577be4a6c，reportSHAaab1f6d1c562f828338c63f29314ea507c06d46b1c0ec62f4d608670d9f17c10，领域2/3、比较1/2对1/2、净增0。修订build006e1d55-f5d4-45d2-b956-25dbc28134d7，源码扫描全数组，1调试命令3案例正确，镜像sha256:fdde4b1505f52eb815b6f716343ef548fb382f620a698bebddbeed8088d6a2fc已finalize；但提交自行加parent={toolName:summarize_numeric_range_repair,version:1.0.0}，违反原无parent合同。基本schema合法，不能称schema拒绝；保存的参数事后在内存重建registration视图，原参数registration_refused、仅移除parent则返回合法association，无真实补交。公开宿主事件仅success:false，没有细化原因，事后诊断不能冒充当时错误。
+
+实际无替代候选/第二验证/批准/激活，票据awaiting_replacement；task已ended、guest释放。两轮25模型响应/28Pi调用/6工具错误，242151tokens=input22851+output5953+cacheRead213347，cacheWrite0，实际账单未知。两describe对象参数错误；修订propose失败后试finalized会话run、正式工具空参数和builder空参数均错误。模型据相同通用错误推断后台宕机不成立，还错误声称parent可改/原候选submitted，原轨迹及revision-report.md保留不可修写。绝不补跑旧轮或为演示成功循环付费。
+
+2构建调试命令共4样例；4构建/打包+11验证临时容器均移除，两个镜像保留。旧29材料/28构建文件/12正式审计/12会话/旧任务行/4运行容器/catalog/凭据元数据保持。schema4当前6proposals/5validations/2versions/15events，正式target_sequence仍active1.0.1，旧候选状态不变。项目后台重启后只读验收报告完全一致，无模型重发。当前复核node scripts/verify-controlled-tool-repair.mjs依赖私有runtime/repair-state.mjs/快照/轨迹，ok仅证据一致，outcome repair_submission_rejected及modelRepairSucceeded:false；旧10M固定总数验收不再适用。
+
+最新学习docs/27-可信来源与一轮工具修订.md；runtime/repair-acceptance-{01,02}.json、repair-ended-history.json、repair-notes.json、repair-{local,linux}-tests日志及repair-browser.png为本轮证据；同步回执留runtime。下一步先完善安全明确的合同拒绝与未知结果区别，用独立新演示补齐合法替代→独立验证的成功路径，再接真正Curator。当前不是完整真实修订闭环成功，不是自进化有效性证明。仍个人main持续同步，唯一远端/home/hanwen/Project/project/siNRA-pi，不改上级RSI研究项目。
