@@ -11,19 +11,30 @@ export function createCurationBuildRegistrationPolicy(getService) {
   return policy;
 }
 
-export function startApiServices({server,toolMaintenance,toolRepair,toolCuration,toolCurationBuild}) {
+export function createCurationAutomationReadiness({taskMessages,agentRuntime}) {
+  return async task => {
+    if (taskMessages.isTaskBusy(task.id)) return false;
+    const description = await agentRuntime.describe(task.executionSessionId);
+    if (description?.backend !== 'agent-compose' || taskMessages.isTaskBusy(task.id)) return false;
+    await agentRuntime.assertWorkspaceIdle(task.executionSessionId);
+    return !taskMessages.isTaskBusy(task.id);
+  };
+}
+
+export function startApiServices({server,toolMaintenance,toolRepair,toolCuration,toolCurationBuild,toolCurationCoordinator}) {
   if (!server.listening) throw Error('Services require ownership of the listening socket.');
   toolRepair?.recover();
   toolCurationBuild?.recover();
   toolMaintenance?.start();
   toolCuration?.start();
+  toolCurationCoordinator?.start();
 }
 
-export function createApiShutdown({server,toolMaintenance,toolRepair,toolCuration,toolCurationBuild,toolsServer,stores=[],rpc,rpcs=[]}) {
+export function createApiShutdown({server,toolMaintenance,toolRepair,toolCuration,toolCurationBuild,toolCurationCoordinator,toolsServer,stores=[],rpc,rpcs=[]}) {
   let pending;
   return function shutdown() {
     if(pending)return pending;
-    const drains=[toolMaintenance,toolRepair,toolCuration,toolCurationBuild].filter(Boolean).map(service=>{
+    const drains=[toolCurationCoordinator,toolMaintenance,toolRepair,toolCuration,toolCurationBuild].filter(Boolean).map(service=>{
       try{return Promise.resolve(service.stop());}catch(error){return Promise.reject(error);}
     });
     const drainResult=Promise.allSettled(drains);

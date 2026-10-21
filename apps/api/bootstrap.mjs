@@ -27,12 +27,13 @@ import { createToolCurationPreview } from "../../packages/extensions/tool-curati
 import { getRegisteredToolCatalog } from "../../packages/capability-platform/tool-approval-service.mjs";
 import { ToolCurationStore } from "../../packages/extensions/tool-curation/tool-curation-store.mjs";
 import { createToolCurationService } from "../../packages/extensions/tool-curation/tool-curation-service.mjs";
+import { createToolCurationCoordinator } from "../../packages/extensions/tool-curation/tool-curation-coordinator.mjs";
 import { createAgentToolCurator } from "../../packages/extensions/tool-curation/agent-tool-curator.mjs";
 import { ToolCurationBuildStore } from "../../packages/extensions/tool-curation/tool-curation-build-store.mjs";
 import { createToolCurationBuildService } from "../../packages/extensions/tool-curation/tool-curation-build-service.mjs";
 import { ToolGapStore } from "../../packages/extensions/tool-curation/tool-gap-store.mjs";
 import { createToolGapService } from "../../packages/extensions/tool-curation/tool-gap-service.mjs";
-import { createApiShutdown, startApiServices, createCurationBuildRegistrationPolicy } from "./service-lifecycle.mjs";
+import { createApiShutdown, startApiServices, createCurationBuildRegistrationPolicy, createCurationAutomationReadiness } from "./service-lifecycle.mjs";
 
 process.umask(0o077);
 const directory = path.join(projectRoot, "runtime", "tasks");
@@ -50,7 +51,7 @@ if (fs.realpathSync(dockerSocket) !== dockerSocket || !fs.lstatSync(dockerSocket
 const docker = new DockerEngineClient(dockerSocket);
 const runner = createDockerValidationRunner({ docker, purpose: 'approved-call' });
 const toolCallLeases = createToolCallLeases();
-let toolRepair, toolCurationBuild, toolGaps;
+let toolRepair, toolCurationBuild, toolGaps, toolCurationCoordinator;
 const builders = createTaskToolBuilders({root: projectRoot,docker,registrationPolicy:(input,context)=>{
   if(!toolRepair)throw new Error('Tool repair admission is unavailable');
   return toolRepair.registration(input,context);
@@ -64,7 +65,7 @@ const agentRuntime = new RuntimeRouter({ compose, legacy: new LocalPiRuntime() }
 const taskStore = new TaskStore(database);
 const recovered = taskStore.recoverInterruptedTasks();
 const workspaceFiles = new TaskFiles({ root: projectRoot, agentRuntime });
-const taskMessages=new TaskMessageService({taskStore,agentRuntime,workspaceFiles});
+const taskMessages=new TaskMessageService({taskStore,agentRuntime,workspaceFiles,onSettled:run=>toolCurationCoordinator?.observeRun(run)});
 const maintenanceStore=new ToolMaintenanceStore({root:projectRoot});
 const toolMaintenance=createToolMaintenance({root:projectRoot,store:maintenanceStore,validate:createMaintenanceValidator({root:projectRoot,docker}),
   canValidate:id=>!toolRepair?.active(id),
@@ -79,16 +80,18 @@ const curatorRuntime = new AgentComposeRuntime({root:projectRoot,agentName:'tool
 const curationStore = new ToolCurationStore({root:projectRoot});
 const gapStore = new ToolGapStore({root:projectRoot});
 toolGaps = createToolGapService({store:gapStore,taskStore,curationStore});
-const toolCuration = createToolCurationService({store:curationStore,preview:toolCurationPreview,curator:createAgentToolCurator({runtime:curatorRuntime,timeoutMs:180000})});
+const toolCuration = createToolCurationService({store:curationStore,preview:toolCurationPreview,cooldownMs:604800000,curator:createAgentToolCurator({runtime:curatorRuntime,timeoutMs:180000})});
+toolCurationCoordinator=createToolCurationCoordinator({taskStore,preview:toolCurationPreview,curation:toolCuration,
+  isReady:createCurationAutomationReadiness({taskMessages,agentRuntime}),isTaskBusy:taskId=>taskMessages.isTaskBusy(taskId),intervalMs:1000,maxReviews:3});
 const curationBuildStore = new ToolCurationBuildStore({root:projectRoot});
 toolCurationBuild = createToolCurationBuildService({root:projectRoot,store:curationBuildStore,curationStore,taskStore,taskMessages,agentRuntime,listExistingTools});
-const server = createAppServer({ taskStore, agentRuntime, workspaceFiles, taskMessages, toolMaintenance, toolRepair, toolCurationPreview, toolCuration, toolCurationBuild });
-const shutdown = createApiShutdown({server,toolMaintenance,toolRepair,toolCuration,toolCurationBuild,toolsServer,
+const server = createAppServer({ taskStore, agentRuntime, workspaceFiles, taskMessages, toolMaintenance, toolRepair, toolCurationPreview, toolCuration, toolCurationBuild, toolCurationCoordinator });
+const shutdown = createApiShutdown({server,toolMaintenance,toolRepair,toolCuration,toolCurationBuild,toolCurationCoordinator,toolsServer,
   stores:[taskStore,maintenanceStore,repairStore,curationStore,curationBuildStore,gapStore],rpcs:[rpc,curatorRpc]});
 const shutdownFailure = () => {console.error('服务停止未完全确认，请检查项目内私有运行记录。');process.exitCode=1;};
 server.listen(3000, "127.0.0.1", () => {
   // Never recover or claim jobs until this instance owns the listening socket.
-  try {startApiServices({server,toolRepair,toolCurationBuild,toolMaintenance,toolCuration});}
+  try {startApiServices({server,toolRepair,toolCurationBuild,toolMaintenance,toolCuration,toolCurationCoordinator});}
   catch {shutdownFailure();void shutdown().catch(shutdownFailure);return;}
   console.log(`siRNA-pi: http://127.0.0.1:3000/ ; runtime=agent-compose ; recovered=${recovered.length}`);
 });

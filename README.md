@@ -6,7 +6,11 @@
 
 ## 当前进度
 
-最新：第11D步接入 `report_tool_gap`。任务中的 Pi 可以明确报告缺少的能力、原因和输入输出草案；后端绑定真实执行来源，在独立数据库中不可变保存。本轮结束后，即使没有重复调用，也能在网页手动送交 Curator；建议仍沿11C人工交给Builder。报告是Agent主张，不能证明缺口真实或授予权限。完整机制、逐文件说明与验收见 [Agent主动报告能力缺口](docs/32-Agent主动报告能力缺口.md)。下一步对照原仓库学习自动观察和能力冷却调度，尚未自动构建或批准。
+最新：第11E步接通新结束轮次的自动观察、全局网页开关与七天候选冷却。默认关闭；每次API服务启动最多3次自动送审尝试，反复开关不补次数，重启不回扫旧任务。任务保存完成后才通知，异步运行环境检查之后再同步复核上传/取消/结束占用。Curator返回候选后，后端将近期同能力重复候选转为明确归因的skip；冷却发生在模型回答之后，不节省该次调用。Builder交接、验证和批准仍由人触发。逐文件机制、原版差异和实际验收见 [自动观察与候选冷却](docs/33-自动观察与候选冷却.md)。
+
+上一轮第11D已接入 `report_tool_gap`，任务Pi的明确缺口报告可以单独成为审查线索。报告是Agent主张，不能证明缺口真实或授予权限，机制与当时验收见 [Agent主动报告能力缺口](docs/32-Agent主动报告能力缺口.md)。
+
+11E最终Linux1459项：1457通过、2项Windows专属跳过、0失败。最终代码的隔离浏览器完成两个任务自动送审→一candidate/一后端冷却skip，原始两回答保持candidate，0真实模型/Builder。生产默认关闭0/3；七旧DB全schema/行、旧证据/catalog/所有容器镜像及正式active1.0.1保持。只重启空闲API，PID1914941；三端同步状态以最终Git读回和私有回执为准。
 
 上一阶段第11B的真实合成审查返回skip（1模型响应/0工具）；Windows全套曾有间歇文件锁失败，历史证据不改，见 [独立Curator审查与冻结证据](docs/30-独立Curator审查与冻结证据.md)。以下日期条目保留各阶段完成时的状态，以本节和最新教学文档为准。
 
@@ -226,6 +230,7 @@ scripts/verify-compose-lifecycle.mjs           中断、续聊、释放后的状
 apps/api/router.mjs         任务接口、SSE 传输与静态页面
 packages/task-core/task-store.mjs           SQLite 任务、消息和运行事件
 packages/extensions/tool-curation/         轨迹预览、独立审查与显式构建交接
+packages/extensions/tool-curation/tool-curation-coordinator.mjs 新轮次观察、开关、次数与同步准入
 packages/extensions/tool-curation/tool-curation-build-contract.mjs 固定构建指令与权限/摘要合同
 packages/extensions/tool-curation/tool-curation-build-store.mjs    不可变交接单、状态和重启恢复
 packages/extensions/tool-curation/tool-curation-build-service.mjs  原任务派发、去重和精确提案来源
@@ -239,6 +244,7 @@ packages/agent-runtime/pi-sdk.mjs           CLI/网页共用的 SDK 创建与运
 packages/agent-runtime/workspace-files.mjs  read/write 文件范围检查
 public/index.html           任务列表、对话、执行动态三个区域
 public/app.js               创建任务、发消息、切换与恢复历史
+public/curation-automation.mjs 全局自动审查开关、剩余次数与近期准入状态
 public/sse.mjs              连续读取服务端事件，确认保存完成
 public/lifecycle.mjs        停止/结束按钮、迟到状态和待发送草稿规则
 public/files.mjs            文件请求、文本预览与切换任务后的过期响应保护
@@ -281,6 +287,7 @@ docs/29-工具发现轨迹预览.md 任务事件、真实工具识别、重复�
 docs/30-独立Curator审查与冻结证据.md 固定材料、独立无工具审查与建议状态
 docs/31-Curator建议交给Builder.md 原任务构建交接、持久票据与提案来源
 docs/32-Agent主动报告能力缺口.md 主动报告、可信来源、冻结证据与人工审查
+docs/33-自动观察与候选冷却.md 保存后通知、自动送审、七天冷却与费用边界
 docs/superpowers/plans/      安装步骤与执行记录
 ```
 

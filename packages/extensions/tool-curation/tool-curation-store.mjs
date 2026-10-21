@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 import {assertCurationJson,TOOL_CURATION_TRACE_PROTOCOL,traceSha256} from './tool-curation-evidence.mjs';
+import {validateToolCurationResult} from './tool-curation-result.mjs';
 
 const APPLICATION_ID=0x53435431;
 const now=()=>new Date().toISOString();
@@ -85,6 +86,20 @@ export class ToolCurationStore {
   get(taskId,id){return rowRecord(this.#db.prepare('SELECT * FROM curations WHERE task_id=? AND id=?').get(taskId,id));}
   find(taskId,runId){return rowRecord(this.#db.prepare('SELECT * FROM curations WHERE task_id=? AND run_id=?').get(taskId,runId));}
   list(taskId){return this.#db.prepare('SELECT * FROM curations WHERE task_id=? ORDER BY requested_at DESC,id DESC LIMIT 100').all(taskId).map(r=>rowRecord(r,false));}
+  findRecentCandidate(capabilityKey,{excludeId,since,until}){
+    const time=value=>typeof value==='number'?value:typeof value==='string'?Date.parse(value):NaN;
+    const lower=time(since),upper=time(until);
+    if(typeof capabilityKey!=='string'||!capabilityKey||typeof excludeId!=='string'||!Number.isFinite(lower)||!Number.isFinite(upper)||lower>upper)throw Error('Invalid candidate cooldown lookup');
+    // The display list is capped at 100. Inspect durable candidates directly,
+    // validating stored bindings before deciding they cannot be a duplicate.
+    for(const row of this.#db.prepare("SELECT * FROM curations WHERE status='candidate' AND id!=? ORDER BY completed_at DESC,id DESC").iterate(excludeId)){
+      const candidate=rowRecord(row),completedAt=Date.parse(candidate.completedAt);
+      const result=validateToolCurationResult(candidate,candidate.result);
+      if(result.decision!=='candidate'||!Number.isFinite(completedAt))throw Error('Invalid persisted candidate');
+      if(completedAt>=lower&&completedAt<=upper&&result.candidate.capabilityKey===capabilityKey)return candidate;
+    }
+    return undefined;
+  }
   create(trace){
     assertCurationJson(trace,{maxDepth:32,maxBytes:65536});
     if(trace.protocolVersion!==TOOL_CURATION_TRACE_PROTOCOL||!['post_run','online_gap'].includes(trace.trigger)||trace.traceSha256!==traceSha256(trace))throw Error('Invalid frozen trace');

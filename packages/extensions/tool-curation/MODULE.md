@@ -1,6 +1,6 @@
 # Tool Curation：工具发现扩展
 
-本阶段实现已结束任务轮次的只读轨迹预览、Agent明确缺口报告、显式送审、不可变证据、独立Curator建议，以及用户明确触发的建议→Builder交接。Task Core仍负责保存任务、消息与公共事件，能力平台仍负责工具构建、独立验证和发布。
+本阶段实现已结束任务轮次的只读轨迹预览、Agent明确缺口报告、显式/有界自动送审、不可变证据、独立Curator建议、七天候选冷却，以及用户明确触发的建议→Builder交接。Task Core仍负责保存任务、消息与公共事件，能力平台仍负责工具构建、独立验证和发布。
 
 输入：TaskStore.readRunEvidence的有界记录，以及经过已有目录核验逻辑读出的正式工具名称。snapshot一次取得来源与目录；原始目录给11A预览构建器，冻结目录另按相同规则去sirna_tools_前缀、去重、排序，避免双重规范化。
 
@@ -18,6 +18,10 @@
 
 构建交接：tool-curation-build-contract组织固定消息及三个摘要，store在runtime/tool-curation-build/builds.sqlite先保存不可变交接单，service通过TaskMessageService向原任务派发固定auto-tool-curation-build:<curationId>消息。GET异步核验Compose/Builder/任务状态；POST冻结建议/来源并去重，恢复时未完成票据只记outcome_unknown，不重发。注册策略从真实激活轮身份、最新持久消息与事件检查来源，通过能力平台登记事务保存精确curation关联；旧registry schema不变、每票据最多一个提案、未知提交锁不能由另一构建会话绕过。
 
-边界：规则预览和报告都不派发；Curator的candidate是建议，只有用户显式交接且实际登记后才有能力平台的submitted提案。构建沿用原任务的Pi与六个OCI构建操作；仅接受node/空dependencies/exact/no_external_access/无parent，工具名称冻结。已接online_gap证据来源，未接自动观察/冷却、自动Builder、自动验证或批准。结构与引用检查不证明建议正确或有收益；JSON.parse沿用标准重复键语义。预览/trace仅常见字段脱敏，不承诺消除任意私密文本。
+自动协调：tool-curation-coordinator.mjs通过TaskMessageService保存助手消息并清除active后的onSettled接收本轮身份。默认off，无历史回扫；每次服务进程最多3次自动尝试，切换不重置，pending32/seen256/recent20。异步Compose空闲检查后，再同步调用同一消息服务isTaskBusy复核upload/cancel/end预约，无await直至service.request。启用期间的新结束轮次入队，消费时检查证据资格，合格才送审；Builder保留requestId排除，generation隔离关停/重开，stop同步停止准入并等待已进入操作。精确service.find不受100条展示上限影响。近期admitted只表示准入，模型结果由原服务持久记录。
+
+冷却：生产service显式604800000ms，未配置默认0。自动请求有gap/合格错误信号用online_gap，否则post_run；旧默认摘要不变。候选校验后通过store.findRecentCandidate查全部持久candidate、精确能力键、其他ID、包含边界的合法完成时间，排除未来记录。采用前校验trace/result绑定，损坏即拒绝；查找到complete无await。重复写标准skip且说明后端规则/原ID，原模型对象不变，skip不延长期限。模型调用已经发生，不能声称节约该次费用。
+
+边界：规则预览和报告本身不派发；启用的coordinator在任务收尾后安排独立审查。Curator的candidate是建议，只有用户显式交接且实际登记后才有能力平台的submitted提案。构建沿用原任务的Pi与六个OCI构建操作；仅接受node/空dependencies/exact/no_external_access/无parent，工具名称冻结。未接自动Builder、Goal限制/验证后回调、自动验证或批准。结构与引用检查不证明建议正确或有收益；JSON.parse沿用标准重复键语义。预览/trace仅常见字段脱敏，不承诺消除任意私密文本。
 
 参考：sirna-pi-agent-service-refactor@67d275494c50f1e5c205b96b72a7b1623acfbe1d 的同目录 MODULE、trace、coordinator 和 agent-tool-curator。未发现参考根目录 LICENSE/NOTICE，本模块按公开职责与行为独立实现，未复制原模块。

@@ -40,8 +40,9 @@ function shape(preview){
 }
 function urls(call){const refs=new Map();for(const value of [call.inputPreview,call.outputPreview])for(const match of String(value??'').matchAll(/https?:\/\/[^\s"'<>\\]+/gi)){try{const u=new URL(match[0]);const ref={host:u.hostname,path:u.pathname,queryKeys:[]};refs.set(`${ref.host}${ref.path}`,ref);}catch{}}return [...refs.values()].slice(0,20);}
 
-export function buildToolCurationTrace({id,snapshot}){
+export function buildToolCurationTrace({id,snapshot,trigger}){
   if(typeof id!=='string' || !/^[0-9a-f-]{36}$/i.test(id))throw Error('Invalid curation identity');
+  if(trigger!==undefined&&!['post_run','online_gap'].includes(trigger))throw Error('Invalid curation trigger');
   const {preview,existingTools,events}=snapshot??{};
   if(!preview || !Array.isArray(existingTools) || !Array.isArray(events))throw Error('Snapshot is required');
   const {previewSha256,...body}=preview;
@@ -58,7 +59,7 @@ export function buildToolCurationTrace({id,snapshot}){
   });
   const included=new Set(calls.flatMap(c=>[c.startEventId,c.endEventId]));
   if([...ids].some(id=>!included.has(id)))throw Error('Trigger evidence is missing');
-  const trace={protocolVersion:TOOL_CURATION_TRACE_PROTOCOL,curationId:id,trigger:gapReports.length?'online_gap':'post_run',taskId:preview.taskId,runId:preview.runId,userMessageId:preview.userMessageId,objective:preview.objective,existingTools:[...existingTools],calls,gapReports,truncated:preview.limits.displayTruncated===true,sourceSha256:preview.sourceSha256,previewSha256,signals:structuredClone(signals),evidenceMetadata:{shapeSource:'sanitized_preview',originalInputsAvailable:false,completeTriggerEvidence:true,sourceHashScope:preview.limits.sourceHashScope}};
+  const trace={protocolVersion:TOOL_CURATION_TRACE_PROTOCOL,curationId:id,trigger:trigger??(gapReports.length?'online_gap':'post_run'),taskId:preview.taskId,runId:preview.runId,userMessageId:preview.userMessageId,objective:preview.objective,existingTools:[...existingTools],calls,gapReports,truncated:preview.limits.displayTruncated===true,sourceSha256:preview.sourceSha256,previewSha256,signals:structuredClone(signals),evidenceMetadata:{shapeSource:'sanitized_preview',originalInputsAvailable:false,completeTriggerEvidence:true,sourceHashScope:preview.limits.sourceHashScope}};
   if(gapReports.length){
     const gapIds=new Set(gapReports.flatMap(r=>r.evidenceEventIds));
     trace.gapEvidence=events.filter(e=>gapIds.has(e.id)).map(e=>sanitizeCurationEvidence(e,'',0,{complete:true}));

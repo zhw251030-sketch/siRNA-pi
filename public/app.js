@@ -2,6 +2,7 @@ import { consumeSse } from "./sse.mjs";
 import { lifecycleControls, mergeTaskState, pendingDisposition } from "./lifecycle.mjs";
 import { createTaskFiles, taskFileUrl, canPreviewFile, canDownloadFile } from "./files.mjs";
 import { createCurationPreviewPanel, curationNavigation } from "./curation.mjs";
+import { createCurationAutomationPanel } from "./curation-automation.mjs";
 
 const elements = Object.fromEntries([
   "new-session", "refresh-tasks", "task-list", "chat-panel", "chat-title", "task-status",
@@ -27,6 +28,8 @@ let taskSelectionVersion = 0;
 const taskFiles = createTaskFiles({ onChange: renderTaskFiles });
 const curationPreview = createCurationPreviewPanel({ root: document.getElementById("curation-panel"),
   ...curationNavigation({document,openTask:id=>withBusy(()=>selectTask(id))}) });
+const curationAutomation = createCurationAutomationPanel({root:document.getElementById('curation-automation-panel')});
+void curationAutomation.refresh();
 
 function readStored(storage, key) {
   try { return JSON.parse(storage.getItem(key) || "null"); } catch { return null; }

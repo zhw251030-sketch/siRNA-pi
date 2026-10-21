@@ -31,10 +31,17 @@ export class TaskMessageService {
   #ending = new Map();
   #uploading = new Map();
 
-  constructor({ taskStore, agentRuntime, workspaceFiles }) {
+  constructor({ taskStore, agentRuntime, workspaceFiles, onSettled }) {
     this.taskStore = taskStore;
     this.agentRuntime = agentRuntime;
     this.workspaceFiles = workspaceFiles;
+    this.onSettled = onSettled;
+  }
+
+  isTaskBusy(taskId) {
+    const task = this.taskStore.getTask(taskId);
+    return this.#active.has(taskId) || this.#canceling.has(taskId) || this.#ending.has(taskId) || this.#uploading.has(taskId) ||
+      task?.status === 'running' || task?.status === 'stopped';
   }
 
   async createTask(requestId) {
@@ -98,7 +105,17 @@ export class TaskMessageService {
     send({ type: "task", task: turn.task, message: turn.message });
     // Install the controller and completion before dispatch: queued preparation
     // and active RPC both receive the same cancellation signal.
-    const completion = Promise.resolve().then(() => this.#execute(turn, message, send, active.controller.signal));
+    const completion = Promise.resolve().then(() => this.#execute(turn, message, send, active.controller.signal)).then(result => {
+      // #execute's finally has released active, and its returned assistant is
+      // durable. Observers never own the already-saved turn's outcome.
+      if (result.assistantMessage && typeof this.onSettled === 'function') {
+        try {
+          Promise.resolve(this.onSettled({taskId, runId:result.finalRunId, userMessageId:turn.message.id,
+            ...(requestId === undefined ? {} : {requestId})})).catch(() => {});
+        } catch { /* Observation failure cannot alter the original result. */ }
+      }
+      return result;
+    });
     active.completion = completion;
     return { task: turn.task, userMessage: turn.message, deduplicated: false, completion };
   }

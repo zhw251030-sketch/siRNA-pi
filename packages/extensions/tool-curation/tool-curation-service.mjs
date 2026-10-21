@@ -7,7 +7,8 @@ const fail=(status,message)=>{throw new ToolCurationError(status,message);};
 const digest=/^[a-f0-9]{64}$/;
 const runIdentity=/^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{64})$/i;
 
-export function createToolCurationService({store,preview,curator}){
+export function createToolCurationService({store,preview,curator,cooldownMs=0,clock=Date.now}){
+  if(!Number.isFinite(cooldownMs)||cooldownMs<0||typeof clock!=='function')throw Error('Invalid curation cooldown configuration');
   let accepting=false,initialized=false,worker=null,storageFault=false;
   const queue=[];
   function storage(action){
@@ -37,7 +38,13 @@ export function createToolCurationService({store,preview,curator}){
         }catch(error){identityError=error;}
         if(uncertain)throw Object.assign(identityError??Error('Curator execution was not confirmed'),uncertainty);
         if(identityError)throw identityError;
-        const result=validateToolCurationResult(run,response.result);
+        let result=validateToolCurationResult(run,response.result);
+        if(cooldownMs>0&&result.decision==='candidate'){
+          const until=clock();
+          if(!Number.isFinite(until))throw Error('Invalid cooldown clock');
+          const previous=store.findRecentCandidate(result.candidate.capabilityKey,{excludeId:id,since:until-cooldownMs,until});
+          if(previous)result=validateToolCurationResult(run,{protocolVersion:result.protocolVersion,curationId:result.curationId,traceSha256:result.traceSha256,decision:'skip',summary:`后端冷却规则：近期同能力候选 ${previous.id} 已存在；保留原候选，本次不重复生成。`});
+        }
         store.complete(id,result);
       }catch(error){
         store.fail(id,{halt:error?.cleanupFailed===true||error?.outcomeUnknown===true||error?.cleanupConfirmed===false,message:error?.cleanupFailed===true||error?.cleanupConfirmed===false?'Curator cleanup could not be confirmed. Operator recovery required; no retry was attempted.':error?.outcomeUnknown===true?'Curator execution outcome unconfirmed. Operator recovery required; no retry was attempted.':'Independent curator did not complete a valid review; no retry was attempted.'});
@@ -56,7 +63,7 @@ export function createToolCurationService({store,preview,curator}){
   return {
     start(){if(!initialized){storage(()=>store.recoverInterrupted());initialized=true;}accepting=true;},
     async stop(){accepting=false;while(worker)await worker;if(storageFault)fail(503,'Independent curator persistence failed; shutdown requires operator inspection.');},
-    async request(taskId,binding){
+    async request(taskId,binding,{automatic=false}={}){
       if(!accepting||storageFault||!curator||typeof curator.curate!=='function'||storage(()=>store.isAdmissionHalted()))fail(503,'Independent curator is unavailable; operator recovery may be required.');
       try{assertCurationJson(binding,{maxDepth:2,maxBytes:1024});}catch{fail(400,'Invalid curation request.');}
       if(!binding||Object.keys(binding).some(k=>!['runId','sourceSha256','previewSha256'].includes(k))||!runIdentity.test(binding.runId)||!digest.test(binding.sourceSha256)||!digest.test(binding.previewSha256))fail(400,'Invalid curation request binding.');
@@ -69,11 +76,13 @@ export function createToolCurationService({store,preview,curator}){
       if(snapshot.preview.sourceSha256!==binding.sourceSha256||snapshot.preview.previewSha256!==binding.previewSha256)fail(409,'Preview changed; refresh before requesting review.');
       if(!snapshot.preview.eligibleForReview||!snapshot.preview.signals.some(s=>s.evidenceComplete)&&!snapshot.preview.gapReports?.length)fail(409,'No complete eligible triggering evidence is available.');
       let trace;
-      try{trace=buildToolCurationTrace({id:randomUUID(),snapshot});}catch(error){fail(error instanceof RangeError?413:409,'Frozen evidence cannot be represented completely within the review envelope.');}
+      try{trace=buildToolCurationTrace({id:randomUUID(),snapshot,...(automatic?{trigger:snapshot.preview.gapReports?.length||snapshot.preview.signals.some(signal=>signal.evidenceComplete&&signal.errorCount>0)?'online_gap':'post_run'}:{})});}catch(error){fail(error instanceof RangeError?413:409,'Frozen evidence cannot be represented completely within the review envelope.');}
       const result=storage(()=>store.create(trace));
       if(!result.deduplicated){queue.push(result.curation.id);schedule();}
       return result;
     },
+    // Internal coordinator lookup; unlike list(), this has no display window.
+    find(taskId,runId){return storage(()=>store.find(taskId,runId));},
     list(taskId){return storage(()=>store.list(taskId));},
     get(taskId,id){const row=storage(()=>store.get(taskId,id));if(!row)fail(404,'Independent review was not found.');return row;},
   };

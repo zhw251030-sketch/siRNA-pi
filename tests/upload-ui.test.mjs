@@ -6,6 +6,7 @@ import { createTaskFiles, taskFileUrl, canPreviewFile, canDownloadFile } from '.
 import { lifecycleControls, mergeTaskState, pendingDisposition } from '../public/lifecycle.mjs';
 import { consumeSse } from '../public/sse.mjs';
 import { createCurationPreviewPanel, curationNavigation } from '../public/curation.mjs';
+import { createCurationAutomationPanel } from '../public/curation-automation.mjs';
 
 const metadata = (name = 'data.csv', size = 4) => ({ id: `input:${name}`, kind: 'input', name, size, sha256: 'a'.repeat(64), modifiedAt: '2026-10-20T12:00:00.000Z' });
 const listing = (files = [], extra = {}) => Response.json({ files, state: 'ready', synchronization: 'unprepared', ...extra });
@@ -188,6 +189,7 @@ async function appHarness({ status = 'idle', execution = {}, events = [], fetche
   // Bind the files controller to the same transport boundary as the browser.
   sandbox.createTaskFiles = options => createTaskFiles({ ...options, fetcher: sandbox.fetch });
   sandbox.createCurationPreviewPanel = options => createCurationPreviewPanel({ ...options, fetcher: sandbox.fetch });
+  sandbox.createCurationAutomationPanel = options => createCurationAutomationPanel({ ...options, fetcher: sandbox.fetch });
   const context = vm.createContext(sandbox);
   const source = (await readFile(new URL('../public/app.js', import.meta.url), 'utf8')).replace(/^import .*;\r?\n/gm, '');
   vm.runInContext(source, context);

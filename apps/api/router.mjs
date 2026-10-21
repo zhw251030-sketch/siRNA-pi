@@ -17,6 +17,7 @@ const staticFiles = new Map([
   ["/files.mjs", ["files.mjs", "text/javascript; charset=utf-8"]],
   ["/tools.mjs", ["tools.mjs", "text/javascript; charset=utf-8"]],
   ["/curation.mjs", ["curation.mjs", "text/javascript; charset=utf-8"]],
+  ["/curation-automation.mjs", ["curation-automation.mjs", "text/javascript; charset=utf-8"]],
   ["/style.css", ["style.css", "text/css; charset=utf-8"]],
 ]);
 function reply(response, status, data) {
@@ -56,7 +57,7 @@ async function readBody(request, maxBytes=1048576) {
 
 // HTTP only coordinates transport. Task state and runtime execution stay in
 // their own packages, matching the reference repository's responsibility split.
-export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolMaintenance, toolRepair, toolCurationPreview, toolCuration, toolCurationBuild, taskMessages: sharedTaskMessages } = {}) {
+export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolMaintenance, toolRepair, toolCurationPreview, toolCuration, toolCurationBuild, toolCurationCoordinator, taskMessages: sharedTaskMessages } = {}) {
   const taskMessages = sharedTaskMessages ?? new TaskMessageService({ taskStore, agentRuntime, workspaceFiles });
   const activeTurns = new Set();
   const track = (operation) => {
@@ -92,6 +93,18 @@ export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolM
         return reply(response, 410, { error: "Unbound chat sessions are disabled; use the task-scoped /v1/tasks API" });
       }
       if (request.method === "GET" && pathname === "/v1/tasks") return reply(response, 200, { tasks: taskStore.listTasks() });
+      if (pathname === '/v1/tool-curation-automation' && ['GET','POST'].includes(request.method)) {
+        if (url.searchParams.size) invalid('自动审查不接受查询参数。');
+        if (!toolCurationCoordinator) return reply(response,503,{error:'自动审查服务尚未配置。'});
+        const body = request.method === 'POST' ? await readBody(request,1024) : undefined;
+        if (body && (Object.keys(body).length !== 1 || !Object.hasOwn(body,'enabled') || typeof body.enabled !== 'boolean')) invalid('自动审查只接受 enabled 布尔开关。');
+        try {
+          if (body) await toolCurationCoordinator.configure(body);
+          return reply(response,200,{automation:toolCurationCoordinator.status()});
+        } catch (error) {
+          return reply(response,[409,503].includes(error?.statusCode)?error.statusCode:503,{error:'自动审查状态未能确认，请刷新状态后重试。'});
+        }
+      }
       const buildRoute = /^\/v1\/tasks\/([^/]+)\/curations\/([^/]+)\/build$/.exec(pathname);
       if (buildRoute && ['GET','POST'].includes(request.method)) {
         if (url.searchParams.size || !buildId(buildRoute[1]) || !buildId(buildRoute[2])) invalid('构建请求地址或参数无效。');

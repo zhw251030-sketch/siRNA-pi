@@ -1,6 +1,20 @@
 # siRNA-pi 协作规则
 
-## 最新完成：第11D步（2026-10-22）
+## 最新完成：第11E步（2026-10-22）
+
+已接通保存后onSettled→有界自动观察→既有Curator串行审查→七天候选冷却与网页全局开关。教学入口docs/33-自动观察与候选冷却.md；参考67d2754只读，个人main和唯一远端根规则保持。下一步可对照原版自动Builder；当前交接、验证、批准仍人工，未接Goal限制/验证后回调，不混入其他RSI研究项目。
+
+coordinator默认off，每次服务进程累计3次自动尝试，切换不补、重启不回扫历史；pending32/seen256/recent20，Builder requestId排除、固定身份和generation重检。task消息保存且active清除后才通知；异步Compose空闲检查之后再同步通过同一TaskMessageService检查upload/cancel/end预约，从此到request无await。审查发现Promise交接竞态，经真实三种预约RED3fail→GREEN修复、独立复审通过。精确service.find不受100条展示窗口影响；已接受工作沿原服务排空。
+
+新候选完成前按完整持久candidate、精确能力键、合法完成时间检查604800000ms冷却，包含两端、排除未来、验证trace/result绑定，损坏拒绝。命中构造标准后端skip并标原ID，原模型回答不变，skip不延长期限。冷却发生在模型回答后，不节约该次调用；手动审查不计自动次数但新结果同样受冷却。旧schema/冻结字节不改，默认未配置service仍cooldown0。
+
+最终Linux1459项1457pass/2Windows专属skip/0fail/0cancel，84files/501.99秒；在最终源修复后完整运行一次。新增53行为项。Windows相关union168/166pass2skip与215/213pass2skip有交集且早于最后竞态修复；修复后core+integration38/38、integration16/16通过，不宣称Windows全套。最终源码审查通过；之后只补文档。
+
+最终隔离浏览器02两个真实存储/API任务，各一报告，固定模型边界审查两次得到candidate/skipped，原回答均candidate，关闭后已用2/3/剩1，0handoff/真实模型、console0error。browser01原验收保留，两测试服务均正常关闭/私有证据不删，不算业务成果。生产16任务14有轮次/2no_run/0eligible/0gap/0curation/0handoff；新API默认关闭0/3/剩3，错误字段/查询400、超限413、外站403、显式off200。七旧DB全schema/行、旧证据/会话/catalog/所有容器和镜像、凭据元数据保持，active1.0.1不变；0新模型/生产任务/提案/验证/批准。
+
+仅空闲API重启，最新PID1914941，沿用隧道288176和127.0.0.1:3000，不设自启。guest mcp5/controller/relay均未重建。私有runtime/curation-coordinator-*证据不进Git；最终main提交与三端同步以curation-coordinator-sync.json和Git读回为准。无root/系统改动；用户已授权的持续main同步继续沿用。
+
+## 历史完成：第11D步（2026-10-22）
 
 已完成report_tool_gap→可信缺口记录→结束轮次预览→人工Curator→既有Builder说明/人工交接。教学入口docs/32-Agent主动报告能力缺口.md。参考67d2754只读；下一步对照coordinator逐步学习自动观察/能力冷却，当前不自动审查、构建、验证或批准。个人main和远端唯一根规则不变，不混入其他RSI研究项目。
 
