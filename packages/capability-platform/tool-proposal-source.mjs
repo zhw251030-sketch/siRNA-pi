@@ -1,4 +1,4 @@
-import {getRegisteredToolProposal,resolveToolLearningPaths} from './tool-lifecycle.mjs';
+import {getRegisteredToolProposal,resolveToolLearningPaths,assertRegisteredCurationAssociation} from './tool-lifecycle.mjs';
 import {readToolProposal} from './tool-proposals.mjs';
 import {repairSource,repairAssociation,assertRepairContract,assertRepairPredecessor} from './tool-repair-contract.mjs';
 
@@ -17,7 +17,9 @@ export function getToolProposalSource(id,{root,visiting=new Set()}={}){
     const source=details.source===undefined?null:repairSource(details.source);
     if(source&&event.actor!=='web-agent')throw new Error('Source requires a trusted web actor');
     const repair=details.repair===undefined?null:repairAssociation(details.repair);
-    const result={source,repair,rootProposalId:repair?.rootProposalId??id,attempt:repair?.attempt??0,input:material.input,registry:saved.registry,validation:saved.validation};
+    const curation=details.curation===undefined?null:assertRegisteredCurationAssociation(material.input,details.curation,source,{root});
+    if(curation&&repair)throw new Error('Conflicting curation and repair associations');
+    const result={source,repair,curation,rootProposalId:repair?.rootProposalId??id,attempt:repair?.attempt??0,input:material.input,registry:saved.registry,validation:saved.validation};
     if(repair){
       if(!source||repair.previousProposalId===id)throw new Error('Invalid repair source');
       const previous=getToolProposalSource(repair.previousProposalId,{root,visiting});

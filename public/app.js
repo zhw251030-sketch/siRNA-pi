@@ -1,7 +1,7 @@
 import { consumeSse } from "./sse.mjs";
 import { lifecycleControls, mergeTaskState, pendingDisposition } from "./lifecycle.mjs";
 import { createTaskFiles, taskFileUrl, canPreviewFile, canDownloadFile } from "./files.mjs";
-import { createCurationPreviewPanel } from "./curation.mjs";
+import { createCurationPreviewPanel, curationNavigation } from "./curation.mjs";
 
 const elements = Object.fromEntries([
   "new-session", "refresh-tasks", "task-list", "chat-panel", "chat-title", "task-status",
@@ -25,7 +25,8 @@ let fileGroup = "output";
 let previousFilesView = null;
 let taskSelectionVersion = 0;
 const taskFiles = createTaskFiles({ onChange: renderTaskFiles });
-const curationPreview = createCurationPreviewPanel({ root: document.getElementById("curation-panel") });
+const curationPreview = createCurationPreviewPanel({ root: document.getElementById("curation-panel"),
+  ...curationNavigation({document,openTask:id=>withBusy(()=>selectTask(id))}) });
 
 function readStored(storage, key) {
   try { return JSON.parse(storage.getItem(key) || "null"); } catch { return null; }

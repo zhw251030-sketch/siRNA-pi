@@ -6,7 +6,11 @@
 
 ## 当前进度
 
-最新：第11B步完成冻结证据、持久审查请求、独立无工具Curator与网页显式送审。规则预览保持只读；合格轮次才可点击“提交独立审查（调用模型）”，结果分skip/candidate，尚不构建或登记。一次独立合成材料真实验收返回skip（1模型响应/0工具，新guest已释放）；16个业务任务仍0eligible，14次不合格送审均409。Linux全套1319通过/2跳过；Windows相关回归通过，但两次全套仍有间歇文件锁/关联失败，详见 [独立Curator审查与冻结证据](docs/30-独立Curator审查与冻结证据.md)。旧状态与正式1.0.1保持。下一步显式连接Curator建议与Builder。
+最新：第11C步接通 Curator 建议→显式 Builder 交接。网页读取固定构建说明后，由人点击交接；后端先保存不可变票据，再让原任务的 Pi 继续一轮，复用已有构建工具。登记时保存建议与提案的精确来源，每票据最多一个提案；断线/重启遇到未知结果不自动重发。隔离浏览器验收走通交接、submitted 提案和双向导航，但使用确定性运行器，不能算真实模型发现成果。完整验收与逐文件说明见 [Curator建议交给Builder](docs/31-Curator建议交给Builder.md)。下一步对照原仓库接入 `report_tool_gap` 能力缺口报告，仍不自动验证或批准。
+
+上一阶段第11B的真实合成审查返回skip（1模型响应/0工具）；Windows全套曾有间歇文件锁失败，历史证据不改，见 [独立Curator审查与冻结证据](docs/30-独立Curator审查与冻结证据.md)。以下日期条目保留各阶段完成时的状态，以本节和最新教学文档为准。
+
+11C最终Linux完整1360项1358通过/2跳过/0失败，Windows修复后96项网页相关全通过。真实业务仍16任务、0合格建议、0交接；本轮没有新增模型调用或业务提案。五旧业务库、旧证据、容器镜像及正式1.0.1保持；服务已更新，网页入口不变。首次测试环境失败与修复过程均保留在本步文档。
 
 - 2026-10-15：建立仓库说明、学习路线和协作规则。
 - 2026-10-15：在指定服务器目录安装 Pi Coding Agent `1.2.0`，使用已有 Node.js `24.16.0`；依赖检查、版本输出和隔离环境下的帮助命令均通过。
@@ -221,6 +225,10 @@ scripts/verify-compose-web-task.mjs            新容器网页统计练习只读
 scripts/verify-compose-lifecycle.mjs           中断、续聊、释放后的状态与文件只读验收
 apps/api/router.mjs         任务接口、SSE 传输与静态页面
 packages/task-core/task-store.mjs           SQLite 任务、消息和运行事件
+packages/extensions/tool-curation/         轨迹预览、独立审查与显式构建交接
+packages/extensions/tool-curation/tool-curation-build-contract.mjs 固定构建指令与权限/摘要合同
+packages/extensions/tool-curation/tool-curation-build-store.mjs    不可变交接单、状态和重启恢复
+packages/extensions/tool-curation/tool-curation-build-service.mjs  原任务派发、去重和精确提案来源
 packages/task-core/task-message-service.mjs 消息检查、去重、执行协调与保存
 packages/task-core/workspace.mjs           工作目录归属、受限读取与 SHA-256 共享原语
 packages/task-core/task-files.mjs          输入上传、任务归档、执行前回填与结果收集
@@ -270,6 +278,8 @@ docs/23-Agent构建工具与提交候选.md 六个构建操作、洁净打包、
 docs/24-网页Agent构建工具与任务归属.md 真实网页构建、宿主认证、归属与清理
 docs/28-明确拒绝反馈与修订闭环.md 明确拒绝与未知结果、无模型错误验收及真实修订边界
 docs/29-工具发现轨迹预览.md 任务事件、真实工具识别、重复能力线索与只读网页
+docs/30-独立Curator审查与冻结证据.md 固定材料、独立无工具审查与建议状态
+docs/31-Curator建议交给Builder.md 原任务构建交接、持久票据与提案来源
 docs/superpowers/plans/      安装步骤与执行记录
 ```
 

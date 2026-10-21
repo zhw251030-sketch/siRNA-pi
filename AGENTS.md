@@ -1,6 +1,18 @@
 # siRNA-pi 协作规则
 
-## 最新完成：第11B步（2026-10-21）
+## 最新完成：第11C步（2026-10-22）
+
+已接通显式 Curator candidate→Builder 交接，教学入口 docs/31-Curator建议交给Builder.md。沿参考67d2754把固定消息交给原任务Pi新一轮，复用已有TaskMessageService和六个OCI构建操作；不另建Builder Agent。下一步对照原版report_tool_gap补明确能力缺口报告；不重复11A/B/C，不自动观察、派发、验证或批准。
+
+新增tool-curation-build-contract/store/service；独立runtime/tool-curation-build/builds.sqlite先存不可变票据再派发，固定auto-tool-curation-build:<curationId>及trace/result/prompt三个摘要。GET/POST /v1/tasks/:taskId/curations/:curationId/build严格参数，GET异步检查真实Compose/Builder能力；异步检查后重读历史和材料，避免并发派发后显示过期可用状态。相同票据不重发，重启未完成→outcome_unknown；正常关闭排空。网页POST未确认标记存sessionStorage，GET读到对应票据才能确认；无自动轮询。
+
+curationRegistrationPolicy独立于旧repair策略，验证真实激活来源、原任务最新固定用户消息与未终态事件；注册事务保存精确curation关联，每票据最多一个提案。旧registry schema/旧行不改。当前只接受固定工具名、node、空dependencies、exact、no_external_access、无parent；未知登记锁保持且不能借另一构建会话重试。正常完成有实际提案为submitted，无提案为no_proposal；模型文字不能证明登记。提交后仍须原有独立验证与人工批准。
+
+最终Linux完整1360项1358pass/2Windows专属skip/0fail；新增39行为项。首次Linux1357项有6个旧upload-ui VM缺真实导航函数注入失败，补真实import/注入后96网页相关全过，保留失败日志。核心并发view缺陷经3个RED→GREEN竞争用例修复、独立复审通过；全源审查与最后测试环境修复审查通过。本轮没有Windows全套通过声明，11B历史间歇失败保持。隔离浏览器用真实存储/API/登记配确定性模型及Docker边界完成建议→submitted→提案/原任务导航，一任务四消息一提案零正式工具，明确不是模型发现成果。
+
+生产16任务14有轮次/2no_run/0eligible/0curation/0handoff；缺失建议GET/POST404、错误ID400、保留请求伪造400、外站403。网页门禁正常、控制台无error。五旧DB全schema/行、旧证据/会话、catalog、容器镜像及凭据元数据保持；0新增模型/Docker执行/任务/提案/验证/批准，正式active1.0.1不变。API正常重启最新PID1736030，隧道沿用288176，127.0.0.1:3000入口、不设自启。私有证据runtime/curation-build-*不进Git；最终提交/三端一致性以curation-build-sync.json为准。main及唯一远端根规则保持。
+
+## 历史完成：第11B步（2026-10-21）
 
 已完成11A之后的手动Curator：冻结trace、独立SQLite请求、单消费者/去重/重启不重试、独立无工具Pi审查与网页POST/list/detail。最新教学入口docs/30-独立Curator审查与冻结证据.md；下一步显式连接合格candidate建议与Builder，不重复做11A/11B，不自动扫描/构建/批准。
 

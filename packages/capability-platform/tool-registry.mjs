@@ -5,6 +5,7 @@ import { dirname, isAbsolute, resolve } from 'node:path';
 import { types } from 'node:util';
 import {toolVersion,versionParts,earlierParent,maintenanceText} from './tool-version.mjs';
 import {repairSource,repairAssociation,assertRepairPredecessor} from './tool-repair-contract.mjs';
+import {curationBuildAssociation} from '../extensions/tool-curation/tool-curation-build-contract.mjs';
 
 const APPLICATION_ID = 1397903433;
 const SCHEMA_VERSION = 4;
@@ -385,18 +386,21 @@ export class ToolRegistry {
     const db = this.#connection();
     must(!this.#readOnly, 'Tool registry is read-only');
     const input = proposalInput(value);
-    const settings = plainData(options, ['actor','taskContext','repair'], [], 'registration options');
+    const settings = plainData(options, ['actor','taskContext','repair','curation'], [], 'registration options');
     const actor = settings.actor === undefined ? 'local-cli' : settings.actor;
     must(typeof actor === 'string' && actor.trim().length > 0 && actor.length <= 128 &&
       !/[\u0000-\u001f\u007f]/.test(actor), 'actor must be nonempty short text without control characters');
     const createdAt = new Date().toISOString();
     const source=settings.taskContext===undefined?undefined:repairSource(settings.taskContext);
     const repair=settings.repair===undefined?undefined:repairAssociation(settings.repair);
+    const curation=settings.curation===undefined?undefined:curationBuildAssociation(settings.curation);
     must(!source||actor==='web-agent','Source requires web-agent actor');
     must(!repair||!!source,'Repair requires source');
-    const details = JSON.stringify({ proposalId: input.id, artifactSha256: input.artifactSha256,...(source?{source}:{}),...(repair?{repair}:{}) });
+    must(!curation||!!source&&!repair,'Curation requires source and cannot be a repair');
+    const details = JSON.stringify({ proposalId: input.id, artifactSha256: input.artifactSha256,...(source?{source}:{}),...(repair?{repair}:{}),...(curation?{curation}:{}) });
     db.exec('BEGIN IMMEDIATE');
     try {
+      if(curation)must(!this.getCurationProposal(curation.requestId),'Curation ticket already has a proposal');
       if(repair){
         must(!this.getRepairReplacement(repair.requestId),'Repair ticket already has a replacement');
         const previous=this.getProposal(repair.previousProposalId),events=this.listEvents(repair.previousProposalId).filter(e=>e.eventType==='proposal_submitted');
@@ -640,6 +644,13 @@ export class ToolRegistry {
     must(typeof requestId==='string'&&/^auto-tool-repair:[a-f0-9-]{36}$/.test(requestId),'Invalid repair request key');
     const rows=this.#connection().prepare("SELECT proposal_id FROM tool_events WHERE event_type='proposal_submitted' AND json_extract(details_json,'$.repair.requestId')=?").all(requestId);
     must(rows.length<=1,'Ambiguous repair replacement');
+    return rows.length?{proposalId:rows[0].proposal_id}:null;
+  }
+
+  getCurationProposal(requestId) {
+    must(typeof requestId==='string'&&/^auto-tool-curation-build:[a-f0-9-]{36}$/.test(requestId),'Invalid curation request key');
+    const rows=this.#connection().prepare("SELECT proposal_id FROM tool_events WHERE event_type='proposal_submitted' AND json_extract(details_json,'$.curation.requestId')=?").all(requestId);
+    must(rows.length<=1,'Ambiguous curation proposal');
     return rows.length?{proposalId:rows[0].proposal_id}:null;
   }
 

@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import { createTaskFiles, taskFileUrl, canPreviewFile, canDownloadFile } from '../public/files.mjs';
 import { lifecycleControls, mergeTaskState, pendingDisposition } from '../public/lifecycle.mjs';
 import { consumeSse } from '../public/sse.mjs';
-import { createCurationPreviewPanel } from '../public/curation.mjs';
+import { createCurationPreviewPanel, curationNavigation } from '../public/curation.mjs';
 
 const metadata = (name = 'data.csv', size = 4) => ({ id: `input:${name}`, kind: 'input', name, size, sha256: 'a'.repeat(64), modifiedAt: '2026-10-20T12:00:00.000Z' });
 const listing = (files = [], extra = {}) => Response.json({ files, state: 'ready', synchronization: 'unprepared', ...extra });
@@ -177,7 +177,7 @@ async function appHarness({ status = 'idle', execution = {}, events = [], fetche
   const document = { getElementById: id => nodes[id], createElement: tag => Object.assign(new Element(tag), { ownerDocument: document }) };
   for (const element of Object.values(nodes)) element.ownerDocument = document;
   const sandbox = { document, localStorage: storage, sessionStorage: storage, crypto: { randomUUID: () => 'random-id' },
-    createTaskFiles, taskFileUrl, canPreviewFile, canDownloadFile, lifecycleControls, mergeTaskState, pendingDisposition, consumeSse,
+    createTaskFiles, taskFileUrl, canPreviewFile, canDownloadFile, lifecycleControls, mergeTaskState, pendingDisposition, consumeSse, curationNavigation,
     fetch: async (url, options) => {
       requests.push({ url, options });
       if (options?.method === 'POST' || options?.method === 'DELETE') return fetcher(url, options);

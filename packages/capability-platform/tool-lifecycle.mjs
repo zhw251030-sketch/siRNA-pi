@@ -12,6 +12,9 @@ import {loadApprovedToolPackage} from './tool-approved-packages.mjs';
 import {toolVersion,earlierParent} from './tool-version.mjs';
 import {repairSource,repairAssociation,assertRepairContract,assertRepairPredecessor} from './tool-repair-contract.mjs';
 import {getToolProposalSource} from './tool-proposal-source.mjs';
+import {ToolCurationBuildStore} from '../extensions/tool-curation/tool-curation-build-store.mjs';
+import {ToolCurationStore} from '../extensions/tool-curation/tool-curation-store.mjs';
+import {curationBuildAssociation,curationBuildPrompt,assertCurationBuildInput} from '../extensions/tool-curation/tool-curation-build-contract.mjs';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 function checkedId(id) {
@@ -53,11 +56,22 @@ function integrity(artifactSha256) {
   return {packageMatchesRegistration:true,sourceHashesMatch:true,artifactSha256};
 }
 
-export function submitRegisteredToolProposal(input,{root,actor='local-cli',taskContext,repair}={}) {
+export function assertRegisteredCurationAssociation(input,value,source,{root,active=false}={}){
+  const association=curationBuildAssociation(value);if(!source)throw Error('Curation requires task source');
+  const store=new ToolCurationBuildStore({root,readOnly:true});let ticket;try{ticket=store.get(association.curationId);}finally{store.close();}
+  if(!ticket||ticket.requestId!==association.requestId||!isDeepStrictEqual(ticket.binding,{traceSha256:association.traceSha256,resultSha256:association.resultSha256,promptSha256:association.promptSha256})||!isDeepStrictEqual(ticket.registrationSource,source)||!ticket.userMessageId||ticket.runId!==source.agentRunId||active&&!['dispatching','running'].includes(ticket.phase))throw Error('Curation handoff source differs');
+  const curations=new ToolCurationStore({root,readOnly:true});let run;try{run=curations.get(ticket.taskId,ticket.curationId);}finally{curations.close();}
+  const frozen=curationBuildPrompt(run);
+  if(!isDeepStrictEqual(frozen.binding,ticket.binding)||frozen.prompt!==ticket.prompt||run.result.candidate.suggestedToolName!==ticket.toolName||run.result.candidate.permissions.profile!=='no_external_access')throw Error('Curation evidence differs');
+  assertCurationBuildInput(input,ticket.toolName);return association;
+}
+
+export function submitRegisteredToolProposal(input,{root,actor='local-cli',taskContext,repair,curation}={}) {
   if(!['local-cli','web-agent'].includes(actor))throw new TypeError('Invalid proposal actor');
   const preflight=checkToolProposal(input);
   if(!preflight.ok) throw new Error(`${preflight.code}: ${preflight.error}`);
   if(taskContext!==undefined){taskContext=repairSource(taskContext);if(actor!=='web-agent')throw new Error('Source requires web-agent actor');}
+  if(curation!==undefined){if(repair!==undefined)throw Error('Conflicting registration associations');curation=assertRegisteredCurationAssociation(input,curation,taskContext,{root,active:true});}
   if(repair!==undefined){
     repair=repairAssociation(repair);if(!taskContext)throw new Error('Repair requires task source');
     const previous=getToolProposalSource(repair.previousProposalId,{root});
@@ -81,7 +95,7 @@ export function submitRegisteredToolProposal(input,{root,actor='local-cli',taskC
     const row=registry.registerProposal({id:saved.manifest.id,toolName:saved.manifest.toolName,
       artifactPath:saved.artifactPath,artifactSha256:saved.artifactSha256,
       permissionProfile:saved.manifest.permissions.profile,imageDigest:saved.manifest.runtimeArtifact.imageDigest},
-    {actor,...(taskContext?{taskContext}:{}),...(repair?{repair}:{})});
+    {actor,...(taskContext?{taskContext}:{}),...(repair?{repair}:{}),...(curation?{curation}:{})});
     return {proposal:saved.manifest,registry:row,integrity:integrity(saved.artifactSha256),...flags()};
   } catch(error) {
     const failure=new Error(`Proposal material saved but registration failed: ${error.message}`,{cause:error});

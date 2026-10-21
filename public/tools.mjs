@@ -90,6 +90,12 @@ const feedbackStatuses={passed:'通过',failed:'未通过',not_run:'未执行',c
 const feedbackStatus=value=>feedbackStatuses[value]??'未知状态';
 const repairReasons={unavailable:'修订服务暂不可用。',stopped:'修订服务正在停止。',invalid_id:'候选编号不正确。',not_found:'没有找到候选。',invalid_request:'修订报告编号不完整。',no_source:'此候选没有可信来源任务。',invalid_evidence:'候选材料、来源或验证证据不完整。',not_failed:'此候选没有完整的失败验证报告。',max_attempts:'此修订链已达到三代上限。',task_unavailable:'来源任务不可继续或执行状态无法确认。',busy:'来源任务或候选正在执行。',maintenance_unavailable:'候选验证服务已停止或暂停。',validation_pending:'候选仍在排队或验证中。',report_conflict:'当前报告与已请求的报告不同。',already_requested:'此候选已请求过一轮修订。',context_too_large:'完整修订材料超过消息上限，未派发。',registration_refused:'新候选不符合修订合同。'};
 const repairPhases={dispatching:'正在确认派发',running:'一轮修订运行中',awaiting_replacement:'本轮已结束，未收到新候选',superseded:'已登记替代候选',failed:'本轮执行或保存失败，未自动重发',interrupted:'上次派发结果未确认，未自动重发'};
+export function bindToolProposalNavigation(document,panel){
+  document.addEventListener?.('sirna:open-tool-proposal',event=>{
+    const id=event.detail?.proposalId;
+    if(typeof id==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(id))void panel.select(id);
+  });
+}
 export function mountToolPanel(document){
   const list=document.getElementById('tools-list'),status=document.getElementById('tools-status'),summary=document.getElementById('tools-summary');
   if(!list||!status||!summary)return;
@@ -163,6 +169,7 @@ export function mountToolPanel(document){
       }
     }
   }});
+  bindToolProposalNavigation(document,panel);
   document.getElementById('refresh-tools').addEventListener('click',()=>panel.refresh());
   // Poll only reads evidence. It never requests validation or model execution.
   let timer;

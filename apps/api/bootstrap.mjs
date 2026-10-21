@@ -28,7 +28,9 @@ import { getRegisteredToolCatalog } from "../../packages/capability-platform/too
 import { ToolCurationStore } from "../../packages/extensions/tool-curation/tool-curation-store.mjs";
 import { createToolCurationService } from "../../packages/extensions/tool-curation/tool-curation-service.mjs";
 import { createAgentToolCurator } from "../../packages/extensions/tool-curation/agent-tool-curator.mjs";
-import { createApiShutdown } from "./service-lifecycle.mjs";
+import { ToolCurationBuildStore } from "../../packages/extensions/tool-curation/tool-curation-build-store.mjs";
+import { createToolCurationBuildService } from "../../packages/extensions/tool-curation/tool-curation-build-service.mjs";
+import { createApiShutdown, startApiServices, createCurationBuildRegistrationPolicy } from "./service-lifecycle.mjs";
 
 process.umask(0o077);
 const directory = path.join(projectRoot, "runtime", "tasks");
@@ -46,11 +48,11 @@ if (fs.realpathSync(dockerSocket) !== dockerSocket || !fs.lstatSync(dockerSocket
 const docker = new DockerEngineClient(dockerSocket);
 const runner = createDockerValidationRunner({ docker, purpose: 'approved-call' });
 const toolCallLeases = createToolCallLeases();
-let toolRepair;
+let toolRepair, toolCurationBuild;
 const builders = createTaskToolBuilders({root: projectRoot,docker,registrationPolicy:(input,context)=>{
   if(!toolRepair)throw new Error('Tool repair admission is unavailable');
   return toolRepair.registration(input,context);
-}});
+},curationRegistrationPolicy:createCurationBuildRegistrationPolicy(()=>toolCurationBuild)});
 const toolsServer = createAgentToolsServer({ leases: toolCallLeases, builders,
   discover: ({taskContext}) => discoverApprovedTools({ root: projectRoot, runner, taskContext }) });
 await listenToolSocket(toolsServer, {root: projectRoot});
@@ -66,19 +68,22 @@ const toolMaintenance=createToolMaintenance({root:projectRoot,store:maintenanceS
   onError:()=>console.error('候选验证执行失败，请检查项目内私有运行记录。')});
 const repairStore=new ToolRepairStore({root:projectRoot});
 toolRepair=createToolRepair({root:projectRoot,store:repairStore,taskStore,taskMessages,agentRuntime,maintenance:toolMaintenance});
-const toolCurationPreview = createToolCurationPreview({taskStore, listExistingTools: () => [
+const listExistingTools = () => [
   'enumerate_sirna_candidates', ...getRegisteredToolCatalog({root: projectRoot}).tools.map(tool => tool.toolName),
-]});
+];
+const toolCurationPreview = createToolCurationPreview({taskStore, listExistingTools});
 const curatorRuntime = new AgentComposeRuntime({root:projectRoot,agentName:'tool-curator',executor:createComposeExecutor(projectRoot,{agentName:'tool-curator'}),rpc:curatorRpc});
 const curationStore = new ToolCurationStore({root:projectRoot});
 const toolCuration = createToolCurationService({store:curationStore,preview:toolCurationPreview,curator:createAgentToolCurator({runtime:curatorRuntime,timeoutMs:180000})});
-const server = createAppServer({ taskStore, agentRuntime, workspaceFiles, taskMessages, toolMaintenance, toolRepair, toolCurationPreview, toolCuration });
-const shutdown = createApiShutdown({server,toolMaintenance,toolRepair,toolCuration,toolsServer,
-  stores:[taskStore,maintenanceStore,repairStore,curationStore],rpcs:[rpc,curatorRpc]});
+const curationBuildStore = new ToolCurationBuildStore({root:projectRoot});
+toolCurationBuild = createToolCurationBuildService({root:projectRoot,store:curationBuildStore,curationStore,taskStore,taskMessages,agentRuntime,listExistingTools});
+const server = createAppServer({ taskStore, agentRuntime, workspaceFiles, taskMessages, toolMaintenance, toolRepair, toolCurationPreview, toolCuration, toolCurationBuild });
+const shutdown = createApiShutdown({server,toolMaintenance,toolRepair,toolCuration,toolCurationBuild,toolsServer,
+  stores:[taskStore,maintenanceStore,repairStore,curationStore,curationBuildStore],rpcs:[rpc,curatorRpc]});
 const shutdownFailure = () => {console.error('服务停止未完全确认，请检查项目内私有运行记录。');process.exitCode=1;};
 server.listen(3000, "127.0.0.1", () => {
   // Never recover or claim jobs until this instance owns the listening socket.
-  try {toolRepair.recover();toolMaintenance.start();toolCuration.start();}
+  try {startApiServices({server,toolRepair,toolCurationBuild,toolMaintenance,toolCuration});}
   catch {shutdownFailure();void shutdown().catch(shutdownFailure);return;}
   console.log(`siRNA-pi: http://127.0.0.1:3000/ ; runtime=agent-compose ; recovered=${recovered.length}`);
 });

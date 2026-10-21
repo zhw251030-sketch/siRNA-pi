@@ -1,10 +1,29 @@
 // Stop admission synchronously, then drain accepted work before closing stores.
 // Every resource is attempted even if one service cannot persist its shutdown.
-export function createApiShutdown({server,toolMaintenance,toolRepair,toolCuration,toolsServer,stores=[],rpc,rpcs=[]}) {
+export function createCurationBuildRegistrationPolicy(getService) {
+  const service=()=>{
+    const value=getService();
+    if(!value)throw Error('Tool curation build admission is unavailable');
+    return value;
+  };
+  const policy=(...args)=>service().registration(...args);
+  policy.onSubmissionFailure=(...args)=>service().registration.onSubmissionFailure(...args);
+  return policy;
+}
+
+export function startApiServices({server,toolMaintenance,toolRepair,toolCuration,toolCurationBuild}) {
+  if (!server.listening) throw Error('Services require ownership of the listening socket.');
+  toolRepair?.recover();
+  toolCurationBuild?.recover();
+  toolMaintenance?.start();
+  toolCuration?.start();
+}
+
+export function createApiShutdown({server,toolMaintenance,toolRepair,toolCuration,toolCurationBuild,toolsServer,stores=[],rpc,rpcs=[]}) {
   let pending;
   return function shutdown() {
     if(pending)return pending;
-    const drains=[toolMaintenance,toolRepair,toolCuration].filter(Boolean).map(service=>{
+    const drains=[toolMaintenance,toolRepair,toolCuration,toolCurationBuild].filter(Boolean).map(service=>{
       try{return Promise.resolve(service.stop());}catch(error){return Promise.reject(error);}
     });
     const drainResult=Promise.allSettled(drains);
