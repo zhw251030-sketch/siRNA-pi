@@ -1,5 +1,15 @@
 # siRNA-pi 协作规则
 
+## 最新完成：第11A步（2026-10-21）
+
+已实现原tool-curation前置的只读轨迹预览，当前下一步是持久化Curator请求/冻结证据和独立只读Agent审查，不重复做10O修订。新增packages/extensions/tool-curation的trace/preview/MODULE，TaskStore.readRunEvidence，GET /v1/tasks/:id/curation-preview，public/curation.mjs及“工具线索”入口。默认currentRunId，显式runId接受旧SDK UUID或Compose64hex，必须属于该任务；done/error后只允许workspace_synced/warning归档通知。源payload+用户正文≤4MiB/2000事件，最终预览含摘要≤64KiB；最多12调用/20线索/20排除摘要，窗口外依据明确标不完整。
+
+跟原版67d2754同阈值：(调用≥3且canonical不同输入≥2)或明确失败≥2。MCP真实tool去sirna_tools_前缀，嵌套JSON参数/内层错误/身份冲突均处理；控制工具用明确名单，普通文件操作本轮提前排除（原版后续Curator prompt过滤），已有工具仅按名排除。sourceSha绑定保存事件/目标/身份/规范目录，不是原始provider字节；preview不是原版已冻结trace。不得据此自动创建/验证/批准候选。
+
+已做完整1261项测试：Windows1248pass13skip，Linux1259pass2skip，0fail；实际Compose64hex补丁后两端38项定向全通过，目标折叠呈现后21项UI相关通过。独立审查与两次针对性复审通过；初次保全助手因SQLite null-prototype与JSON普通对象比较不同而失败，规范化后旧baseline未覆盖、逐组摘要检查通过。私有证据runtime/curation-preview-*，不进Git；早先10O记录不改。
+
+真实GET重复核查16任务：14预览、2no_run、0eligible；10O末轮e92e21ad…有5个Builder控制调用，全部排除。0新增模型/工具执行/任务/提案/验证/版本。四业务DB全schema+行、旧证据目录树/原生会话、容器镜像、正式catalog保持；模型key只stat，控制token仅已有idle核验内存鉴权。网页进程空闲重启，最新PID1406864；未改controller/relay/guest。本机回环SSH隧道重新启动PID288176，入口http://127.0.0.1:3000/；不设自启。新基线5cdc5ed，最终提交与服务器一致性以runtime/curation-preview-sync.json实际回执为准。唯一远端工作目录及main持续同步规则不变。教学入口docs/29-工具发现轨迹预览.md。
+
 ## 项目目标
 
 用户希望通过从零逐步重建参考项目来理解 Agent 工程，当前是学习项目。先阅读 README.md 和 docs/学习路线.md，确认当前阶段。

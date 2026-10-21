@@ -107,6 +107,41 @@ export class TaskStore {
     }));
   }
 
+  // Public, bounded evidence read for extensions. No schema changes or runtime
+  // access: a deferred read transaction keeps counts and rows in one snapshot.
+  readRunEvidence(taskId, runId) {
+    this.#db.exec('BEGIN');
+    try {
+      const counts = this.#db.prepare(`SELECT COUNT(*) AS n,
+        COALESCE(SUM(length(CAST(payload_json AS BLOB))), 0) AS bytes,
+        COUNT(DISTINCT user_message_id) AS messages, MIN(user_message_id) AS message_id
+        FROM chat_run_events WHERE task_id = ? AND run_id = ?`).get(taskId, runId);
+      let result = null;
+      if (counts.n) {
+        const messageSize = this.#db.prepare(`SELECT length(CAST(content AS BLOB)) AS bytes
+          FROM chat_messages WHERE task_id = ? AND id = ?`).get(taskId, counts.message_id);
+        if (counts.n > 2000 || counts.bytes + (messageSize?.bytes ?? 0) > 4 * 1024 * 1024) {
+          result = {tooLarge: true};
+        } else if (counts.messages !== 1 || !messageSize) {
+          result = {inconsistent: true};
+        } else {
+          const userMessage = messageRecord(this.#db.prepare('SELECT * FROM chat_messages WHERE task_id = ? AND id = ?')
+            .get(taskId, counts.message_id));
+          const events = this.#db.prepare('SELECT * FROM chat_run_events WHERE task_id = ? AND run_id = ? ORDER BY sequence')
+            .all(taskId, runId).map(row => ({id: row.id, taskId: row.task_id, userMessageId: row.user_message_id,
+              runId: row.run_id, sequence: Number(row.sequence), type: row.type,
+              payload: JSON.parse(row.payload_json), createdAt: row.created_at}));
+          result = {userMessage, events};
+        }
+      }
+      this.#db.exec('COMMIT');
+      return result;
+    } catch (error) {
+      this.#db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
   #transaction(operation) {
     this.#db.exec("BEGIN IMMEDIATE");
     try {

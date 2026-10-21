@@ -125,6 +125,14 @@ dd { margin: 4px 0 0; overflow-wrap: anywhere; font-family: Consolas, "SFMono-Re
 @media (max-width: 600px) { .topbar { padding: 14px 16px; min-height: 72px; gap: 10px; } .brand { font-size: 17px; } .brand-label { display: none; } .workspace { display: flex; flex-direction: column; padding: 12px; } .panel { width: 100%; } .thread-panel { padding: 15px; } .thread-panel .panel-heading, .navigation-label, .sidebar-note { display: none; } #task-list { max-height: 150px; margin-top: 10px; } .chat-header { padding: 18px; } .messages { padding: 18px; height: 45vh; } .composer-area { padding: 12px; } h1 { font-size: 18px; } }
 @media (prefers-reduced-motion: reduce) { .button { transition: none; } .messages { scroll-behavior: auto; } }
 /* Global tool candidates remain independent of the current task. */
+.curation-panel { margin: 16px 0; padding: 24px; overflow-wrap: anywhere; }
+.curation-panel h2 { margin-top: 0; }
+.curation-panel p { font-size: 12px; line-height: 1.8; }
+.curation-panel details { margin: 10px 0; }
+.curation-panel summary { cursor: pointer; color: #47664e; }
+.curation-item { padding: 12px 0; border-bottom: 1px solid #dce4e6; }
+.curation-item h4 { margin: 4px 0; }
+.curation-raw { max-height: 260px; overflow: auto; padding: 10px; background: #f5f8f1; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; line-height: 1.7; }
 .tools-panel { margin: 16px 0; padding: 24px; }
 .tool-proposal { padding: 14px 0; border-bottom: 1px solid #dce4e6; overflow-wrap: anywhere; }
 .tool-proposal .button { margin-right: 8px; margin-bottom: 6px; }

@@ -23,6 +23,8 @@ import { createMaintenanceValidator } from "../../packages/capability-platform/t
 import { TaskMessageService } from "../../packages/task-core/task-message-service.mjs";
 import { ToolRepairStore } from "../../packages/capability-platform/tool-repair-store.mjs";
 import { createToolRepair } from "../../packages/capability-platform/tool-repair-service.mjs";
+import { createToolCurationPreview } from "../../packages/extensions/tool-curation/tool-curation-preview.mjs";
+import { getRegisteredToolCatalog } from "../../packages/capability-platform/tool-approval-service.mjs";
 
 process.umask(0o077);
 const directory = path.join(projectRoot, "runtime", "tasks");
@@ -57,7 +59,10 @@ const toolMaintenance=createToolMaintenance({root:projectRoot,store:maintenanceS
   onError:()=>console.error('候选验证执行失败，请检查项目内私有运行记录。')});
 const repairStore=new ToolRepairStore({root:projectRoot});
 toolRepair=createToolRepair({root:projectRoot,store:repairStore,taskStore,taskMessages,agentRuntime,maintenance:toolMaintenance});
-const server = createAppServer({ taskStore, agentRuntime, workspaceFiles, taskMessages, toolMaintenance, toolRepair });
+const toolCurationPreview = createToolCurationPreview({taskStore, listExistingTools: () => [
+  'enumerate_sirna_candidates', ...getRegisteredToolCatalog({root: projectRoot}).tools.map(tool => tool.toolName),
+]});
+const server = createAppServer({ taskStore, agentRuntime, workspaceFiles, taskMessages, toolMaintenance, toolRepair, toolCurationPreview });
 server.listen(3000, "127.0.0.1", () => {
   // Never recover or claim jobs until this instance owns the listening socket.
   toolRepair.recover();toolMaintenance.start();

@@ -4,6 +4,7 @@ import { TaskMessageService, TaskMessageSubmissionError } from "../../packages/t
 import { WorkspaceFileError } from "../../packages/task-core/workspace.mjs";
 import { ToolMaintenanceError } from "../../packages/capability-platform/tool-maintenance-store.mjs";
 import { ToolRepairError } from "../../packages/capability-platform/tool-repair-service.mjs";
+import { ToolCurationPreviewError } from "../../packages/extensions/tool-curation/tool-curation-preview.mjs";
 
 const staticFiles = new Map([
   ["/", ["index.html", "text/html; charset=utf-8"]],
@@ -12,6 +13,7 @@ const staticFiles = new Map([
   ["/lifecycle.mjs", ["lifecycle.mjs", "text/javascript; charset=utf-8"]],
   ["/files.mjs", ["files.mjs", "text/javascript; charset=utf-8"]],
   ["/tools.mjs", ["tools.mjs", "text/javascript; charset=utf-8"]],
+  ["/curation.mjs", ["curation.mjs", "text/javascript; charset=utf-8"]],
   ["/style.css", ["style.css", "text/css; charset=utf-8"]],
 ]);
 function reply(response, status, data) {
@@ -51,7 +53,7 @@ async function readBody(request, maxBytes=1048576) {
 
 // HTTP only coordinates transport. Task state and runtime execution stay in
 // their own packages, matching the reference repository's responsibility split.
-export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolMaintenance, toolRepair, taskMessages: sharedTaskMessages } = {}) {
+export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolMaintenance, toolRepair, toolCurationPreview, taskMessages: sharedTaskMessages } = {}) {
   const taskMessages = sharedTaskMessages ?? new TaskMessageService({ taskStore, agentRuntime, workspaceFiles });
   const activeTurns = new Set();
   const track = (operation) => {
@@ -87,6 +89,14 @@ export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolM
         return reply(response, 410, { error: "Unbound chat sessions are disabled; use the task-scoped /v1/tasks API" });
       }
       if (request.method === "GET" && pathname === "/v1/tasks") return reply(response, 200, { tasks: taskStore.listTasks() });
+      const curationRoute = /^\/v1\/tasks\/([^/]+)\/curation-preview$/.exec(pathname);
+      if (request.method === 'GET' && curationRoute) {
+        if ([...url.searchParams.keys()].some(key => key !== 'runId') || url.searchParams.getAll('runId').length > 1) {
+          invalid('轨迹预览只接受一个可选的 runId 参数。');
+        }
+        if (!toolCurationPreview) return reply(response, 503, {error: '轨迹预览服务尚未配置。'});
+        return reply(response, 200, toolCurationPreview.read(curationRoute[1], url.searchParams.get('runId') ?? undefined));
+      }
       const proposalRoute=/^\/v1\/tool-proposals(?:\/([^/]+)\/(validate|validation-summary|repair-feedback|repair-status|repair))?$/.exec(pathname);
       if(proposalRoute){
         if(['repair-status','repair'].includes(proposalRoute[2])){
@@ -198,7 +208,7 @@ export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolM
       reply(response, 404, { error: "没有这个页面或接口。" });
     } catch (error) {
       if (!response.headersSent && !response.destroyed) {
-        const known = error instanceof TaskMessageSubmissionError || error instanceof WorkspaceFileError || error instanceof ToolMaintenanceError || error instanceof ToolRepairError;
+        const known = error instanceof TaskMessageSubmissionError || error instanceof WorkspaceFileError || error instanceof ToolMaintenanceError || error instanceof ToolRepairError || error instanceof ToolCurationPreviewError;
         reply(response, known ? error.statusCode : 500,
           { error: known ? error.message : "服务处理失败，请检查项目内运行记录。" });
       } else if (!response.destroyed) response.end();

@@ -1,6 +1,7 @@
 import { consumeSse } from "./sse.mjs";
 import { lifecycleControls, mergeTaskState, pendingDisposition } from "./lifecycle.mjs";
 import { createTaskFiles, taskFileUrl, canPreviewFile, canDownloadFile } from "./files.mjs";
+import { createCurationPreviewPanel } from "./curation.mjs";
 
 const elements = Object.fromEntries([
   "new-session", "refresh-tasks", "task-list", "chat-panel", "chat-title", "task-status",
@@ -24,6 +25,7 @@ let fileGroup = "output";
 let previousFilesView = null;
 let taskSelectionVersion = 0;
 const taskFiles = createTaskFiles({ onChange: renderTaskFiles });
+const curationPreview = createCurationPreviewPanel({ root: document.getElementById("curation-panel") });
 
 function readStored(storage, key) {
   try { return JSON.parse(storage.getItem(key) || "null"); } catch { return null; }
@@ -196,6 +198,7 @@ function renderTaskList() {
 }
 function renderIdentity() {
   const task = state.task;
+  curationPreview.setTask(task);
   const execution = state.execution;
   const known = Boolean(exampleMessages[execution?.backend]);
   const waiting = execution?.unavailable ? "暂时无法读取，请刷新记录" : "等待任务文件信息";

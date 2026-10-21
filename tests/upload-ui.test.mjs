@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import { createTaskFiles, taskFileUrl, canPreviewFile, canDownloadFile } from '../public/files.mjs';
 import { lifecycleControls, mergeTaskState, pendingDisposition } from '../public/lifecycle.mjs';
 import { consumeSse } from '../public/sse.mjs';
+import { createCurationPreviewPanel } from '../public/curation.mjs';
 
 const metadata = (name = 'data.csv', size = 4) => ({ id: `input:${name}`, kind: 'input', name, size, sha256: 'a'.repeat(64), modifiedAt: '2026-10-20T12:00:00.000Z' });
 const listing = (files = [], extra = {}) => Response.json({ files, state: 'ready', synchronization: 'unprepared', ...extra });
@@ -173,7 +174,9 @@ async function appHarness({ status = 'idle', execution = {}, events = [], fetche
   const task = { id: 'a', title: 'My task', status, updatedAt: '2026-10-20T12:00:00Z' };
   const requests = [];
   let historyFails = false;
-  const sandbox = { document: { getElementById: id => nodes[id], createElement: tag => new Element(tag) }, localStorage: storage, sessionStorage: storage, crypto: { randomUUID: () => 'random-id' },
+  const document = { getElementById: id => nodes[id], createElement: tag => Object.assign(new Element(tag), { ownerDocument: document }) };
+  for (const element of Object.values(nodes)) element.ownerDocument = document;
+  const sandbox = { document, localStorage: storage, sessionStorage: storage, crypto: { randomUUID: () => 'random-id' },
     createTaskFiles, taskFileUrl, canPreviewFile, canDownloadFile, lifecycleControls, mergeTaskState, pendingDisposition, consumeSse,
     fetch: async (url, options) => {
       requests.push({ url, options });
@@ -184,12 +187,24 @@ async function appHarness({ status = 'idle', execution = {}, events = [], fetche
     } };
   // Bind the files controller to the same transport boundary as the browser.
   sandbox.createTaskFiles = options => createTaskFiles({ ...options, fetcher: sandbox.fetch });
+  sandbox.createCurationPreviewPanel = options => createCurationPreviewPanel({ ...options, fetcher: sandbox.fetch });
   const context = vm.createContext(sandbox);
   const source = (await readFile(new URL('../public/app.js', import.meta.url), 'utf8')).replace(/^import .*;\r?\n/gm, '');
   vm.runInContext(source, context);
   await tick(); await tick();
   return { nodes, requests, stored, run: code => vm.runInContext(code, context), failHistory: () => { historyFails = true; } };
 }
+
+test('real app mounts curation without automatic fetch and task status disables reads', async () => {
+  for (const status of ['idle', 'running']) {
+    const app = await appHarness({ status });
+    const panel = app.nodes['curation-panel'];
+    const button = panel.children.find(child => child.tagName === 'BUTTON');
+    assert.ok(panel.textContent.includes('当前任务：a'));
+    assert.equal(button.disabled, status === 'running');
+    assert.equal(app.requests.some(request => request.url.includes('curation-preview')), false);
+  }
+});
 
 test('file selection sends nothing; upload click locks competing actions and preserves chat history', async () => {
   const response = deferred();
