@@ -1,0 +1,41 @@
+// Read-only fixed Step10M acceptance. Requires the private exercise receipts;
+// never creates a job, executes a candidate, or sends a model request.
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import {DatabaseSync} from 'node:sqlite';
+import {execFileSync} from 'node:child_process';
+import {getLatestToolValidationReport} from '../packages/capability-platform/tool-validation-service.mjs';
+import {getToolRepairFeedback} from '../packages/capability-platform/tool-repair-feedback.mjs';
+import {root,read,preserve} from '../runtime/feedback-state.mjs';
+assert.equal(process.cwd(),root);assert.equal(process.argv.length,2);
+const preserved=await preserve({phase:'validated'}),build=read('runtime/feedback-build.json');
+const id=build.proposal.proposalId;assert.equal(build.modelRequests,0);assert.equal(build.sourceTaskId,null);
+assert.equal(build.sourceSha256,'cb507bb3f5096fffb2fec3bf3d21d94edccdae1eecb0595b084adcb41f09f4e1');
+const latest=getLatestToolValidationReport(id,{root}),r=latest.report;
+assert.equal(r.passed,false);assert.equal(r.artifactIntegrityPassed,true);assert.equal(r.runtimeArtifactVerified,true);
+assert.equal(r.staticCheck.passed,true);assert.ok(r.syntaxChecks.length===2&&r.syntaxChecks.every(c=>c.passed));assert.equal(r.repeatability.passed,true);
+assert.equal(r.domainGatePassed,false);assert.deepEqual(r.domainCases.map(c=>c.expectationPassed),[false,true,true]);assert.equal(r.executionCount,9);
+assert.deepEqual(r.domainCases[0].run.output,{count:3,min:6,max:4,range:-2});
+assert.deepEqual(r.benchmarkGate,{candidateScore:1,baselineScore:1,netGain:0,minNetGain:1,passed:false});
+const feedback=getToolRepairFeedback(id,{root});assert.equal(feedback.validationId,latest.id);assert.equal(feedback.reportSha256,latest.reportSha256);assert.equal(feedback.artifactSha256,r.artifactSha256);assert.equal(feedback.previewOnly,true);
+assert.equal(feedback.gates.domain,'failed');assert.equal(feedback.gates.benchmark,'failed');assert.equal(feedback.gates.repeatability,'passed');
+const example=feedback.domainCases.entries[0];assert.equal(example.status,'failed');assert.equal(example.run.status,'completed');
+assert.deepEqual(JSON.parse(example.input.json),{values:[6,2,4]});assert.deepEqual(JSON.parse(example.expected.json),{count:3,min:2,max:6,range:4});assert.deepEqual(JSON.parse(example.actual.json),{count:3,min:6,max:4,range:-2});assert.equal(example.actual.truncated,false);
+assert.equal(feedback.domainCases.total,3);assert.equal(feedback.domainCases.omitted,0);assert.equal(feedback.benchmarkCases.total,2);assert.ok(Buffer.byteLength(JSON.stringify(feedback))<=256*1024);
+const db=new DatabaseSync(path.join(root,'runtime/tool-maintenance/jobs.sqlite'),{readOnly:true});let job;
+try{const jobs=db.prepare('SELECT * FROM jobs WHERE proposal_id=?').all(id);assert.equal(jobs.length,1);job=jobs[0];assert.equal(job.status,'succeeded');assert.equal(job.passed,0);assert.equal(job.validation_id,latest.id);}finally{db.close();}
+const events=fs.readFileSync(`runtime/tool-maintenance/runs/${job.id}/events.jsonl`,'utf8').trim().split('\n').map(JSON.parse);
+const created=events.filter(e=>e.type==='validation_container_created'),cleaned=events.filter(e=>e.type==='validation_container_cleaned');assert.equal(created.length,11);assert.equal(cleaned.length,11);assert.equal(new Set(created.map(e=>e.containerId)).size,11);assert.deepEqual(created.map(e=>e.containerId).sort(),cleaned.map(e=>e.containerId).sort());
+for(const e of created){assert.equal(e.actualPolicy.networkMode,'none');assert.equal(e.actualPolicy.user,'65534:65534');assert.equal(e.actualPolicy.readonlyRootfs,true);}
+assert.equal(read(`runtime/tool-maintenance/runs/${job.id}/request.json`).modelRequests,0);assert.equal(read(`runtime/tool-maintenance/runs/${job.id}/result.json`).modelRequests,0);
+const be=fs.readFileSync(`runtime/tool-builds/${build.sessionId}/events.jsonl`,'utf8').trim().split('\n').map(JSON.parse);
+const bc=be.filter(e=>e.type==='container_created'),bclean=be.filter(e=>e.type==='container_cleaned');assert.equal(bc.length,2);assert.equal(bclean.length,2);assert.deepEqual(bc.map(e=>e.containerId).sort(),bclean.map(e=>e.containerId).sort());
+assert.equal(execFileSync('sh',['scripts/project-docker.sh','ps','-a','--filter','label=sirna.learning.project=siRNA-pi','--format','{{.ID}}'],{encoding:'utf8'}).trim(),'');
+const api=async route=>{const res=await fetch('http://127.0.0.1:3000'+route,{headers:{Connection:'close'},signal:AbortSignal.timeout(5000)});assert.equal(res.status,200);return res.json();};
+const list=await api('/v1/tool-proposals');assert.equal(list.proposals.find(p=>p.id===id).state,'verification_failed');
+assert.deepEqual((await api(`/v1/tool-proposals/${id}/repair-feedback`)).feedback,feedback);
+assert.deepEqual((await api(`/v1/tool-proposals/${id}/repair-feedback`)).feedback,feedback);
+assert.equal((await api('/v1/tool-proposals/26883ce8-5c2e-4a0e-90fb-d96e53270b9c/repair-feedback')).feedback,null);
+assert.deepEqual(await preserve({phase:'validated'}),preserved);
+console.log(JSON.stringify({proposalId:id,jobId:job.id,validationId:latest.id,reportSha256:latest.reportSha256,artifactSha256:r.artifactSha256,state:'verification_failed',jobStatus:'succeeded',passed:false,domainCases:{passed:2,total:3},benchmarkGate:r.benchmarkGate,syntaxChecks:2,businessExecutions:9,buildDebugExecutions:1,validationContainers:11,buildContainers:2,all13ContainersCleaned:true,feedbackBytes:Buffer.byteLength(JSON.stringify(feedback)),modelRequests:0,repairDispatched:false,approved:false,activated:false,...preserved},null,2));

@@ -86,11 +86,12 @@ export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolM
         return reply(response, 410, { error: "Unbound chat sessions are disabled; use the task-scoped /v1/tasks API" });
       }
       if (request.method === "GET" && pathname === "/v1/tasks") return reply(response, 200, { tasks: taskStore.listTasks() });
-      const proposalRoute=/^\/v1\/tool-proposals(?:\/([^/]+)\/(validate|validation-summary))?$/.exec(pathname);
+      const proposalRoute=/^\/v1\/tool-proposals(?:\/([^/]+)\/(validate|validation-summary|repair-feedback))?$/.exec(pathname);
       if(proposalRoute){
         if(!toolMaintenance)return reply(response,503,{error:'候选验证服务尚未配置。'});
         if(request.method==='GET'&&!proposalRoute[1])return reply(response,200,{proposals:toolMaintenance.list(),maintenance:toolMaintenance.status()});
         if(request.method==='GET'&&proposalRoute[2]==='validation-summary')return reply(response,200,{summary:toolMaintenance.summary(proposalRoute[1])});
+        if(request.method==='GET'&&proposalRoute[2]==='repair-feedback')return reply(response,200,{feedback:toolMaintenance.feedback(proposalRoute[1])});
         if(request.method==='POST'&&proposalRoute[2]==='validate'){
           const body=await readBody(request,4096);
           if(Object.keys(body).length!==1||!Object.hasOwn(body,'requestId'))invalid('验证请求只接受 requestId。');

@@ -3,6 +3,7 @@ import {getRegisteredToolProposal,listRegisteredToolProposals,resolveToolLearnin
 import {ToolRegistry} from './tool-registry.mjs';
 import {getLatestToolValidationReport} from './tool-validation-service.mjs';
 import {maintenanceId,ToolMaintenanceError} from './tool-maintenance-store.mjs';
+import {getToolRepairFeedback} from './tool-repair-feedback.mjs';
 
 // One trusted web process owns this worker. A restart never assumes an unknown
 // Docker execution is safe to repeat. Other maintenance CLIs remain manual.
@@ -36,6 +37,7 @@ export function createToolMaintenance({root,store,validate,onError=()=>{}}){
       if(previous){if(previous.proposalId!==id)throw new ToolMaintenanceError(409,'Request key belongs to a different proposal');return {job:previous,deduplicated:true};}
       const current=ready(id);const result=store.enqueue(id,requestId,{artifactSha256:current.artifactSha256});wake();return result;},
     list(){return listRegisteredToolProposals({root}).map(p=>({id:p.id,toolName:p.toolName,state:p.state,createdAt:p.createdAt,updatedAt:p.updatedAt,latestValidationId:p.latestValidationId??null,latestJob:store.latest(p.id)}));},
+    feedback(id){proposal(id);if(['pending','running'].includes(store.latest(id)?.status))return null;return getToolRepairFeedback(id,{root});},
     summary(id){proposal(id);const latest=getLatestToolValidationReport(id,{root});if(!latest)return null;
       const r=latest.report;return {proposalId:id,validationId:r.validationId,passed:r.passed,verifiedAt:r.verifiedAt,
         artifactIntegrityPassed:r.artifactIntegrityPassed,runtimeArtifactVerified:r.runtimeArtifactVerified,

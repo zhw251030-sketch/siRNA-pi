@@ -129,3 +129,4 @@ dd { margin: 4px 0 0; overflow-wrap: anywhere; font-family: Consolas, "SFMono-Re
 .tool-proposal { padding: 14px 0; border-bottom: 1px solid #dce4e6; overflow-wrap: anywhere; }
 .tool-proposal .button { margin-right: 8px; margin-bottom: 6px; }
 #tools-summary { overflow-wrap: anywhere; }
+#tools-summary pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.7; }

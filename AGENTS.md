@@ -290,3 +290,17 @@ finalize要求写入后成功调试，但不等于独立验证。先停止移除
 最新docs/25-网页候选验证队列.md，当前只读验收node scripts/verify-web-tool-maintenance.mjs，依赖私有runtime/maintenance-state-before.json及maintenance-state.mjs，固定当前数量；未来新作业后不改历史迎合旧断言。runtime/maintenance-{tests-03,restart-01,restart-02,acceptance-01,acceptance-02}为私有证据，本机maintenance-browser.png截图；同步回执也留runtime。第10K旧状态检查已不适用当前提案state。
 
 角色更正：原Curator从任务trace/gaps提出能力建议、安排构建；已提交proposal验证/修复/批准属于tool automation+maintenance。原版默认自动批准；个人保留人工门是收紧，不是原版自带。本轮仅完成显式维护作业和网页结果，不是完整Curator/自动修订/自进化有效性。下一步先学习验证反馈、可信来源任务与修订谱系/预算，再接真正Curator；不要恢复已结束旧task或盲目补跑。个人main持续同步，唯一远端目录不变，不改父级RSI项目。
+
+以上为第10L步历史；以下为当前状态。
+
+2026-10-21：第10M步完成可信失败报告的结构化反馈与网页修订说明预览。tool-repair-feedback复用getRegisteredToolProposal核对材料/报告/parent身份，再检查完整案例关联及重算已有结果谓词；不执行源码或新评分。GET /v1/tool-proposals/:id/repair-feedback返回固定白名单、绑定proposal/tool/artifactSHA/validation/reportSHA。只有完整verification_failed负报告提供反馈，通过/批准/未报告返回null，pending/running屏蔽旧结果；损坏材料报安全错误。单值预览4096 UTF8字节、每组20案例、整体256KiB，省略显式；not_run不同于算法失败。不返回原始stdout/stderr/源码/内部路径。只读指业务记录和材料/报告不变，SQLite可能创建WAL/SHM旁文件，不用immutable忽略活动WAL。
+
+网页按代次/选择/提交隔离旧响应，固定门禁/状态中文显示；修订说明明确未派发。审查发现轮询会收起已展开内容，已用挂载级RED/GREEN修复：只按同候选+同validationId/reportSHA恢复展开和提示块滚动，证据等待时清空；换候选/报告/提交/运行状态重置。成功GET清除旧读取错误，但未确认POST警告保留。独立限定复审通过；真实浏览器刷新展开、换候选重置已核实。
+
+新的人为错误教学候选summarize_numeric_range_feedback，proposal cf7cc77a-b835-4c0c-8946-1b1f25d3749b、build session7c13cb08-4528-4a1a-a3f1-68360ebda24e。错误用首尾当极值，排序调试成功；网页独立验证job b841922d-7511-43d3-8122-1b75247f5090 succeeded但report passed=false、proposal verification_failed。validation72889c5d-c636-4027-ace6-1f7c85c143e4，reportSHA d351fae6b3c224fb2ed40cacca3d663cbfe67c27a0ac45391b99724d55754619。领域2/3，乱序[6,2,4]实际min6/max4/range-2；候选与基线均1/2、净增0<1。构建1次业务/2容器，验证9业务+2语法/11容器，共13均清理。0模型、0修订派发、0批准/激活；本候选无来源网页任务，不恢复任何旧ended任务。
+
+schema4，当前5proposals/4validations/2versions/13events；旧25材料/25构建文件/12正式调用审计/12会话/任务行/4运行容器/目录保持；凭据仅核元数据。原range候选verified，原正式target_sequence active1.0.1不变。项目后台空闲重启后作业、请求、证据与6016字节反馈逐项一致，无重跑；无系统/root修改。
+
+Linux修复前完整1111项1109pass/2skip，0fail。Windows两次完整串行均1111项1097pass/1fail/13skip，分别旧web临时端口bad port和旧workspace rename EPERM；单文件复查web7pass、workspace14pass/3skip，根因未确认、原日志保留。仅UI修复后两地64相关测试全通过；后续展示数量文案由23网页用例覆盖，不宣称最终全套Windows通过。Node既有实验API警告保留，未屏蔽旧测试。
+
+最新学习文档docs/26-验证失败反馈与修订说明.md；固定只读复核scripts/verify-web-tool-feedback.mjs依赖runtime/feedback-{state,state-before,build}，未来新增状态后勿改历史迎合总数。私有feedback-{tests-01,fix-tests-01,acceptance-01,acceptance-02}及task-review记录证据；本机feedback-browser.png为页面截图。10L旧总数断言已不适用。原参考67d2754的tool-repair-prompt→sendAutomatedRepair→tool-automation尚只完成前段反馈准备；下一步持久可信来源绑定、固定请求去重、修订派发、替代谱系与次数预算，再接真正Curator。没有自主修订/自进化效果结论。个人main持续同步，唯一远端项目根不变。
