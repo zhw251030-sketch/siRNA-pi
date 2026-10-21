@@ -5,6 +5,7 @@ import { WorkspaceFileError } from "../../packages/task-core/workspace.mjs";
 import { ToolMaintenanceError } from "../../packages/capability-platform/tool-maintenance-store.mjs";
 import { ToolRepairError } from "../../packages/capability-platform/tool-repair-service.mjs";
 import { ToolCurationPreviewError } from "../../packages/extensions/tool-curation/tool-curation-preview.mjs";
+import { ToolCurationError } from "../../packages/extensions/tool-curation/tool-curation-service.mjs";
 
 const staticFiles = new Map([
   ["/", ["index.html", "text/html; charset=utf-8"]],
@@ -53,7 +54,7 @@ async function readBody(request, maxBytes=1048576) {
 
 // HTTP only coordinates transport. Task state and runtime execution stay in
 // their own packages, matching the reference repository's responsibility split.
-export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolMaintenance, toolRepair, toolCurationPreview, taskMessages: sharedTaskMessages } = {}) {
+export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolMaintenance, toolRepair, toolCurationPreview, toolCuration, taskMessages: sharedTaskMessages } = {}) {
   const taskMessages = sharedTaskMessages ?? new TaskMessageService({ taskStore, agentRuntime, workspaceFiles });
   const activeTurns = new Set();
   const track = (operation) => {
@@ -89,6 +90,20 @@ export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolM
         return reply(response, 410, { error: "Unbound chat sessions are disabled; use the task-scoped /v1/tasks API" });
       }
       if (request.method === "GET" && pathname === "/v1/tasks") return reply(response, 200, { tasks: taskStore.listTasks() });
+      const reviewsRoute = /^\/v1\/tasks\/([^/]+)\/curations(?:\/([^/]+))?$/.exec(pathname);
+      if (reviewsRoute && ['GET','POST'].includes(request.method)) {
+        if (url.searchParams.size) invalid('独立审查不接受查询参数。');
+        if (!toolCuration) return reply(response, 503, {error:'独立审查服务尚未配置。'});
+        if (!taskStore.getTask(reviewsRoute[1])) return reply(response, 404, {error:'没有找到这个任务。'});
+        if (request.method === 'GET') return reply(response, 200, reviewsRoute[2] ?
+          {curation:toolCuration.get(reviewsRoute[1],reviewsRoute[2])} : {curations:toolCuration.list(reviewsRoute[1])});
+        if (!reviewsRoute[2]) {
+          const body=await readBody(request,4096);
+          if (Object.keys(body).length!==3 || !['runId','sourceSha256','previewSha256'].every(key=>Object.hasOwn(body,key))) invalid('独立审查只接受 runId、sourceSha256 和 previewSha256。');
+          const result=await track(toolCuration.request(reviewsRoute[1],body));
+          return reply(response,result.deduplicated?200:202,result);
+        }
+      }
       const curationRoute = /^\/v1\/tasks\/([^/]+)\/curation-preview$/.exec(pathname);
       if (request.method === 'GET' && curationRoute) {
         if ([...url.searchParams.keys()].some(key => key !== 'runId') || url.searchParams.getAll('runId').length > 1) {
@@ -208,7 +223,7 @@ export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolM
       reply(response, 404, { error: "没有这个页面或接口。" });
     } catch (error) {
       if (!response.headersSent && !response.destroyed) {
-        const known = error instanceof TaskMessageSubmissionError || error instanceof WorkspaceFileError || error instanceof ToolMaintenanceError || error instanceof ToolRepairError || error instanceof ToolCurationPreviewError;
+        const known = error instanceof TaskMessageSubmissionError || error instanceof WorkspaceFileError || error instanceof ToolMaintenanceError || error instanceof ToolRepairError || error instanceof ToolCurationPreviewError || error instanceof ToolCurationError;
         reply(response, known ? error.statusCode : 500,
           { error: known ? error.message : "服务处理失败，请检查项目内运行记录。" });
       } else if (!response.destroyed) response.end();

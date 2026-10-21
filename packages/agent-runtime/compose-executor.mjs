@@ -2,13 +2,36 @@ import { execFile as execFileCallback } from 'node:child_process';
 import { promisify } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import path from 'node:path';
-import { sandboxIdPattern } from './compose-session-store.mjs';
+import fs from 'node:fs';
+import { sandboxIdPattern, composeRole, ensureDirectory } from './compose-session-store.mjs';
 
 const execFile = promisify(execFileCallback);
-export function createComposeExecutor(root) {
+function stageCuratorProfile(root) {
+  // The existing manager already mounts runtime/agent-compose/data at /data.
+  // Stage only this fixed public profile; never recreate the shared manager or
+  // copy credentials, task workspaces, or the designer configuration.
+  try {
+    if(fs.realpathSync(root)!==root)throw Error();
+    const source=path.join(root,'agent-compose-curator.yml');
+    const stat=fs.lstatSync(source);
+    if(!stat.isFile()||stat.isSymbolicLink()||stat.size>65536||fs.realpathSync(source)!==source)throw Error();
+    const bytes=fs.readFileSync(source);
+    const directory=ensureDirectory(root,'runtime/agent-compose/data/curator-config');
+    const target=path.join(directory,'agent-compose.yml');
+    try {fs.writeFileSync(target,bytes,{flag:'wx',mode:0o600});}
+    catch(error){if(error.code!=='EEXIST')throw error;}
+    const staged=fs.lstatSync(target);
+    if(!staged.isFile()||staged.isSymbolicLink()||staged.size!==bytes.length||fs.realpathSync(target)!==target||!fs.readFileSync(target).equals(bytes))throw Error();
+  } catch {throw Error('Curator compose profile staging could not be verified');}
+}
+export function createComposeExecutor(root, {agentName='designer', execute=execFile} = {}) {
+  composeRole(agentName);
+  root=path.resolve(root);
   async function command(...args) {
     // No shell interpolation: prompt text goes through RPC, not command strings.
-    const { stdout } = await execFile('sh', [path.join(root, 'scripts/project-agent-compose.sh'), ...args], {
+    if(agentName==='tool-curator')stageCuratorProfile(root);
+    const roleArgs = agentName === 'tool-curator' ? ['--file', '/data/curator-config/agent-compose.yml'] : [];
+    const { stdout } = await execute('sh', [path.join(root, 'scripts/project-agent-compose.sh'), ...roleArgs, ...args], {
       cwd: root, timeout: 120_000, maxBuffer: 8 * 1024 * 1024,
     });
     return JSON.parse(stdout);
@@ -43,7 +66,7 @@ export function createComposeExecutor(root) {
       }
     },
     async bootstrap(onUpdate) {
-      const run = await command('run', '--detach', '--keep-running', 'designer', '--command',
+      const run = await command('run', '--detach', '--keep-running', agentName, '--command',
         'mkdir -p /workspace/input /workspace/work /workspace/output /workspace/tool-drafts');
       await onUpdate(run);
       return wait(run.id, onUpdate);

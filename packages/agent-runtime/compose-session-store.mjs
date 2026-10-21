@@ -4,6 +4,10 @@ import { randomUUID } from 'node:crypto';
 
 export const executionId = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 export const sandboxIdPattern = /^[a-f0-9]{64}$/;
+export function composeRole(agentName = 'designer') {
+  if (!['designer', 'tool-curator'].includes(agentName)) throw new Error('Invalid Compose agent role');
+  return agentName;
+}
 
 export function ensureDirectory(root, relative) {
   let current = root;
@@ -18,24 +22,35 @@ export function ensureDirectory(root, relative) {
 }
 
 export class ComposeSessionStore {
-  constructor(root) {
+  constructor(root, {agentName = 'designer'} = {}) {
     this.root = path.resolve(root);
-    this.directory = ensureDirectory(this.root, 'runtime/compose-sessions');
-    ensureDirectory(this.root, 'runtime/compose-web');
+    this.agentName = composeRole(agentName);
+    this.directory = ensureDirectory(this.root, agentName === 'designer' ? 'runtime/compose-sessions' : 'runtime/tool-curation/sessions');
+    this.eventsDirectory = agentName === 'designer' ? 'runtime/compose-web' : 'runtime/tool-curation/events';
+    ensureDirectory(this.root, this.eventsDirectory);
   }
   file(id) {
     if (!executionId.test(id)) throw new Error('Invalid execution session ID');
     return path.join(this.directory, `${id}.json`);
   }
-  has(id) { return fs.existsSync(this.file(id)); }
+  has(id) {
+    if (!fs.existsSync(this.file(id))) return false;
+    try { this.load(id); return true; }
+    catch (error) { if (error.code === 'COMPOSE_ROLE_MISMATCH') return false; throw error; }
+  }
+  assertRole(session) {
+    if ((session.agentName ?? 'designer') !== this.agentName) throw Object.assign(new Error('Session agent role mismatch'), {code: 'COMPOSE_ROLE_MISMATCH'});
+  }
   load(id) {
     const file = this.file(id);
     if (fs.realpathSync(file) !== file) throw new Error('Invalid session record path');
     const session = JSON.parse(fs.readFileSync(file, 'utf8'));
+    this.assertRole(session);
     if (session.id !== id || session.backend !== 'agent-compose' || !Array.isArray(session.runs)) throw new Error('Invalid session record');
     return session;
   }
   save(session) {
+    this.assertRole(session);
     const file = this.file(session.id);
     if (fs.existsSync(file) && fs.realpathSync(file) !== file) throw new Error('Invalid session record path');
     const temporary = `${file}.${randomUUID()}.tmp`;

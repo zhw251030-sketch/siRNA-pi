@@ -1,0 +1,3 @@
+FROM sirna-pi-guest:pi1.2.0-mcp4
+COPY --chmod=755 containers/agent-compose-guest/pi-curator.sh /usr/local/bin/pi
+COPY containers/agent-compose-guest/curator-guard.mjs /opt/sirna-pi/curator-guard.mjs

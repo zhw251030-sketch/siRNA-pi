@@ -1,0 +1,11 @@
+# Independent read-only review project. No MCP servers or task workspace mounts.
+name: sirna-pi-learning-curator
+agents:
+  tool-curator:
+    provider: pi
+    model: minimax-cn/MiniMax-M3
+    image: sirna-pi-curator:pi1.2.0-v1
+    driver:
+      docker: {}
+    sandbox:
+      stopped_runtime_policy: remove

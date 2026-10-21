@@ -1,6 +1,20 @@
 # siRNA-pi 协作规则
 
-## 最新完成：第11A步（2026-10-21）
+## 最新完成：第11B步（2026-10-21）
+
+已完成11A之后的手动Curator：冻结trace、独立SQLite请求、单消费者/去重/重启不重试、独立无工具Pi审查与网页POST/list/detail。最新教学入口docs/30-独立Curator审查与冻结证据.md；下一步显式连接合格candidate建议与Builder，不重复做11A/11B，不自动扫描/构建/批准。
+
+新增tool-curation的evidence/result/store/service/agent适配器，原版trace/result v1主字段加来源/完整性元数据；只有完整触发组可送审，trace≤64KiB/result≤48KiB，固定来源与回答编号/摘要/引用必须一致。审查candidate不是submitted提案。目录按11A同一规则去一次sirna_tools_前缀、去重排序；不改变旧预览摘要语义。JSON.parse重复键语义未自建扫描器，结构与引用检查不认证语义或收益。
+
+运行使用sirna-pi-learning-curator/tool-curator、镜像sirna-pi-curator:pi1.2.0-v1（实际ID6813643b…），固定角色与独立runtime/tool-curation/{curation.sqlite,sessions,events}；不授予原任务workspace/host lease/MCP。wrapper禁工具并显式加载guard；message_end遇工具意图本地中止，防止未知工具错误触发第二次请求。独立Curator RPC180秒，适配器180秒发出取消，启动/清理另可耗时；零自动重试，未确认终态/释放暂停接收。shutdown排空并尝试关闭全部存储和两个RPC。
+
+agent-compose-curator.yml由executor首次独占复制到runtime/agent-compose/data/curator-config/agent-compose.yml，管理容器从已有/data挂载读取；已有副本必须逐字节相同，未来改配置需空闲时明确处理旧副本，不能静默覆盖。本轮没有修改compose.yml/agent-compose.yml或重建四个旧容器。
+
+Linux完整1321项1319pass/2Windows专属skip/0fail，含POSIXwrapper、悬空链接/硬链接、真实Pi假provider循环。Windows285相关283pass/2skip，独立审查46项44pass/2skip；两次全套1321项分别1305pass/1fail/15skip与1304pass/2fail/15skip，旧用例出现EPERM重命名/EBUSY链接和关联断言，相关复跑亦有间歇失败，根因未确认。本机全套不算通过；保留runtime/curator-review-local-tests-01/02日志，不改旧断言或添加掩盖重试。
+
+真实一次合成审查1739e09c…返回skip（明确没有稳定复用证据）；1模型响应/0工具，新guest释放，独立会话7c4aa7a4…保留。未向业务任务库插入合成任务，无业务candidate/新提案/验证/批准。真实16任务14有轮次/2no_run/0eligible，14不合格POST409且列表不变；重启读取与浏览器禁用门槛通过。四旧业务DB全schema/行、旧证据/原生会话、旧容器镜像/catalog保持，正式1.0.1不变；仅新增派生镜像，无遗留新容器。最新API PID1547001，隧道沿用288176，入口127.0.0.1:3000，不设自启。私有证据runtime/curator-review-*不进Git，最终提交/三端同步以curator-review-sync.json回执为准。参考固定67d2754只读；main和唯一远端根规则不变。
+
+## 历史完成：第11A步（2026-10-21）
 
 已实现原tool-curation前置的只读轨迹预览，当前下一步是持久化Curator请求/冻结证据和独立只读Agent审查，不重复做10O修订。新增packages/extensions/tool-curation的trace/preview/MODULE，TaskStore.readRunEvidence，GET /v1/tasks/:id/curation-preview，public/curation.mjs及“工具线索”入口。默认currentRunId，显式runId接受旧SDK UUID或Compose64hex，必须属于该任务；done/error后只允许workspace_synced/warning归档通知。源payload+用户正文≤4MiB/2000事件，最终预览含摘要≤64KiB；最多12调用/20线索/20排除摘要，窗口外依据明确标不完整。
 

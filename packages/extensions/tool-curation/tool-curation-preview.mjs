@@ -18,8 +18,7 @@ function hasCompletedEvidence(events) {
 }
 
 export function createToolCurationPreview({taskStore, listExistingTools}) {
-  return {
-    read(taskId, requestedRunId) {
+  function snapshot(taskId, requestedRunId) {
       if (requestedRunId !== undefined && !runIdentity.test(requestedRunId)) fail(400, 'runId 必须是已保存的 SDK UUID 或 Compose 轮次编号。');
       const task = taskStore.getTask(taskId);
       if (!task) fail(404, '没有找到这个任务。');
@@ -35,16 +34,26 @@ export function createToolCurationPreview({taskStore, listExistingTools}) {
           !hasCompletedEvidence(source.events)) {
         fail(409, '这轮缺少一致的用户消息或结束记录，暂不能生成预览。');
       }
-      let existingTools;
+      let existingTools, rawExistingTools;
       try {
         existingTools = listExistingTools();
         if (!Array.isArray(existingTools) || existingTools.length > 500 ||
             existingTools.some(name => typeof name !== 'string' || !/^[a-zA-Z0-9_.:-]{1,128}$/.test(name))) throw Error('Invalid tool names');
+        rawExistingTools = [...existingTools];
+        // Freeze exactly the canonical catalog represented by the 11A source
+        // digest: namespace aliases, duplicates and order are not identity.
+        existingTools = [...new Set(existingTools.map(name => name.replace(/^sirna_tools_/, '')).filter(Boolean))].sort();
       } catch { fail(503, '当前正式工具目录无法核验，预览暂不可用。'); }
       try {
         return {preview: buildCurationPreview({taskId: task.id, runId, userMessageId: source.userMessage.id,
-          objective: source.userMessage.content, events: source.events, existingTools})};
+          objective: source.userMessage.content, events: source.events, existingTools: rawExistingTools}), existingTools, events: source.events};
       } catch { fail(409, '这轮工具证据存在冲突或不支持的记录，不能生成可靠预览。'); }
+    }
+  return {
+    snapshot,
+    read(taskId, runId) {
+      const result = snapshot(taskId, runId);
+      return result.preview ? {preview: result.preview} : {preview: null, reason: result.reason};
     },
   };
 }

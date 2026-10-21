@@ -32,9 +32,11 @@ function recordDaemonOutcome(run, snapshot) {
 }
 
 export class AgentComposeRuntime {
-  constructor({ root, executor, rpc, toolCallLeases, toolBuildersAvailable=false }) {
+  constructor({ root, executor, rpc, toolCallLeases, toolBuildersAvailable=false, agentName='designer' }) {
     this.root = path.resolve(root);
-    this.store = new ComposeSessionStore(this.root);
+    this.store = new ComposeSessionStore(this.root, {agentName});
+    this.agentName = this.store.agentName;
+    if (agentName === 'tool-curator' && (toolCallLeases || toolBuildersAvailable)) throw new Error('Curator cannot receive host tool leases or builders');
     this.executor = executor;
     this.rpc = rpc;
     this.toolCallLeases = toolCallLeases;
@@ -50,7 +52,7 @@ export class AgentComposeRuntime {
   owns(id) { return this.store.has(id); }
   async status(id) { return this.store.load(id); }
   async create() {
-    const session = { id: randomUUID(), backend: 'agent-compose', status: 'idle', runs: [] };
+    const session = { id: randomUUID(), backend: 'agent-compose', agentName: this.agentName, status: 'idle', runs: [] };
     this.store.save(session);
     return session;
   }
@@ -130,7 +132,7 @@ export class AgentComposeRuntime {
     const workspacePath = this.store.workspace(sandbox);
     if (session.workspacePath && session.workspacePath !== workspacePath) throw new Error('Workspace changed unexpectedly');
     session.workspacePath = workspacePath;
-    if (!session.workspaceReady) {
+    if (!session.workspaceReady && this.agentName === 'designer') {
       const sample = path.join(this.root, workspacePath, 'input/numbers.csv');
       const contents = 'value\n10\n20\n30\n40\n';
       try { fs.writeFileSync(sample, contents, { flag: 'wx', mode: 0o600 }); }
@@ -138,8 +140,8 @@ export class AgentComposeRuntime {
         if (error.code !== 'EEXIST' || fs.realpathSync(sample) !== sample || !fs.statSync(sample).isFile() ||
             fs.readFileSync(sample, 'utf8') !== contents) throw new Error('Workspace sample initialization conflicts with existing data');
       }
-      session.workspaceReady = true;
     }
+    session.workspaceReady = true;
     this.store.save(session);
     return session;
   }
@@ -272,6 +274,7 @@ export class AgentComposeRuntime {
     try { return await operation; } finally { this.releasing.delete(id); }
   }
   async run(request, emit, externalSignal) {
+    if (this.agentName === 'tool-curator' && request.prepareWorkspace !== undefined) throw new Error('Curator workspace hydration is forbidden');
     const id = request.sessionId;
     if (this.active.has(id)) throw new Error('Execution session is already running');
     if (this.releasing.has(id)) throw new Error('Execution session is ending');
@@ -308,7 +311,7 @@ export class AgentComposeRuntime {
     const send = event => {
       if (run && log === undefined) {
         if (!/^[A-Za-z0-9_-]+$/.test(run.runId)) throw new Error('Invalid run ID');
-        session.eventLogPath = `runtime/compose-web/${id}.${run.runId}.events.jsonl`;
+        session.eventLogPath = `${this.store.eventsDirectory}/${id}.${run.runId}.events.jsonl`;
         log = fs.openSync(path.join(this.root, session.eventLogPath), 'wx', 0o600);
         run.eventLogPath = session.eventLogPath;
         this.store.save(session);
@@ -365,8 +368,8 @@ export class AgentComposeRuntime {
       // Register before RPC's abort handler so intent is durable before StopRun.
       signal.addEventListener('abort', rememberUserCancel, { once: true });
       if (signal.aborted) rememberUserCancel();
-      let snapshot = await this.rpc.run({ projectId: session.projectId, agentName: 'designer', sandboxId: session.sandboxId,
-        prompt: '当前任务工作目录是 /workspace。输入资料在 input/，结果请写入 output/。可使用 read/write 和显式配置的 mcp 工具，保留其他文件。不要读取或展示隐藏的任务连接配置。\n' +
+      let snapshot = await this.rpc.run({ projectId: session.projectId, agentName: this.agentName, sandboxId: session.sandboxId,
+        prompt: this.agentName === 'tool-curator' ? request.message : '当前任务工作目录是 /workspace。输入资料在 input/，结果请写入 output/。可使用 read/write 和显式配置的 mcp 工具，保留其他文件。不要读取或展示隐藏的任务连接配置。\n' +
           inputContext + '\n用户消息：\n' + request.message }, {
         signal,
         onStarted: task => {
@@ -378,7 +381,7 @@ export class AgentComposeRuntime {
           // remember daemon identity and let its confirmed canceled result win.
           if (!signal.aborted) toolLease?.activate(task.runId);
           send({ type: 'session', mode: 'model', sandboxId: session.sandboxId, piSessionId: session.piSessionId,
-            workspacePath: session.workspacePath, eventLogPath: `runtime/compose-web/${id}.${task.runId}.events.jsonl` });
+            workspacePath: session.workspacePath, eventLogPath: `${this.store.eventsDirectory}/${id}.${task.runId}.events.jsonl` });
           send({ type: 'run_status', status: 'running' });
           if (this.toolCallLeases && !toolLease) send({ type: 'progress_message',
             text: '此任务保留旧版容器，尚不支持正式工具；需要使用正式工具时请新建任务。' });

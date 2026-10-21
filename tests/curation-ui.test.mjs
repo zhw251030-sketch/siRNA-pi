@@ -66,3 +66,30 @@ test('excluded calls teach concrete reasons without payload and success is only 
   const details = h.root.children.flatMap(child => child.children).find(child => child.tagName === 'details' && child.textContent.includes('excluded-0'));
   assert.ok(details); assert.notEqual(details.open, true);
 });
+
+function buttons(h){return h.root.children.filter(child=>child.tagName==='button');}
+test('review is explicit only after a complete signal preview and submits exact immutable binding',async()=>{
+  const calls=[];const p=preview({signals:[{capabilityKey:'network',callCount:3,distinctInputs:2,errorCount:0,evidenceEventIds:['e1'],evidenceComplete:true}]});
+  const h=harness(async(url,options)=>{calls.push([url,options]);return Response.json(options.method==='POST'?{curation:{id:'review-1',status:'waiting',traceSha256:'trace-hash'}}:{preview:p});});
+  h.panel.setTask(task);const submit=buttons(h).find(b=>b.textContent==='提交独立审查（调用模型）');assert.ok(submit);assert.equal(submit.disabled,true);
+  await h.panel.refresh();assert.equal(submit.disabled,false);assert.equal(calls.length,1);
+  await submit.listeners.click();assert.equal(calls.length,2);assert.equal(calls[1][1].method,'POST');
+  assert.deepEqual(JSON.parse(calls[1][1].body),{runId:'run-1',sourceSha256:'source',previewSha256:'preview'});
+  assert.equal(calls[1][0],'/v1/tasks/task%2Fa/curations');assert.ok(h.root.textContent.includes('trace-hash'));assert.ok(h.root.textContent.includes('等待'));
+  h.panel.setTask({...task,id:'other'});assert.equal(submit.disabled,true);assert.equal(h.root.textContent.includes('trace-hash'),false);
+});
+test('incomplete signals cannot enable review; records refresh is manual and safely renders advisory detail',async()=>{
+  const calls=[];const h=harness(async(url,options)=>{calls.push(url);return Response.json(url.endsWith('/review-1')?{curation:{id:'review-1',status:'candidate',traceSha256:'frozen',result:{decision:'candidate',summary:'<img onerror=x>',candidate:{suggestedToolName:'example_tool',evidenceEventIds:['e1'],permissions:{profile:'no_external_access'}}}}}:url.endsWith('/curations')?{curations:[{id:'review-1',status:'candidate',traceSha256:'frozen'}]}:{preview:preview()});});
+  h.panel.setTask(task);await h.panel.refresh();assert.equal(buttons(h).find(b=>b.textContent==='提交独立审查（调用模型）').disabled,true);
+  const refresh=buttons(h).find(b=>b.textContent==='刷新审查记录');assert.ok(refresh);assert.equal(calls.length,1);await refresh.listeners.click();assert.equal(calls.length,2);
+  const reviews=h.root.children.at(-1);const detailButton=reviews.children.flatMap(c=>c.children).find(c=>c.tagName==='button');assert.ok(detailButton);await detailButton.listeners.click();
+  for(const text of ['<img onerror=x>','example_tool','e1','no_external_access','frozen','建议','不授予权限'])assert.ok(h.root.textContent.includes(text),text);
+  assert.equal(calls.length,3);
+});
+test('late review POST and detail JSON never overwrite a newly selected task',async()=>{
+  const p=preview({signals:[{capabilityKey:'network',evidenceEventIds:['e1'],evidenceComplete:true}]});let finish;
+  const h=harness(async(url,options)=>options.method==='POST'?{ok:true,json:()=>new Promise(resolve=>finish=resolve)}:Response.json({preview:p}));
+  h.panel.setTask(task);await h.panel.refresh();const pending=buttons(h).find(b=>b.textContent==='提交独立审查（调用模型）').listeners.click();
+  while(!finish)await Promise.resolve();h.panel.setTask({...task,id:'other'});finish({curation:{id:'old-review',status:'waiting',traceSha256:'stale-hash'}});await pending;
+  assert.equal(h.root.textContent.includes('stale-hash'),false);assert.equal(h.root.textContent.includes('old-review'),false);
+});

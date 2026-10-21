@@ -25,6 +25,10 @@ import { ToolRepairStore } from "../../packages/capability-platform/tool-repair-
 import { createToolRepair } from "../../packages/capability-platform/tool-repair-service.mjs";
 import { createToolCurationPreview } from "../../packages/extensions/tool-curation/tool-curation-preview.mjs";
 import { getRegisteredToolCatalog } from "../../packages/capability-platform/tool-approval-service.mjs";
+import { ToolCurationStore } from "../../packages/extensions/tool-curation/tool-curation-store.mjs";
+import { createToolCurationService } from "../../packages/extensions/tool-curation/tool-curation-service.mjs";
+import { createAgentToolCurator } from "../../packages/extensions/tool-curation/agent-tool-curator.mjs";
+import { createApiShutdown } from "./service-lifecycle.mjs";
 
 process.umask(0o077);
 const directory = path.join(projectRoot, "runtime", "tasks");
@@ -33,7 +37,10 @@ const database = path.join(directory, "tasks.sqlite");
 for (const file of [database, `${database}-wal`, `${database}-shm`]) {
   if (fs.existsSync(file) && fs.realpathSync(file) !== file) throw new Error("任务数据库路径无效。");
 }
-const rpc = new AgentComposeRpcClient({ token: readComposeControlToken(projectRoot) });
+const controlToken = readComposeControlToken(projectRoot);
+const rpc = new AgentComposeRpcClient({ token: controlToken });
+// Preserve Designer transport defaults; bound this independent model transport.
+const curatorRpc = new AgentComposeRpcClient({token:controlToken,timeoutMs:180000});
 const dockerSocket = path.join(projectRoot, 'runtime/docker/run/docker.sock');
 if (fs.realpathSync(dockerSocket) !== dockerSocket || !fs.lstatSync(dockerSocket).isSocket()) throw new Error('Expected project Docker socket');
 const docker = new DockerEngineClient(dockerSocket);
@@ -62,31 +69,19 @@ toolRepair=createToolRepair({root:projectRoot,store:repairStore,taskStore,taskMe
 const toolCurationPreview = createToolCurationPreview({taskStore, listExistingTools: () => [
   'enumerate_sirna_candidates', ...getRegisteredToolCatalog({root: projectRoot}).tools.map(tool => tool.toolName),
 ]});
-const server = createAppServer({ taskStore, agentRuntime, workspaceFiles, taskMessages, toolMaintenance, toolRepair, toolCurationPreview });
+const curatorRuntime = new AgentComposeRuntime({root:projectRoot,agentName:'tool-curator',executor:createComposeExecutor(projectRoot,{agentName:'tool-curator'}),rpc:curatorRpc});
+const curationStore = new ToolCurationStore({root:projectRoot});
+const toolCuration = createToolCurationService({store:curationStore,preview:toolCurationPreview,curator:createAgentToolCurator({runtime:curatorRuntime,timeoutMs:180000})});
+const server = createAppServer({ taskStore, agentRuntime, workspaceFiles, taskMessages, toolMaintenance, toolRepair, toolCurationPreview, toolCuration });
+const shutdown = createApiShutdown({server,toolMaintenance,toolRepair,toolCuration,toolsServer,
+  stores:[taskStore,maintenanceStore,repairStore,curationStore],rpcs:[rpc,curatorRpc]});
+const shutdownFailure = () => {console.error('服务停止未完全确认，请检查项目内私有运行记录。');process.exitCode=1;};
 server.listen(3000, "127.0.0.1", () => {
   // Never recover or claim jobs until this instance owns the listening socket.
-  toolRepair.recover();toolMaintenance.start();
+  try {toolRepair.recover();toolMaintenance.start();toolCuration.start();}
+  catch {shutdownFailure();void shutdown().catch(shutdownFailure);return;}
   console.log(`siRNA-pi: http://127.0.0.1:3000/ ; runtime=agent-compose ; recovered=${recovered.length}`);
 });
-server.on("error", async () => { console.error("网页服务启动失败，请检查端口与项目配置。"); process.exitCode = 1; await toolRepair.stop();await toolMaintenance.stop();repairStore.close(); maintenanceStore.close(); toolsServer.close(); taskStore.close(); rpc.close(); });
-// Deployment stops an idle server. Let any accepted HTTP turn finish on normal shutdown.
-async function shutdown(){
-  // stop() synchronously closes acceptance/claiming before HTTP drains; its
-  // promise settles only after the current validator and durable job finish.
-  const maintenanceDrain=toolMaintenance.stop();
-  const repairDrain=toolRepair.stop();
-  server.close(async () => {
-  await maintenanceDrain;
-  await repairDrain;
-  await server.waitForTaskCompletion();
-  await new Promise(resolve => toolsServer.close(resolve));
-  await toolsServer.waitForCalls();
-  taskStore.close();
-  maintenanceStore.close();
-  repairStore.close();
-  rpc.close();
-  process.exit(0);
-  });
-}
-process.once("SIGTERM", shutdown);
-process.once("SIGINT", shutdown);
+server.on("error", () => { console.error("网页服务启动失败，请检查端口与项目配置。");process.exitCode=1;void shutdown().catch(shutdownFailure);});
+process.once("SIGTERM", () => {void shutdown().catch(shutdownFailure);});
+process.once("SIGINT", () => {void shutdown().catch(shutdownFailure);});
