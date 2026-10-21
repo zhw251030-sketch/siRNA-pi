@@ -1,6 +1,7 @@
 import {isDeepStrictEqual,types} from 'node:util';
 import {createHash} from 'node:crypto';
 import {validateToolTaskContext} from './tool-run-audit.mjs';
+import {repairContractViolation} from '../domain/sirna-tools/builder-rejection.mjs';
 
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 export const repairRequestId=id=>`auto-tool-repair:${id}`;
@@ -24,7 +25,10 @@ export function frozenToolContract(input){
   return result;
 }
 export function assertRepairContract(original,next){
-  if(!isDeepStrictEqual(frozenToolContract(original),frozenToolContract(next))||original.runtimeArtifact.buildSessionId===next.runtimeArtifact?.buildSessionId)throw new Error('Repair must preserve the original contract and use a new build session');
+  if(original.runtimeArtifact.buildSessionId===next.runtimeArtifact?.buildSessionId)throw new Error('Repair must preserve the original contract and use a new build session');
+  const before=frozenToolContract(original),after=frozenToolContract(next);
+  const changed=Object.keys(before).filter(f=>!isDeepStrictEqual(before[f],after[f])||f==='parent'&&Object.hasOwn(original,f)!==Object.hasOwn(next,f));
+  if(changed.length)throw repairContractViolation(changed);
 }
 export function assertRepairPredecessor(current,previous,source,previousSource){
   if(!previousSource||source.taskId!==previousSource.taskId||source.executionSessionId!==previousSource.executionSessionId||source.sandboxId!==previousSource.sandboxId||

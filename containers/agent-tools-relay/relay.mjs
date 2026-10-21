@@ -3,6 +3,17 @@ import http from 'node:http';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 const errorBody=Buffer.from(JSON.stringify({error:'Approved tool relay unavailable'}));
+// This container mounts this one file only. Keep the wire allowlist local;
+// the host and guest independently validate the same small public contract.
+function repairRejection(output){
+  const value=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(output));
+  const exact=(v,keys)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).length===keys.length&&keys.every(k=>Object.hasOwn(v,k));
+  const fields=['toolName','runtime','dependencies','permissions','repeatabilityMode','smokeInput','testCases','baseline','benchmarkCases','minNetGain','parent'];
+  if(!exact(value,['error'])||!exact(value.error,['protocolVersion','code','outcome','fields']))throw new Error('unavailable');
+  const e=value.error;
+  if(e.protocolVersion!=='sirna-builder-rejection/v1'||e.code!=='repair_contract_mismatch'||e.outcome!=='not_registered'||!Array.isArray(e.fields)||!e.fields.length||e.fields.length>fields.length||e.fields.some(f=>!fields.includes(f))||new Set(e.fields).size!==e.fields.length)throw new Error('unavailable');
+  return Buffer.from(JSON.stringify({error:{protocolVersion:'sirna-builder-rejection/v1',code:'repair_contract_mismatch',outcome:'not_registered',fields:fields.filter(f=>e.fields.includes(f))}}));
+}
 function reply(res,status,body=errorBody){
   if(res.destroyed||res.writableEnded)return;
   res.writeHead(status,{'content-type':'application/json','content-length':body.length,'cache-control':'no-store'});res.end(body);
@@ -46,6 +57,12 @@ export function createToolRelay({socketPath,timeoutMs=30000,builderTimeoutMs=310
       const result=await new Promise((resolve,reject)=>{
         const upstream=http.request({socketPath,path:req.url,method:req.method,headers,signal},async response=>{
           try{
+            if(req.method==='POST'&&req.url==='/v1/tool-proposals'&&response.statusCode===409){
+              try{
+                if(Number(response.headers['content-length'])>2048||!/^application\/json(?:;\s*charset=utf-8)?$/i.test(response.headers['content-type']??''))throw new Error('unavailable');
+                const output=await readBounded(response,2048,signal);resolve({status:409,body:repairRejection(output)});return;
+              }catch{response.destroy();const error=new Error('upstream');error.upstreamStatus=409;throw error;}
+            }
             if(response.statusCode!==(create?201:200)){response.resume();const error=new Error('upstream');error.upstreamStatus=response.statusCode;throw error;}
             if(Number(response.headers['content-length'])>300000){response.destroy();throw new Error('large response');}
             let output;try{output=await readBounded(response,300000,signal);}catch{response.destroy();throw new Error('response unavailable');}
@@ -53,10 +70,10 @@ export function createToolRelay({socketPath,timeoutMs=30000,builderTimeoutMs=310
             const allowed=list?['tools']:['content','isError'];
             if(!value||typeof value!=='object'||Array.isArray(value)||!build&&(Object.keys(value).some(key=>!allowed.includes(key))||
               !Array.isArray(list?value.tools:value.content)))throw new Error('response unavailable');
-            resolve(output);
+            resolve({status:create?201:200,body:output});
           }catch(error){reject(error);}
         });upstream.once('error',()=>reject(new Error('upstream unavailable')));upstream.end(body);
-      });reply(res,create?201:200,result);
+      });reply(res,result.status,result.body);
     }catch(error){reply(res,error.status===413?413:[400,401,403,404,405,408,409,413,415,503].includes(error.upstreamStatus)?error.upstreamStatus:502);}
   });
   server.headersTimeout=10000;server.requestTimeout=15000;server.timeout=0;

@@ -8,6 +8,7 @@ import {submitRegisteredToolProposal,resolveToolLearningPaths} from './tool-life
 import {ToolRegistry} from './tool-registry.mjs';
 import {readToolProposal} from './tool-proposals.mjs';
 import {validateToolTaskContext} from './tool-run-audit.mjs';
+import {confirmRepairPreIntent} from '../domain/sirna-tools/builder-rejection.mjs';
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const KEEPALIVE=['/bin/sh','-c','while :; do sleep 3600; done'];
@@ -81,9 +82,11 @@ export function createToolBuildSessionService({root,docker,taskContext,registrat
     });},
     cancel(args){const v=fields(args,['sessionId']);const s=lookup(v.sessionId);must(['running','cancelled'].includes(s.state),'Session cannot be cancelled');return sessionOperation(s,async()=>{if(s.state==='cancelled')return {sessionId:s.id,state:s.state,cleanupConfirmed:s.cleanupConfirmed};try{intent(s,'cancel');await remove(s);s.state='cancelled';journal(s,{type:'cancelled',cleanupConfirmed:true});return {sessionId:s.id,state:s.state,cleanupConfirmed:true};}catch(e){return fail(s,e);}});},
     propose(input){const v=copyToolBuilderArguments(input);const check=checkToolProposal(v);must(check.ok,'Invalid tool proposal');must(v.runtime==='node'&&v.dependencies.length===0&&v.repeatabilityMode==='exact'&&v.permissions.profile==='no_external_access','Unsupported proposal configuration');const s=lookup(v.runtimeArtifact.buildSessionId);must(s.state==='finalized'&&isDeepStrictEqual(v.runtimeArtifact,s.artifact)&&v.script===s.source,'Proposal differs from finalized source or artifact');
-      return sessionOperation(s,async()=>{if(s.proposal){must(isDeepStrictEqual(v,s.proposalInput),'Conflicting proposal repeat');return readback(s);}must(!s.proposalAttempted,'Proposal submission uncertain; inspect private evidence');
-        const repair=registrationPolicy?.(v,taskContext);
-        intent(s,'proposal_submit',{proposal:v});s.proposalAttempted=true;try{const saved=submitRegisteredToolProposal(v,{root,...(taskContext?{actor:'web-agent',taskContext}:{}),...(repair?{repair}:{})});s.proposalInput=v;s.proposal={proposalId:saved.proposal.id,toolName:saved.proposal.toolName,state:saved.registry.state,registered:true,...flags};const result=readback(s);journal(s,{type:'proposal_registered',...result});s.evidence.write('proposal-result.json',{...result,...association});return result;}catch(error){try{journal(s,{type:'proposal_submission_failed',error:error.message,proposalId:error.proposalId});}catch{}throw new Error('Proposal submission failed; inspect private evidence');}
+      return sessionOperation(s,async()=>{if(s.proposal){must(isDeepStrictEqual(v,s.proposalInput),'Conflicting proposal repeat');try{return readback(s);}catch{throw new Error('Proposal readback failed; inspect private evidence');}}must(!s.proposalAttempted,'Proposal submission uncertain; inspect private evidence');
+        let repair;try{repair=registrationPolicy?.(v,taskContext);}catch(error){throw confirmRepairPreIntent(error)??error;}
+        // From the first journal attempt onward even a branded exception is
+        // uncertain. Mark before writing so a partial/failed append cannot replay.
+        s.proposalAttempted=true;try{intent(s,'proposal_submit',{proposal:v});const saved=submitRegisteredToolProposal(v,{root,...(taskContext?{actor:'web-agent',taskContext}:{}),...(repair?{repair}:{})});s.proposalInput=v;s.proposal={proposalId:saved.proposal.id,toolName:saved.proposal.toolName,state:saved.registry.state,registered:true,...flags};const result=readback(s);journal(s,{type:'proposal_registered',...result});s.evidence.write('proposal-result.json',{...result,...association});return result;}catch(error){try{journal(s,{type:'proposal_submission_failed',error:error.message,proposalId:error.proposalId});}catch{}throw new Error('Proposal submission failed; inspect private evidence');}
       });},
     close(){if(closePromise)return closePromise;closing=true;for(const s of sessions.values())clearTimeout(s.timer);closePromise=(async()=>{await accepted;let failed=false;for(const s of sessions.values()){if(s.creatingUnknown)failed=true;if(s.owned.containerId){try{intent(s,'close_cleanup');await remove(s);if(s.state==='running')s.state='cancelled';}catch(error){failed=true;s.state='failed';s.cleanupConfirmed=false;try{journal(s,{type:'close_cleanup_failed',error:error.message,cleanupConfirmed:false});}catch{}}} }if(failed)throw new Error('Tool builder close cleanup unknown');})();return closePromise;},
   };

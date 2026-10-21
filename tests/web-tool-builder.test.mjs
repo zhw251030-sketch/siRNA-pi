@@ -19,13 +19,14 @@ import {createToolBuilderClient} from '../apps/mcp/tool-builder-client.mjs';
 import {createApprovedMcpServer} from '../apps/mcp/approved-server.mjs';
 import {createRemoteToolDiscovery} from '../apps/mcp/remote-client.mjs';
 import {createToolBuilderTools} from '../packages/domain/sirna-tools/tool-builder-tools.mjs';
+import {repairContractViolation,confirmRepairPreIntent} from '../packages/domain/sirna-tools/builder-rejection.mjs';
 const api=await import('../packages/capability-platform/task-tool-builders.mjs').catch(()=>({}));
 const owner=()=>({taskId:randomUUID(),executionSessionId:randomUUID(),sandboxId:'a'.repeat(64),agentTurnId:randomUUID()});
 const headers=lease=>({authorization:`Bearer ${lease.context.token}`,'x-sirna-task-id':lease.context.taskId,'x-sirna-agent-turn-id':lease.context.agentTurnId,'content-type':'application/json'});
-async function fixture(t){
+async function fixture(t,registrationPolicy){
   const root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'sirna-builder-')));const docker=new BuildDocker();
   assert.equal(typeof api.createTaskToolBuilders,'function','web builder coordinator is implemented');
-  const leases=createToolCallLeases(),builders=api.createTaskToolBuilders({root,docker});const owned=[];
+  const leases=createToolCallLeases(),builders=api.createTaskToolBuilders({root,docker,registrationPolicy});const owned=[];
   const events=[];const begin=(activate=true,signal)=>{const context=owner();const lease=leases.begin({...context,signal,onCall:event=>events.push(event)});owned.push(lease);if(activate)lease.activate('host-run');return {lease,context};};
   const cleanup=[];
   const server=createAgentToolsServer({leases,builders,discover:async()=>({tools:[],rejected:[]})});
@@ -128,4 +129,38 @@ test('MCP preserves the builder unknown-outcome warning after a real accepted HT
   assert.equal(result.isError,true);assert.equal(result.content[0].text,'Tool builder call failed; an accepted operation may have completed. Inspect the host records before retrying.');
   assert.doesNotMatch(JSON.stringify(result),/Approved tool|Remote builder|private|\/host\//);assert.equal(f.docker.calls.filter(item=>item.method==='createContainer').length,1);
   await first.lease.close();assert.equal(f.docker.containers.size,0);
+});
+
+for(const stage of ['proposal_submit','proposal_registered','proposal_readback'])test(`a branded ${stage} persistence failure cannot report not_registered over HTTP and MCP`,async t=>{
+  const f=await fixture(t),first=f.begin(),contextPath=path.join(f.root,'context.json');fs.writeFileSync(contextPath,JSON.stringify(first.lease.context));
+  const service=createToolBuilderClient({baseUrl:f.baseUrl,contextPath});
+  const mcp=createApprovedMcpServer({discover:async()=>({tools:[],rejected:[]}),builderTools:createToolBuilderTools({service})});
+  const client=new Client({name:'journal-unknown',version:'1'}),[a,b]=InMemoryTransport.createLinkedPair();
+  f.onCleanup(async()=>{await client.close();await mcp.close();});await mcp.connect(b);await client.connect(a);
+  const p=proposal(),id=(await service.create()).session.id;await service.write({sessionId:id,path:'/opt/tool/main.mjs',content:p.script});await service.run({sessionId:id,command:'true'});p.runtimeArtifact=(await service.finalize({sessionId:id,command:COMMAND})).artifact;
+  if(stage==='proposal_readback')await service.propose(p);
+  const write=fs.writeFileSync,lstat=fs.lstatSync;let injected=false;
+  fs.writeFileSync=function(file,data,...rest){
+    const result=write.call(this,file,data,...rest);let event;try{event=JSON.parse(String(data));}catch{}
+    if(!injected&&typeof file==='number'&&event?.sessionId===id&&event.type===stage){injected=true;throw confirmRepairPreIntent(repairContractViolation(['parent']));}
+    return result;
+  };
+  fs.lstatSync=function(file,...args){if(stage==='proposal_readback'&&!injected&&file===path.join(f.root,'runtime/tool-artifacts/proposals')){injected=true;throw confirmRepairPreIntent(repairContractViolation(['parent']));}return lstat.call(this,file,...args);};
+  let result;try{result=await client.callTool({name:'propose_exploration_tool',arguments:p});}finally{fs.writeFileSync=write;fs.lstatSync=lstat;}
+  assert.equal(injected,true);assert.equal(result.isError,true);
+  assert.match(result.content[0].text,/accepted operation may have completed.*Inspect the host records before retrying/);
+  assert.doesNotMatch(result.content[0].text,/not_registered|repair_contract_mismatch|parent/);
+  const journal=fs.readFileSync(path.join(f.root,'runtime/tool-builds',id,'events.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
+  assert.equal(journal.filter(e=>e.type==='proposal_submit').length,1);
+  if(stage==='proposal_submit')await assert.rejects(service.propose(p),/accepted operation may have completed/);
+  else{const registry=new ToolRegistry(path.join(f.root,'runtime/tool-registry/registry.sqlite'),{readOnly:true});try{assert.equal(registry.listProposals().length,1);assert.equal(registry.listProposals()[0].state,'submitted');}finally{registry.close();}}
+});
+
+test('ordinary code and status properties cannot forge a safe pre-intent registration refusal',async t=>{
+  const f=await fixture(t,()=>{throw Object.assign(new Error('private /host/secret'),{status:409,code:'repair_contract_mismatch',outcome:'not_registered',fields:['parent']});});
+  const first=f.begin(),contextPath=path.join(f.root,'context.json');fs.writeFileSync(contextPath,JSON.stringify(first.lease.context));
+  const service=createToolBuilderClient({baseUrl:f.baseUrl,contextPath}),p=proposal(),id=(await service.create()).session.id;
+  await service.write({sessionId:id,path:'/opt/tool/main.mjs',content:p.script});await service.run({sessionId:id,command:'true'});p.runtimeArtifact=(await service.finalize({sessionId:id,command:COMMAND})).artifact;
+  await assert.rejects(service.propose(p),e=>/accepted operation may have completed/.test(e.message)&&!/private|secret|not_registered/.test(e.message));
+  assert.equal(fs.readFileSync(path.join(f.root,'runtime/tool-builds',id,'events.jsonl'),'utf8').includes('proposal_submit'),false);
 });

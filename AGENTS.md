@@ -318,3 +318,19 @@ Linux修复前完整1111项1109pass/2skip，0fail。Windows两次完整串行均
 2构建调试命令共4样例；4构建/打包+11验证临时容器均移除，两个镜像保留。旧29材料/28构建文件/12正式审计/12会话/旧任务行/4运行容器/catalog/凭据元数据保持。schema4当前6proposals/5validations/2versions/15events，正式target_sequence仍active1.0.1，旧候选状态不变。项目后台重启后只读验收报告完全一致，无模型重发。当前复核node scripts/verify-controlled-tool-repair.mjs依赖私有runtime/repair-state.mjs/快照/轨迹，ok仅证据一致，outcome repair_submission_rejected及modelRepairSucceeded:false；旧10M固定总数验收不再适用。
 
 最新学习docs/27-可信来源与一轮工具修订.md；runtime/repair-acceptance-{01,02}.json、repair-ended-history.json、repair-notes.json、repair-{local,linux}-tests日志及repair-browser.png为本轮证据；同步回执留runtime。下一步先完善安全明确的合同拒绝与未知结果区别，用独立新演示补齐合法替代→独立验证的成功路径，再接真正Curator。当前不是完整真实修订闭环成功，不是自进化有效性证明。仍个人main持续同步，唯一远端/home/hanwen/Project/project/siNRA-pi，不改上级RSI研究项目。
+
+以上为第10N步历史；以下为当前状态。
+
+2026-10-21：第10O步实现固定安全的Builder拒绝反馈。repair-contract只报告冻结字段名；repair-service先验证来源/ticket再比较；build-session只在首次proposal_submit意图之前确认not_registered。开始写意图前先置proposalAttempted，登记/保存/已登记读回失败均未知。三个私有WeakMap标记防普通Error.code伪造。HTTP仅propose409、sirna-builder-rejection/v1、repair_contract_mismatch、not_registered、白名单fields≤2048UTF8字节；relay/client严格重构，MCP isError:true携固定指导，未知/超时/畸形保留未知且不重放。parent是正式父版本，不是修订谱系；原无parent须省略，包括null也不能新增。冻结测试/基线/权限和新build要求不变。
+
+新项目identity sirna-pi-learning-builder-feedback，guest sirna-pi-guest:pi1.2.0-mcp4，image sha256:aecef2f4e6f033499c65d0dd1629253df87da576b96f605bd0de69f5b10f68d4；Pi1.2.0/adapter2.11.0/Node22.23.2。构建导入通过，运行数据/密钥/宿主内核不进入guest。真实无模型适配器fixture（无外网、readonly、nonroot）验证409明确拒绝/502未知、2认证提案请求、0自动重试、同MCP进程；脚本最初误把Error前缀与参数说明当JSON，修正后旧mcp3负例仍失败、新mcp4通过，日志保留。聚焦122项全通过；完整1223项Windows1210pass13skip、Linux1221pass2skip、0fail。独立核心审查与实际验收助手复核通过。
+
+真实教学新task d72bc8cc-ea17-4782-a4e6-230042dafff8、execution c8fa3878-ebed-4bbc-aca3-bd87423f81c7。仅一根消息+一显式修订消息，根proposal32b9a044-2cd1-4e08-8046-78f280ed4c44/build37cb07ac-f338-4c6e-acb6-6109e0d7f4e4按人为草稿保留首尾极值错误，独立验证领域2/3、候选1/2对基线1/2、net0；validation4fc6258c-a77a-4d86-9e4c-233f33911f47，reportSHA549eea1102185f0ff9e8c2a9b228ca906b558155a60e7eca644eb13fdd48e22a。Pi一轮修订用Math.min/Math.max，替代proposal5fc8293d-4100-4719-88d1-4d45a9753bb6/builddbb9858a-6cb1-46f0-a0b7-65115cfb7757，独立领域3/3、2/2对1/2、net1达到门槛；validation2c538671-1755-471a-ab6a-75df45f58a27，reportSHAaed5e3e9361d5d491be7ffe60937a17d56c80f7bc06623c242d084ced353c87a。冻结合同一致、parent均省略、attempt1、票据superseded。verified待人工批准，未启用。旧10N负报告和awaiting_replacement票据不恢复、不改写。
+
+原生15模型响应/16Pi工具/0工具错误；2propose均成功。113340tokens=input17979+output3135+cacheRead92226，cacheWrite0，实际账单未知；响应记录数不等于穷尽服务商请求数。本轮live未触发409，不声称真实模型通过拒绝后改正；明确反馈通路由无模型实际适配器及离线集成证明，live证明合法替代与再次独立验证。可见测试+人为缺陷+弱基线，不能称泛化或自进化有效性。
+
+两个构建各1调试，4构建/打包+22验证临时容器全部移除，新task已ended、guest释放、材料与轨迹保留。旧270证据文件/22原生文件/16镜像引用/2旧guest/旧任务与票据/正式target_sequence1.0.1/catalog保持。部署时旧controller单文件挂载内容未刷新，确认空闲后只重建本项目controller+relay两管理容器，旧guest未动；无系统/root操作。模型密钥只核元数据，管理token仅内存鉴权未输出。schema4现8proposals/7validations/2versions/19events。
+
+只读入口node scripts/verify-tool-repair-feedback-loop.mjs依赖私有runtime/feedback-fix-acceptance.mjs与本轮基线/收据，不是通用新克隆测试。助手在正式运行前修正baseline镜像断言并补齐保存输出的逐项谓词重核；不调用模型/执行源码/重新验证。重启前后acceptance-01/02均通过且逐字节一致，SHA691eef699db8dcc011869f924f98d278a1bd670c0d6edc0b5e9cb59f5217ddb3；无重发。证据runtime/feedback-fix-{state-before,exercise-started,ended-history,acceptance-01,acceptance-02,management-completed,ops-restart-02}.json及测试/guest日志；Git同步完成后由脚本写runtime/feedback-fix-sync.json，以实际回执核验。不要重跑10N旧固定总数验收或改它迎合新增状态。
+
+最新教学docs/28-明确拒绝反馈与修订闭环.md。下一步对照原tool-curation-coordinator，从任务trace/gaps发现可复用能力建议、去重与派发构建，再复用既有维护链；当前已走通受控修订，不是完整Curator/自动自进化。原版自动批准、个人人工批准为有意收紧。继续个人main提交推送及守卫bundle同步，唯一远端目录不变，不改父级RSI研究项目。

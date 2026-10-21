@@ -18,6 +18,7 @@
 !packages/domain/sirna-tools/candidates.mjs
 !packages/domain/sirna-tools/sirna-tools.mjs
 !packages/domain/sirna-tools/tool-builder-tools.mjs
+!packages/domain/sirna-tools/builder-rejection.mjs
 !apps/
 !apps/mcp/
 !apps/mcp/server.mjs

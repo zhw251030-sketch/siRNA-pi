@@ -1,5 +1,6 @@
 // Reference-shaped build routes on the existing private authenticated gateway.
 import {randomUUID} from 'node:crypto';
+import {builderRejectionEnvelope} from '../../packages/domain/sirna-tools/builder-rejection.mjs';
 const UUID='[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
 const names={create:'create_tool_build_session',write:'write_tool_build_file',run:'run_tool_build_command',cancel:'cancel_tool_build_session',finalize:'finalize_tool_build',propose:'propose_exploration_tool'};
 export function toolBuildRoute(method,url){
@@ -25,8 +26,10 @@ export function createToolBuildApi({builders,authorize,readBody,respond,track}={
       try{
       if(handle.signal.aborted)throw Object.assign(new Error('Capability unavailable'),{status:401});
       const service=builders.acquire(handle);
-      try{const result=await service[route.operation](route.sessionId?{...args,sessionId:route.sessionId}:args);success=true;return result;}
+      try{const result=await service[route.operation](route.sessionId?{...args,sessionId:route.sessionId}:args);success=true;return {status:route.status,value:result};}
       catch(error){
+        const rejected=route.operation==='propose'?builderRejectionEnvelope(error):undefined;
+        if(rejected)return {status:409,value:rejected};
         if(error?.status===409)throw error;
         // Diagnostics stay in owned journals. Unknown sessions cannot cross turns.
         const status=/Unknown build session|busy|limit reached|not running|cannot be|closed/.test(error.message)?409:400;
@@ -34,6 +37,6 @@ export function createToolBuildApi({builders,authorize,readBody,respond,track}={
       }
       }finally{await handle.emit({type:'builder_tool_call',toolName:names[route.operation],toolCallId,agentRunId:handle.taskContext.agentRunId,success});}
     });
-    await track(operation,async()=>respond(res,route.status,await operation));return true;
+    await track(operation,async()=>{const result=await operation;respond(res,result.status,result.value);});return true;
   };
 }

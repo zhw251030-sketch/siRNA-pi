@@ -4,6 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {Server} from '@modelcontextprotocol/sdk/server/index.js';
 import {CallToolRequestSchema,ListToolsRequestSchema} from '@modelcontextprotocol/sdk/types.js';
 import {createSirnaTools,validateCandidateArguments} from '../../packages/domain/sirna-tools/sirna-tools.mjs';
+import {builderRejectionContent} from '../../packages/domain/sirna-tools/builder-rejection.mjs';
 
 const failure=text=>({isError:true,content:[{type:'text',text}]});
 function publicResult(result){
@@ -60,7 +61,9 @@ export function createApprovedMcpServer({discover,pollIntervalMs,builderTools=[]
     if(busy)return failure('Approved tool executor is busy; wait for the accepted call to finish.');
     busy=true;
     try{return publicResult(await tool.execute(randomUUID(),args,extra.signal));}
-    catch{return failure(builders.has(tool.name)
+    catch(error){const rejected=builders.has(tool.name)&&tool.name==='propose_exploration_tool'?builderRejectionContent(error):undefined;
+      if(rejected)return failure(rejected);
+      return failure(builders.has(tool.name)
       ?'Tool builder call failed; an accepted operation may have completed. Inspect the host records before retrying.'
       :'Approved tool call failed. Check arguments and inspect the host audit records.');}
     finally{busy=false;}

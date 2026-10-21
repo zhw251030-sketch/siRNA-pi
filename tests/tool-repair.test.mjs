@@ -18,6 +18,15 @@ import {DockerBoundary} from './helpers/validation-docker-boundary.mjs';
 import {BuildDocker,COMMAND} from './helpers/tool-build-docker.mjs';
 import {createToolBuildSessionService} from '../packages/capability-platform/tool-build-sessions.mjs';
 import {createAppServer} from '../apps/api/router.mjs';
+import {createToolCallLeases} from '../packages/capability-platform/tool-call-leases.mjs';
+import {createTaskToolBuilders} from '../packages/capability-platform/task-tool-builders.mjs';
+import {createAgentToolsServer} from '../apps/api/agent-tools.mjs';
+import {createToolRelay} from '../containers/agent-tools-relay/relay.mjs';
+import {createRemoteMcpServer} from '../apps/mcp/remote-server.mjs';
+import {Client} from '@modelcontextprotocol/sdk/client/index.js';
+import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';
+import {repairContractViolation,confirmRepairPreIntent,builderRejectionEnvelope} from '../packages/domain/sirna-tools/builder-rejection.mjs';
+import {assertRepairContract} from '../packages/capability-platform/tool-repair-contract.mjs';
 
 const api=await import('../packages/capability-platform/tool-repair-service.mjs').catch(()=>({}));
 const storage=await import('../packages/capability-platform/tool-repair-store.mjs').catch(()=>({}));
@@ -43,7 +52,7 @@ async function setup(t,{source=true,changes={},run}={}){
   cleanup.push(async()=>{await repair.stop();await maintenance.stop();store.close();queue.close();tasks.close();assert.deepEqual(runErrors,[],'runtime callback assertions must not be swallowed by the task service');});
   async function validate(id=saved.proposal.id,allPass=false){const row=registry(root,r=>r.getProposal(id));const {readToolProposal}=await import('../packages/capability-platform/tool-proposals.mjs');const material=readToolProposal(id,{proposalsRoot:resolveToolLearningPaths(root).proposalsRoot,expectedArtifactSha256:row.artifactSha256});const docker=new DockerBoundary(material,{runResult:({target,envelope})=>({exitCode:allPass&&target==='baseline'&&envelope.input.sequence.startsWith('>')?1:0,timedOut:false,outputLimitExceeded:false,stdout:JSON.stringify({length:allPass?4:99,gcFraction:0.5}),stderr:''})});await validateRegisteredToolProposal(id,{root,runner:createDockerValidationRunner({docker})});const v=getLatestToolValidationReport(id,{root});return {validationId:v.id,reportSha256:v.reportSha256};}
   const body=await validate();
-  return {root,tasks,ctx,task,p,saved,id:saved.proposal.id,queue,maintenance,runtime,messages,cleanup,get repair(){return repair;},get store(){return store;},body,validate,
+  return {root,tasks,ctx,task,p,saved,id:saved.proposal.id,queue,maintenance,runtime,messages,cleanup,runErrors,get repair(){return repair;},get store(){return store;},body,validate,
     async reopen(){await repair.stop();store.close();store=new storage.ToolRepairStore({root});repair=create();return repair;}};
 }
 
@@ -195,4 +204,90 @@ test('repair store rejects an alien schema, hardlinks and redirected directories
 test('failure after durable dispatch never auto-resends and stopped service refuses a fresh request',async t=>{
   const f=await setup(t);const db=new DatabaseSync(f.tasks.databasePath);db.exec("CREATE TRIGGER fail_user BEFORE INSERT ON chat_messages WHEN NEW.role='user' BEGIN SELECT RAISE(ABORT,'disk failure'); END");db.close();const result=await f.repair.start(f.id,f.body);assert.equal(result.repair.phase,'failed');assert.equal(f.tasks.listMessages(f.task.id).length,0);await f.reopen();f.repair.recover();assert.equal((await f.repair.start(f.id,f.body)).deduplicated,true);assert.equal(f.tasks.listMessages(f.task.id).length,0);
   const g=await setup(t);await g.repair.stop();await assert.rejects(g.repair.start(g.id,g.body),e=>e.code==='stopped');assert.equal(g.store.get(g.id),null);
+});
+
+// Removing the pre-intent rejection channel must lose the field/outcome here;
+// moving admission past intent must leave evidence and prevent this correction.
+test('trusted frozen-contract rejection crosses real UDS relay and MCP then corrected payload reuses the finalized session',async t=>{
+  let successor;
+  const f=await setup(t,{run:async({ctx,repair,root,emit,tasks})=>{
+    const leases=createToolCallLeases(),docker=new BuildDocker(),events=[];
+    const lease=leases.begin({...ctx,onCall:e=>events.push(e)});lease.activate(ctx.agentRunId);
+    const builders=createTaskToolBuilders({root,docker,registrationPolicy:repair.registration});
+    const host=createAgentToolsServer({leases,builders,discover:async()=>({tools:[],rejected:[]})});
+    const socketPath=process.platform==='win32'?`\\\\.\\pipe\\sirna-repair-${randomUUID()}`:path.join(root,'builder.sock');
+    await new Promise(r=>host.listen(socketPath,r));
+    const relay=createToolRelay({socketPath});await new Promise(r=>relay.listen(0,'127.0.0.1',r));
+    const baseUrl=`http://127.0.0.1:${relay.address().port}`,contextPath=path.join(root,'builder-context.json');
+    fs.writeFileSync(contextPath,JSON.stringify(lease.context));
+    const mcp=createRemoteMcpServer({baseUrl,builderUrl:baseUrl,contextPath,pollIntervalMs:0});
+    const client=new Client({name:'repair-safe-feedback',version:'1'}),[a,b]=InMemoryTransport.createLinkedPair();
+    await mcp.connect(b);await client.connect(a);
+    try{
+      const call=async(name,args={})=>{const r=await client.callTool({name,arguments:args});assert.notEqual(r.isError,true,JSON.stringify(r));return JSON.parse(r.content[0].text);};
+      const build=(await call('create_tool_build_session')).session.id,p=input();
+      await call('write_tool_build_file',{sessionId:build,path:'/opt/tool/main.mjs',content:p.script});
+      await call('run_tool_build_command',{sessionId:build,command:'true'});
+      p.runtimeArtifact=(await call('finalize_tool_build',{sessionId:build,command:COMMAND})).artifact;
+      const journalPath=path.join(root,'runtime/tool-builds',build,'events.jsonl');
+      const before=fs.readFileSync(journalPath),proposals=registry(root,r=>r.listProposals().length);
+      const headers={authorization:`Bearer ${lease.context.token}`,'x-sirna-task-id':ctx.taskId,'x-sirna-agent-turn-id':ctx.agentTurnId,'content-type':'application/json'};
+      tasks.updateExecution(ctx.taskId,{currentRunId:randomUUID()});
+      try{
+        const stale=await client.callTool({name:'propose_exploration_tool',arguments:{...p,parent:{toolName:p.toolName,version:'1.0.0'}}});
+        assert.equal(stale.isError,true);assert.match(stale.content[0].text,/accepted operation may have completed/);
+        assert.doesNotMatch(stale.content[0].text,/not_registered|repair_contract_mismatch|parent/);
+      }finally{tasks.updateExecution(ctx.taskId,{currentRunId:ctx.agentRunId});}
+      for(const [field,value] of [['parent',{toolName:p.toolName,version:'1.0.0'}],['testCases',[{name:'changed expectation',input:{sequence:'ACGU'},expectedOutput:{length:999}}]],['baseline',{runtime:'node',script:'console.log("private-secret-marker")'}],['minNetGain',2]]){
+        const response=await fetch(baseUrl+'/v1/tool-proposals',{method:'POST',headers,body:JSON.stringify({...p,[field]:value})});
+        assert.equal(response.status,409);
+        assert.deepEqual(await response.json(),{error:{protocolVersion:'sirna-builder-rejection/v1',code:'repair_contract_mismatch',outcome:'not_registered',fields:[field]}});
+      }
+      const response=await client.callTool({name:'propose_exploration_tool',arguments:{...p,parent:{toolName:p.toolName,version:'1.0.0'}}});
+      assert.equal(response.isError,true);const detail=JSON.parse(response.content[0].text);
+      assert.equal(detail.code,'repair_contract_mismatch');assert.equal(detail.outcome,'not_registered');assert.deepEqual(detail.fields,['parent']);
+      assert.match(detail.message,/same finalized build/i);assert.match(detail.message,/omit parent/i);
+      assert.doesNotMatch(JSON.stringify(response),/private-secret-marker|registry\.sqlite|builder-context|Bearer/);
+      assert.equal(registry(root,r=>r.listProposals().length),proposals);assert.deepEqual(fs.readFileSync(journalPath),before);
+      assert.equal(fs.existsSync(path.join(root,'runtime/tool-builds',build,'proposal-result.json')),false);
+      const saved=await call('propose_exploration_tool',p);successor=saved.proposalId;
+      assert.equal(saved.state,'submitted');assert.equal(docker.commits,1);
+      assert.equal(events.filter(e=>e.toolName==='propose_exploration_tool'&&!e.success).length,6);
+      assert.equal(events.filter(e=>e.toolName==='propose_exploration_tool'&&e.success).length,1);
+      assert.equal(fs.readFileSync(journalPath,'utf8').split('\n').filter(line=>line&&JSON.parse(line).type==='proposal_submit').length,1);
+    }finally{
+      await client.close();await mcp.close();await lease.close();await host.waitForCalls();
+      relay.closeAllConnections();await new Promise(r=>relay.close(r));host.closeAllConnections();await new Promise(r=>host.close(r));
+    }
+    emit({type:'done',status:'succeeded',runId:ctx.agentRunId});
+  }});
+  await f.repair.start(f.id,f.body);await f.repair.drain();if(f.runErrors.length)throw f.runErrors[0];assert.ok(successor);
+  assert.equal(f.repair.status(f.id).repair.replacementProposalId,successor);
+  assert.equal(Object.hasOwn(sources.getToolProposalSource(successor,{root:f.root}).input,'parent'),false);
+});
+
+test('a branded exception while checking repair identity cannot claim a frozen-field rejection',async t=>{
+  const f=await setup(t,{run:async({ctx,repair,emit})=>{
+    const byRequest=f.store.byRequest.bind(f.store);
+    f.store.byRequest=()=>{throw repairContractViolation(['parent']);};
+    try{assert.throws(()=>repair.registration(input(),ctx),e=>e.code==='registration_refused'&&builderRejectionEnvelope(confirmRepairPreIntent(e))===undefined);}
+    finally{f.store.byRequest=byRequest;}
+    emit({type:'done',status:'succeeded',runId:ctx.agentRunId});
+  }});
+  await f.repair.start(f.id,f.body);await f.repair.drain();if(f.runErrors.length)throw f.runErrors[0];
+  assert.equal(registry(f.root,r=>r.listProposals().length),1);
+});
+
+test('frozen field diagnostics preserve the original comparison rules and absent parent without weakening fresh build identity',()=>{
+  const original=input(),next={...structuredClone(original),runtimeArtifact:{...original.runtimeArtifact,buildSessionId:randomUUID()}};
+  const changes={toolName:'other_tool',runtime:'python',dependencies:['other'],permissions:{profile:'other'},repeatabilityMode:'other',smokeInput:{other:1},testCases:[],baseline:{runtime:'node',script:'other'},benchmarkCases:[],minNetGain:2,parent:{toolName:original.toolName,version:'1.0.0'}};
+  for(const [field,value] of Object.entries(changes))assert.throws(()=>assertRepairContract(original,{...next,[field]:value}),error=>{
+    assert.deepEqual(builderRejectionEnvelope(confirmRepairPreIntent(error)),{error:{protocolVersion:'sirna-builder-rejection/v1',code:'repair_contract_mismatch',outcome:'not_registered',fields:[field]}});return true;
+  });
+  assert.doesNotThrow(()=>assertRepairContract(original,{...next,minNetGain:1}));
+  assert.throws(()=>assertRepairContract(original,{...next,parent:null}),e=>builderRejectionEnvelope(confirmRepairPreIntent(e))?.error.fields[0]==='parent');
+  const parent={toolName:original.toolName,version:'1.0.0'};
+  assert.doesNotThrow(()=>assertRepairContract({...original,parent},{...next,parent:{...parent}}));
+  assert.throws(()=>assertRepairContract({...original,parent},next),e=>builderRejectionEnvelope(confirmRepairPreIntent(e))?.error.fields[0]==='parent');
+  assert.throws(()=>assertRepairContract(original,{...original,parent}),e=>builderRejectionEnvelope(confirmRepairPreIntent(e))===undefined);
 });
