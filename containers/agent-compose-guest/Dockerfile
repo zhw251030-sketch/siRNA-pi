@@ -9,6 +9,7 @@ COPY config/pi/compose-settings.json /opt/sirna-pi/settings.json
 COPY packages/domain/sirna-tools/ /opt/sirna-pi/packages/domain/sirna-tools/
 COPY apps/mcp/ /opt/sirna-pi/apps/mcp/
 COPY scripts/verify-guest-mcp.mjs /opt/sirna-pi/scripts/verify-guest-mcp.mjs
+COPY scripts/verify-guest-tool-gap.mjs /opt/sirna-pi/scripts/verify-guest-tool-gap.mjs
 # The official adapter imports adjacent TypeScript modules. Expose its complete
 # package, keeping the upstream MIT license and locked implementation intact.
 RUN test -L /usr/local/share/agent-compose/pi-mcp-adapter/index.ts \

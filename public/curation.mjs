@@ -20,7 +20,7 @@ export function createCurationPreviewPanel({ root, fetcher = fetch, storage = gl
   const submit = node('button', '提交独立审查（调用模型）', 'button secondary'); submit.type='button';
   const history = node('button', '刷新审查记录', 'button secondary'); history.type='button';
   const status = node('p', '', 'help'); status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
-  const explanation = node('p', '这是确定性规则筛出的使用线索，不是模型建议，也不是模型候选；不会登记、构建或批准工具。不是冻结证据。筛选门槛：同类完整业务调用至少 3 次且输入至少 2 种，或错误至少 2 次；既有工具不进入线索。普通文件读写和控制、验证、MCP 元操作排除。', 'help');
+  const explanation = node('p', '这里分别展示重复业务调用的规则线索和 Agent 主动报告的能力缺口。规则线索不是模型建议，门槛是同类完整业务调用至少 3 次且输入至少 2 种，或错误至少 2 次；既有工具不进入线索，普通文件读写和控制、验证、MCP 元操作排除。缺口报告是 Agent 的主张，阻塞仅为 Agent 判断，不是后端判决。轮次结束后才可手动送交独立审查。预览不是冻结证据，不会登记、构建或批准工具。', 'help');
   const privacy = node('p', '仅对常见敏感字段做脱敏，不是完整隐私保证；任意私密文本仍可能出现，请谨慎分享。', 'help');
   const result = node('div');
   const reviews = node('div');
@@ -32,7 +32,7 @@ export function createCurationPreviewPanel({ root, fetcher = fetch, storage = gl
   function controls() {
     button.disabled = !task || ['running', 'pending'].includes(task.status) || loading;
     button.textContent = loading ? '读取中…' : '读取本轮预览';
-    submit.disabled = !task || loading || ['running','pending'].includes(task.status) || !loadedPreview?.eligibleForReview || !loadedPreview.signals.some(signal=>signal.evidenceComplete===true);
+    submit.disabled = !task || loading || ['running','pending'].includes(task.status) || !loadedPreview?.eligibleForReview || !(loadedPreview.signals.some(signal=>signal.evidenceComplete===true)||loadedPreview.gapReports?.length>0);
     history.disabled = !task || loading;
     root.setAttribute('aria-busy', String(loading));
     for(const update of buildPanels.values())update();
@@ -146,7 +146,7 @@ export function createCurationPreviewPanel({ root, fetcher = fetch, storage = gl
   function render(preview) {
     const s = preview.summary, limits = preview.limits;
     result.append(raw('任务目标（保存记录摘要）', preview.objective ?? '未记录'));
-    result.append(node('p', `规则筛选：${preview.eligibleForReview ? '存在达到门槛的线索，仍需审查' : '没有达到门槛的线索，不表示没有可改进之处'}。`));
+    result.append(node('p', preview.gapReports?.length?'存在明确缺口报告，可人工审查；报告存在不证明能力确实缺失。':`规则筛选：${preview.eligibleForReview ? '存在达到门槛的线索，仍需审查' : '没有达到门槛的线索，不表示没有可改进之处'}。`));
     result.append(node('p', `工具开始 ${s.toolStarts}；纳入业务调用 ${s.consideredCalls}；排除 ${s.excludedCalls}；不完整 ${s.incompleteCalls}；调用窗口外省略 ${s.omittedCalls}。`));
     result.append(node('p', `显示窗口最多 ${limits.maxCalls} 条调用；线索省略 ${limits.omittedSignals} 项；${limits.displayTruncated ? '显示已截断' : '显示未截断'}。证据可能在窗口外，不能只凭可见预览作完整判断。`));
     if (Array.isArray(preview.excludedCalls)) {
@@ -157,11 +157,19 @@ export function createCurationPreviewPanel({ root, fetcher = fetch, storage = gl
       for (const call of preview.excludedCalls) list.append(node('li', `${call.actualToolName} · 事件 ${call.startEventId} · ${reasons[call.reason] || '未纳入业务调用筛选'}`));
       excluded.append(list); result.append(excluded);
     }
-    result.append(node('h3', '达到门槛的能力线索'));
-    if (!preview.signals.length) result.append(node('p', '本轮没有达到门槛的线索。'));
+    result.append(node('h3', '达到门槛的重复调用线索'));
+    if (!preview.signals.length) result.append(node('p', '本轮没有达到门槛的重复调用线索。'));
     for (const signal of preview.signals) {
       const item = node('article', undefined, 'curation-item');
       item.append(node('h4', signal.capabilityKey), node('p', `${signal.callCount} 次调用，${signal.distinctInputs} 种输入，${signal.errorCount} 次错误。`), node('p', `事件 ID：${signal.evidenceEventIds.join('、')}。${signal.evidenceComplete ? '依据在当前窗口完整可见。' : '窗口内证据不完整，部分依据未显示。'}`)); result.append(item);
+    }
+    if(preview.gapReports?.length){
+      result.append(node('h3','Agent 明确报告的能力缺口'),node('p','报告是 Agent 判断；报告存在不证明能力确实缺失。阻塞判断不会自动停止任务，也不会创建或批准工具。'));
+      for(const gap of preview.gapReports){
+        const item=node('article',undefined,'curation-item');
+        item.append(node('h4',gap.capability),node('p',`报告 ID：${gap.id} · 能力：${gap.capabilityKey}`),node('p',`阻塞：${gap.blocking?'是':'否'}（Agent 判断）`),node('p',gap.reason),raw('期望输入',gap.desiredInput),raw('期望输出',gap.desiredOutput),node('p',`引用事件 ID：${gap.evidenceEventIds.length?gap.evidenceEventIds.join('、'):'未提供'}。`),raw('完整脱敏报告（含来源与摘要）',gap));
+        result.append(item);
+      }
     }
     result.append(node('h3', '业务调用窗口'));
     result.append(node('p', '“记录未报错”仅表示保存的工具记录未报告错误，不验证业务正确性。'));
@@ -191,6 +199,7 @@ export function createCurationPreviewPanel({ root, fetcher = fetch, storage = gl
       if (body.preview === null && body.reason === 'no_run') { status.textContent = '本任务尚无执行轮次。'; return; }
       const preview = body.preview;
       if (preview?.protocolVersion !== 'sirna-tool-curation-preview/v1' || preview.taskId !== current.id || current.currentRunId && preview.runId !== current.currentRunId || !preview.summary || !preview.limits || !Array.isArray(preview.calls) || !Array.isArray(preview.signals)) throw new Error('预览与当前任务或轮次不匹配，或响应不完整；请刷新任务记录。');
+      if(preview.gapReports!==undefined&&(!Array.isArray(preview.gapReports)||preview.gapReports.some(gap=>!gap||gap.taskId!==preview.taskId||gap.runId!==preview.runId||gap.userMessageId!==preview.userMessageId||typeof gap.id!=='string'||typeof gap.capability!=='string'||typeof gap.reason!=='string'||typeof gap.blocking!=='boolean'||!Array.isArray(gap.evidenceEventIds))))throw new Error('缺口报告与当前任务或轮次不匹配；请刷新任务记录。');
       render(preview);loadedPreview=preview;status.textContent = '已读取本轮保存记录。这里只展示线索，没有创建工具候选。';
     } catch (error) {
       if (version === generation) { loadedPreview=null;result.replaceChildren(); status.textContent = error instanceof Error ? error.message : '预览读取失败，请手动重试。'; }

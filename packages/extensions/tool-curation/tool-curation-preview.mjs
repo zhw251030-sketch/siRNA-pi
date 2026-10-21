@@ -17,7 +17,7 @@ function hasCompletedEvidence(events) {
     ['workspace_synced', 'workspace_warning'].includes(event.payload?.type));
 }
 
-export function createToolCurationPreview({taskStore, listExistingTools}) {
+export function createToolCurationPreview({taskStore, listExistingTools, listGapReports}) {
   function snapshot(taskId, requestedRunId) {
       if (requestedRunId !== undefined && !runIdentity.test(requestedRunId)) fail(400, 'runId 必须是已保存的 SDK UUID 或 Compose 轮次编号。');
       const task = taskStore.getTask(taskId);
@@ -45,9 +45,15 @@ export function createToolCurationPreview({taskStore, listExistingTools}) {
         existingTools = [...new Set(existingTools.map(name => name.replace(/^sirna_tools_/, '')).filter(Boolean))].sort();
       } catch { fail(503, '当前正式工具目录无法核验，预览暂不可用。'); }
       try {
+        const gapReports=listGapReports?listGapReports(task.id,runId):[];
+        if(!Array.isArray(gapReports))throw Error('Gap evidence is unavailable');
         return {preview: buildCurationPreview({taskId: task.id, runId, userMessageId: source.userMessage.id,
-          objective: source.userMessage.content, events: source.events, existingTools: rawExistingTools}), existingTools, events: source.events};
-      } catch { fail(409, '这轮工具证据存在冲突或不支持的记录，不能生成可靠预览。'); }
+          objective: source.userMessage.content, events: source.events, existingTools: rawExistingTools,gapReports}), existingTools, events: source.events};
+      } catch(error) {
+        if(error instanceof RangeError||error.statusCode===413)fail(413,'这轮缺口证据超过完整预览上限，不能部分预览。');
+        if(error.statusCode===503)fail(503,'这轮缺口存储暂不可用。');
+        fail(409, '这轮工具证据存在冲突或不支持的记录，不能生成可靠预览。');
+      }
     }
   return {
     snapshot,

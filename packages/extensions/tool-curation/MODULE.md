@@ -1,8 +1,14 @@
 # Tool Curation：工具发现扩展
 
-本阶段实现已结束任务轮次的只读轨迹预览、显式送审、不可变证据、独立Curator建议，以及用户明确触发的建议→Builder交接。Task Core仍负责保存任务、消息与公共事件，能力平台仍负责工具构建、独立验证和发布。
+本阶段实现已结束任务轮次的只读轨迹预览、Agent明确缺口报告、显式送审、不可变证据、独立Curator建议，以及用户明确触发的建议→Builder交接。Task Core仍负责保存任务、消息与公共事件，能力平台仍负责工具构建、独立验证和发布。
 
 输入：TaskStore.readRunEvidence的有界记录，以及经过已有目录核验逻辑读出的正式工具名称。snapshot一次取得来源与目录；原始目录给11A预览构建器，冻结目录另按相同规则去sirna_tools_前缀、去重、排序，避免双重规范化。
+
+缺口报告：tool-gap-contract/store/service保存report_tool_gap的六项业务字段。来源五字段来自activated lease，服务再检查当前task/session/run/user消息、引用事件及未终态/未冻结；runtime/tool-gaps/gaps.sqlite独立schema1/应用身份/链接保护/不可变摘要/事务唯一去重。每轮最多10项及32KiB，重复保留第一份。能力键保留Unicode字母数字并拒绝空键，这是区别于原版ASCII/基本汉字和占位回退的本地规则。
+
+证据接入：可选listGapReports注入preview，空报告时旧字段/摘要不变；有报告可以gap-only合格，signals不伪造。报告与完整引用事件进入online_gap trace的gapReports/gapEvidence，64KiB超限明确拒绝。候选必须引用同能力组的至少一个报告ID，其他事件只能来自该组冻结引用。blocking仅为报告者判断，不停止任务；报告存在不证明缺口真实。
+
+名称准入：候选验证与能力平台提案合同共用tool-names.mjs的纯谓词，拒绝新控制名report_tool_gap及单次sirna_tools_别名；Builder读取经同一候选验证。实际登记在材料/registry写入之前拒绝。该规则不改变旧预览摘要所用的existingTools目录，不扩展为历史控制名称重构。
 
 输出：`sirna-tool-curation-preview/v1`仍是临时预览；显式送审产生`sirna-tool-curation-trace/v1`，独立Agent返回`sirna-tool-curation-result/v1`。trace沿原版主字段，增加sourceSha256、previewSha256、signals、evidenceMetadata；inputSha256允许null明确表示原输入不可用。完整触发组不代表完整原始正文，truncated独立保留。
 
@@ -12,6 +18,6 @@
 
 构建交接：tool-curation-build-contract组织固定消息及三个摘要，store在runtime/tool-curation-build/builds.sqlite先保存不可变交接单，service通过TaskMessageService向原任务派发固定auto-tool-curation-build:<curationId>消息。GET异步核验Compose/Builder/任务状态；POST冻结建议/来源并去重，恢复时未完成票据只记outcome_unknown，不重发。注册策略从真实激活轮身份、最新持久消息与事件检查来源，通过能力平台登记事务保存精确curation关联；旧registry schema不变、每票据最多一个提案、未知提交锁不能由另一构建会话绕过。
 
-边界：规则预览不派发；Curator的candidate是建议，只有用户显式交接且实际登记后才有能力平台的submitted提案。构建沿用原任务的Pi与六个OCI构建操作；仅接受node/空dependencies/exact/no_external_access/无parent，工具名称冻结。未接自动观察、online_gap、自动Builder、自动验证或批准。结构与引用检查不证明建议正确或有收益；JSON.parse沿用标准重复键语义。预览/trace仅常见字段脱敏，不承诺消除任意私密文本。
+边界：规则预览和报告都不派发；Curator的candidate是建议，只有用户显式交接且实际登记后才有能力平台的submitted提案。构建沿用原任务的Pi与六个OCI构建操作；仅接受node/空dependencies/exact/no_external_access/无parent，工具名称冻结。已接online_gap证据来源，未接自动观察/冷却、自动Builder、自动验证或批准。结构与引用检查不证明建议正确或有收益；JSON.parse沿用标准重复键语义。预览/trace仅常见字段脱敏，不承诺消除任意私密文本。
 
 参考：sirna-pi-agent-service-refactor@67d275494c50f1e5c205b96b72a7b1623acfbe1d 的同目录 MODULE、trace、coordinator 和 agent-tool-curator。未发现参考根目录 LICENSE/NOTICE，本模块按公开职责与行为独立实现，未复制原模块。

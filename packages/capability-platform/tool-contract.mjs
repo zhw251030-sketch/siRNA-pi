@@ -1,6 +1,7 @@
 // Independently implemented from the observable contract at reference checkout
 // 67d2754 (application 965c53f). This module checks data; it has no runner.
 import { toolValidationContract } from './tool-validation.mjs';
+import { isReservedToolName } from './tool-names.mjs';
 export * from './tool-validation.mjs';
 
 const runtimes = ['bash', 'python', 'node'];
@@ -176,7 +177,10 @@ export function validateToolProposalInput(value) {
   boundedText(value.description, 'description', 10, 1000);
   member(value.runtime, runtimes, 'runtime');
   sourceText(value.script, 'script');
-  if (Object.hasOwn(value, 'toolName')) pattern(value.toolName, toolNamePattern, 'toolName');
+  if (Object.hasOwn(value, 'toolName')) {
+    pattern(value.toolName, toolNamePattern, 'toolName');
+    if (isReservedToolName(value.toolName)) throw new Error('toolName is reserved for a control tool');
+  }
   if (Object.hasOwn(value, 'repeatabilityMode')) member(value.repeatabilityMode, modes, 'repeatabilityMode');
   if (Object.hasOwn(value, 'smokeInput')) businessInput(value.smokeInput, 'smokeInput', true);
   if (Object.hasOwn(value, 'dependencies')) dependencies(value.dependencies, value.runtime);

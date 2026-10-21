@@ -1,6 +1,20 @@
 # siRNA-pi 协作规则
 
-## 最新完成：第11C步（2026-10-22）
+## 最新完成：第11D步（2026-10-22）
+
+已完成report_tool_gap→可信缺口记录→结束轮次预览→人工Curator→既有Builder说明/人工交接。教学入口docs/32-Agent主动报告能力缺口.md。参考67d2754只读；下一步对照coordinator逐步学习自动观察/能力冷却，当前不自动审查、构建、验证或批准。个人main和远端唯一根规则不变，不混入其他RSI研究项目。
+
+新增tool-gap-contract/store/service，独立runtime/tool-gaps/gaps.sqlite（schema1/应用身份/链接检查/不可变摘要/事务唯一）。来源五字段从activated lease取得，校验正在执行的task/session/run/latest user、引用属于本轮、无终态/冻结。每轮最多10报告/32KiB，单草案4KiB，重复能力保留第一份。能力键保留Unicode字母数字并拒绝空键，是区别于原版ASCII/基本汉字+占位名的明确本地规则。
+
+私有POST /v1/tool-gaps在body前后鉴权，取消检查紧邻同步落库，纳入关闭排空；新保存202/重复200，固定candidateCreated/toolCreated=false。MCP独立reportTools类别、固定route/严格响应/无重试，经relay转接；公共网页没有报告写接口。gap-only可送审，不伪造重复signals；online_gap trace冻结完整报告和公共引用事件，64KiB超限拒绝。candidate须引用同能力报告ID；报告是主张，blocking只是Agent判断。无gap时旧预览/trace摘要兼容，旧curation schema不改。
+
+最终审查发现并修复新控制名碰撞：tool-names.mjs共享谓词拒绝report_tool_gap及sirna_tools_别名，Curator/Builder/提案登记前检查，拒绝时无材料落盘；未修改旧hashed工具目录。8项回归RED6fail→GREEN8/8，实际旧c418659摘要/字节保持，独立复审通过。最终Linux1406项1404pass/2Windows专属skip/0fail/0cancel，389.92秒；首次1398项也通过，因上述源修复才完整重跑。本轮新增46行为项。Windows核心121项120pass/1skip、接线118/118、修复相关245项244pass/1skip有交集，不相加、不宣称Windows全套通过。
+
+实际Pi1.2.0/adapter2.11.0/stdio在无外网临时guest报告一次、零重试、上下文绑定通过，0模型/生产存储；临时容器释放、空workspace保留。隔离网页1报告/1固定审查candidate，Builder说明可读，0handoff/真实模型，明确隔离标记与证据保留。生产16任务14有轮次/2no_run/0eligible/0gap/0curation/0handoff；公共报告404/私有未鉴权401，其他门禁通过。六旧DB全schema/行、旧证据树/catalog/两个旧guest和正式active1.0.1保持；0新业务任务/提案/验证/批准。
+
+新建任务配置sirna-pi-learning-tool-gap、镜像sirna-pi-guest:pi1.2.0-mcp5（efff5a45238e…），旧任务不迁移。controller/relay已更新；最终API PID1840451，隧道288176，127.0.0.1:3000，不设自启。命名修复仅host代码，无需重建guest。私有证据runtime/tool-gap-*不进Git；最终main提交/三端同步以tool-gap-sync.json和Git读回为准。全部远端工作在指定项目内，无root/系统变更。
+
+## 历史完成：第11C步（2026-10-22）
 
 已接通显式 Curator candidate→Builder 交接，教学入口 docs/31-Curator建议交给Builder.md。沿参考67d2754把固定消息交给原任务Pi新一轮，复用已有TaskMessageService和六个OCI构建操作；不另建Builder Agent。下一步对照原版report_tool_gap补明确能力缺口报告；不重复11A/B/C，不自动观察、派发、验证或批准。
 

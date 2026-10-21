@@ -20,7 +20,8 @@ function rowRecord(row,full=true){
   const trace=JSON.parse(row.trace_json);
   assertCurationJson(trace,{maxDepth:32,maxBytes:65536});
   if(trace.traceSha256!==row.trace_sha256||traceSha256(trace)!==row.trace_sha256||trace.curationId!==row.id||trace.taskId!==row.task_id||trace.runId!==row.run_id||trace.userMessageId!==row.user_message_id||trace.sourceSha256!==row.source_sha256||trace.previewSha256!==row.preview_sha256)throw Error('Frozen trace digest or binding mismatch');
-  const record={id:row.id,taskId:row.task_id,runId:row.run_id,userMessageId:row.user_message_id,trigger:'post_run',status:row.status,sourceSha256:row.source_sha256,previewSha256:row.preview_sha256,traceSha256:row.trace_sha256,requestedAt:row.requested_at};
+  if(!['post_run','online_gap'].includes(trace.trigger))throw Error('Invalid frozen trigger');
+  const record={id:row.id,taskId:row.task_id,runId:row.run_id,userMessageId:row.user_message_id,trigger:trace.trigger,status:row.status,sourceSha256:row.source_sha256,previewSha256:row.preview_sha256,traceSha256:row.trace_sha256,requestedAt:row.requested_at};
   for(const [key,column] of Object.entries({startedAt:'started_at',completedAt:'completed_at',curatorSessionId:'curator_session_id',curatorRunId:'curator_run_id',error:'error'}))if(row[column]!==null)record[key]=row[column];
   if(full)record.trace=trace;
   if(row.result_json!==null)record.result=JSON.parse(row.result_json);
@@ -86,7 +87,7 @@ export class ToolCurationStore {
   list(taskId){return this.#db.prepare('SELECT * FROM curations WHERE task_id=? ORDER BY requested_at DESC,id DESC LIMIT 100').all(taskId).map(r=>rowRecord(r,false));}
   create(trace){
     assertCurationJson(trace,{maxDepth:32,maxBytes:65536});
-    if(trace.protocolVersion!==TOOL_CURATION_TRACE_PROTOCOL||trace.trigger!=='post_run'||trace.traceSha256!==traceSha256(trace))throw Error('Invalid frozen trace');
+    if(trace.protocolVersion!==TOOL_CURATION_TRACE_PROTOCOL||!['post_run','online_gap'].includes(trace.trigger)||trace.traceSha256!==traceSha256(trace))throw Error('Invalid frozen trace');
     for(const field of ['curationId','taskId','runId','userMessageId','sourceSha256','previewSha256'])if(typeof trace[field]!=='string'||!trace[field])throw Error('Incomplete frozen trace binding');
     return this.#transaction(()=>{
       const old=this.find(trace.taskId,trace.runId);

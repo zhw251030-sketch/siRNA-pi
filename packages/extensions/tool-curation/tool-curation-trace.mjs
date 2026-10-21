@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import {validateGapReports} from './tool-gap-contract.mjs';
 
 // Independent preview protocol. Digests describe saved public records, not
 // original provider requests. No model, filesystem, catalog or runtime access.
@@ -16,22 +17,23 @@ function textSafe(value) {
     .replace(/(--(?:api[-_]?key|token|password|secret)\s+)[^\s"']+/gi,'$1[REDACTED]')
     .replace(/("(?:api[-_]?key|authorization|password|token|secret)"\s*:\s*)"(?:\\.|[^"\\])*"/gi,'$1"[REDACTED]"');
 }
-function sanitize(v, key='', depth=0) {
+export function sanitizeCurationEvidence(v, key='', depth=0, {complete=false}={}) {
   if(secret.test(key)) return '[REDACTED]';
-  if(depth>16) return '[truncated]';
+  if(depth>16 && !complete) return '[truncated]';
   if(typeof v==='string') {
     if(/^[\[{\"]/.test(v.trim())) {
-      try { return JSON.stringify(sanitize(JSON.parse(v),'',depth+1)); } catch { /* text fallback */ }
+      try { return JSON.stringify(sanitizeCurationEvidence(JSON.parse(v),'',depth+1,{complete})); } catch { /* text fallback */ }
     }
     return textSafe(v);
   }
-  if(Array.isArray(v)) return [...v.slice(0,500).map(x=>sanitize(x,'',depth+1)),...(v.length>500?['[truncated]']:[])];
+  if(Array.isArray(v)) return [...(complete?v:v.slice(0,500)).map(x=>sanitizeCurationEvidence(x,'',depth+1,{complete})),...(!complete&&v.length>500?['[truncated]']:[])];
   if(object(v)) {
     const entries=Object.entries(v);
-    return Object.fromEntries([...entries.slice(0,500).map(([k,x])=>[textSafe(k),sanitize(x,k,depth+1)]),...(entries.length>500?[['[truncated]',true]]:[])]);
+    return Object.fromEntries([...(complete?entries:entries.slice(0,500)).map(([k,x])=>[textSafe(k),sanitizeCurationEvidence(x,k,depth+1,{complete})]),...(!complete&&entries.length>500?[['[truncated]',true]]:[])]);
   }
   return v;
 }
+const sanitize=sanitizeCurationEvidence;
 function clip(value, max=1400) {
   const s = typeof value==='string' ? value : JSON.stringify(value ?? null);
   if(Buffer.byteLength(s)<=max) return s;
@@ -74,7 +76,7 @@ function capability(name, input) {
   return `tool:${name}`;
 }
 
-export function buildCurationPreview({taskId,runId,userMessageId,objective='',events,existingTools=[]}) {
+export function buildCurationPreview({taskId,runId,userMessageId,objective='',events,existingTools=[],gapReports=[]}) {
   if(!Array.isArray(events)) throw new TypeError('events must be an array');
   const eventIds=new Set();
   for(const event of events) {
@@ -82,6 +84,7 @@ export function buildCurationPreview({taskId,runId,userMessageId,objective='',ev
     if(typeof event.id!=='string' || !event.id) throw new TypeError('event identity required');
     if(eventIds.has(event.id)) throw new TypeError('duplicate event identity');eventIds.add(event.id);
   }
+  gapReports=validateGapReports(gapReports,{taskId,runId,userMessageId,events});
   const existing=new Set(existingTools.map(t=>normalizedTool(typeof t==='string'?t:t?.name)).filter(Boolean));
   const starts=events.filter(e=>e.type==='tool_start');
   const groups=new Map();const calls=[];const excludedDetails=[];let excludedCalls=0,incompleteCalls=0;
@@ -134,6 +137,13 @@ export function buildCurationPreview({taskId,runId,userMessageId,objective='',ev
   preview.limits.omittedExcludedCalls=Math.max(0,excludedDetails.length-20);
   if(preview.limits.omittedExcludedCalls) preview.limits.displayTruncated=true;
   if(shown.some(c=>c.inputPreview.includes('[truncated]') || c.outputPreview?.includes('[truncated]'))) preview.limits.displayTruncated=true;
+  if(gapReports.length){
+    preview.gapReports=gapReports;
+    preview.eligibleForReview=true;
+    preview.sourceSha256=hash({taskId,runId,userMessageId,objective,events,existingTools:[...existing].sort(),gapReports});
+    // Complete report payloads cannot be silently reduced to fit an envelope.
+    if(Buffer.byteLength(JSON.stringify({...preview,previewSha256:'0'.repeat(64)}))>65536)throw new RangeError('Gap preview exceeds byte limit');
+  }
   // Reserve the final hash in the byte budget; bounded metadata above normally
   // stays below 64 KiB, but never silently exceed the published envelope.
   while(Buffer.byteLength(JSON.stringify({...preview,previewSha256:'0'.repeat(64)}))>65536) {

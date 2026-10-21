@@ -3,6 +3,7 @@ import http from 'node:http';
 import {randomUUID} from 'node:crypto';
 import {validateApprovedToolArguments} from '../../packages/capability-platform/tool-approved-execution.mjs';
 import {createToolBuildApi} from './tool-build-api.mjs';
+import {createToolGapApi} from './tool-gap-api.mjs';
 
 const LIMIT=262144;
 function fail(status,message){throw Object.assign(new Error(message),{status});}
@@ -36,9 +37,11 @@ function publicContent(result){
   if(!Array.isArray(result?.content)||!result.content.length||result.content.some(x=>x?.type!=='text'||typeof x.text!=='string')||Buffer.byteLength(JSON.stringify(result.content))>LIMIT)throw new Error('Invalid tool content');
   return {content:result.content.map(({text})=>({type:'text',text}))};
 }
-export function createAgentToolsServer({leases,discover,builders}={}){
+export function createAgentToolsServer({leases,discover,builders,toolGaps}={}){
   if(typeof leases?.authorize!=='function'||typeof discover!=='function')throw new TypeError('Explicit leases and discovery are required');
   const accepted=new Set();let busy=false;
+  const gapApi=createToolGapApi({toolGaps,authorize:(req,call)=>authorize(req,leases,call),readBody:body,respond,
+    async track(operation,reply){accepted.add(operation);try{await reply();}finally{accepted.delete(operation);}}});
   const buildApi=createToolBuildApi({builders,authorize:(req,call)=>authorize(req,leases,call),readBody:body,respond,
     async track(operation,reply){accepted.add(operation);try{await reply();}finally{accepted.delete(operation);}}});
   async function load(taskContext){
@@ -53,6 +56,7 @@ export function createAgentToolsServer({leases,discover,builders}={}){
   }
   const server=http.createServer(async(req,res)=>{
     try{
+      if(await gapApi(req,res))return;
       if(await buildApi(req,res))return;
       const list=req.url==='/v1/agent-tools';const match=/^\/v1\/agent-tools\/([a-z][a-z0-9_]{0,63})\/call$/.exec(req.url??'');
       if(!list&&!match)fail(404,'Unknown tool endpoint');

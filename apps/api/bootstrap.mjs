@@ -30,6 +30,8 @@ import { createToolCurationService } from "../../packages/extensions/tool-curati
 import { createAgentToolCurator } from "../../packages/extensions/tool-curation/agent-tool-curator.mjs";
 import { ToolCurationBuildStore } from "../../packages/extensions/tool-curation/tool-curation-build-store.mjs";
 import { createToolCurationBuildService } from "../../packages/extensions/tool-curation/tool-curation-build-service.mjs";
+import { ToolGapStore } from "../../packages/extensions/tool-curation/tool-gap-store.mjs";
+import { createToolGapService } from "../../packages/extensions/tool-curation/tool-gap-service.mjs";
 import { createApiShutdown, startApiServices, createCurationBuildRegistrationPolicy } from "./service-lifecycle.mjs";
 
 process.umask(0o077);
@@ -48,12 +50,13 @@ if (fs.realpathSync(dockerSocket) !== dockerSocket || !fs.lstatSync(dockerSocket
 const docker = new DockerEngineClient(dockerSocket);
 const runner = createDockerValidationRunner({ docker, purpose: 'approved-call' });
 const toolCallLeases = createToolCallLeases();
-let toolRepair, toolCurationBuild;
+let toolRepair, toolCurationBuild, toolGaps;
 const builders = createTaskToolBuilders({root: projectRoot,docker,registrationPolicy:(input,context)=>{
   if(!toolRepair)throw new Error('Tool repair admission is unavailable');
   return toolRepair.registration(input,context);
 },curationRegistrationPolicy:createCurationBuildRegistrationPolicy(()=>toolCurationBuild)});
 const toolsServer = createAgentToolsServer({ leases: toolCallLeases, builders,
+  toolGaps:{report:(input,context)=>{if(!toolGaps)throw Object.assign(new Error('Report service unavailable'),{statusCode:503});return toolGaps.report(input,context);}},
   discover: ({taskContext}) => discoverApprovedTools({ root: projectRoot, runner, taskContext }) });
 await listenToolSocket(toolsServer, {root: projectRoot});
 const compose = new AgentComposeRuntime({ root: projectRoot, executor: createComposeExecutor(projectRoot), rpc, toolCallLeases, toolBuildersAvailable:true });
@@ -71,15 +74,17 @@ toolRepair=createToolRepair({root:projectRoot,store:repairStore,taskStore,taskMe
 const listExistingTools = () => [
   'enumerate_sirna_candidates', ...getRegisteredToolCatalog({root: projectRoot}).tools.map(tool => tool.toolName),
 ];
-const toolCurationPreview = createToolCurationPreview({taskStore, listExistingTools});
+const toolCurationPreview = createToolCurationPreview({taskStore, listExistingTools,listGapReports:(taskId,runId)=>toolGaps.list(taskId,runId)});
 const curatorRuntime = new AgentComposeRuntime({root:projectRoot,agentName:'tool-curator',executor:createComposeExecutor(projectRoot,{agentName:'tool-curator'}),rpc:curatorRpc});
 const curationStore = new ToolCurationStore({root:projectRoot});
+const gapStore = new ToolGapStore({root:projectRoot});
+toolGaps = createToolGapService({store:gapStore,taskStore,curationStore});
 const toolCuration = createToolCurationService({store:curationStore,preview:toolCurationPreview,curator:createAgentToolCurator({runtime:curatorRuntime,timeoutMs:180000})});
 const curationBuildStore = new ToolCurationBuildStore({root:projectRoot});
 toolCurationBuild = createToolCurationBuildService({root:projectRoot,store:curationBuildStore,curationStore,taskStore,taskMessages,agentRuntime,listExistingTools});
 const server = createAppServer({ taskStore, agentRuntime, workspaceFiles, taskMessages, toolMaintenance, toolRepair, toolCurationPreview, toolCuration, toolCurationBuild });
 const shutdown = createApiShutdown({server,toolMaintenance,toolRepair,toolCuration,toolCurationBuild,toolsServer,
-  stores:[taskStore,maintenanceStore,repairStore,curationStore,curationBuildStore],rpcs:[rpc,curatorRpc]});
+  stores:[taskStore,maintenanceStore,repairStore,curationStore,curationBuildStore,gapStore],rpcs:[rpc,curatorRpc]});
 const shutdownFailure = () => {console.error('服务停止未完全确认，请检查项目内私有运行记录。');process.exitCode=1;};
 server.listen(3000, "127.0.0.1", () => {
   // Never recover or claim jobs until this instance owns the listening socket.

@@ -1,4 +1,6 @@
 import {createHash} from 'node:crypto';
+import {validateGapReports} from './tool-gap-contract.mjs';
+import {sanitizeCurationEvidence} from './tool-curation-trace.mjs';
 
 export const TOOL_CURATION_TRACE_PROTOCOL='sirna-tool-curation-trace/v1';
 export const TOOL_CURATION_RESULT_PROTOCOL='sirna-tool-curation-result/v1';
@@ -45,7 +47,8 @@ export function buildToolCurationTrace({id,snapshot}){
   const {previewSha256,...body}=preview;
   if(curationSha256(body)!==previewSha256)throw Error('Preview digest mismatch');
   const signals=preview.signals.filter(s=>s.evidenceComplete===true);
-  if(!preview.eligibleForReview || !signals.length)throw Error('No complete triggering signal');
+  const gapReports=validateGapReports(preview.gapReports??[],{taskId:preview.taskId,runId:preview.runId,userMessageId:preview.userMessageId,events});
+  if(!preview.eligibleForReview || !signals.length && !gapReports.length)throw Error('No complete triggering signal');
   const ids=new Set(signals.flatMap(s=>s.evidenceEventIds)),eventMap=new Map(events.map(e=>[e.id,e]));
   const calls=preview.calls.filter(c=>ids.has(c.startEventId) && ids.has(c.endEventId)).map(call=>{
     const start=eventMap.get(call.startEventId),end=eventMap.get(call.endEventId);
@@ -55,6 +58,10 @@ export function buildToolCurationTrace({id,snapshot}){
   });
   const included=new Set(calls.flatMap(c=>[c.startEventId,c.endEventId]));
   if([...ids].some(id=>!included.has(id)))throw Error('Trigger evidence is missing');
-  const trace={protocolVersion:TOOL_CURATION_TRACE_PROTOCOL,curationId:id,trigger:'post_run',taskId:preview.taskId,runId:preview.runId,userMessageId:preview.userMessageId,objective:preview.objective,existingTools:[...existingTools],calls,gapReports:[],truncated:preview.limits.displayTruncated===true,sourceSha256:preview.sourceSha256,previewSha256,signals:structuredClone(signals),evidenceMetadata:{shapeSource:'sanitized_preview',originalInputsAvailable:false,completeTriggerEvidence:true,sourceHashScope:preview.limits.sourceHashScope}};
+  const trace={protocolVersion:TOOL_CURATION_TRACE_PROTOCOL,curationId:id,trigger:gapReports.length?'online_gap':'post_run',taskId:preview.taskId,runId:preview.runId,userMessageId:preview.userMessageId,objective:preview.objective,existingTools:[...existingTools],calls,gapReports,truncated:preview.limits.displayTruncated===true,sourceSha256:preview.sourceSha256,previewSha256,signals:structuredClone(signals),evidenceMetadata:{shapeSource:'sanitized_preview',originalInputsAvailable:false,completeTriggerEvidence:true,sourceHashScope:preview.limits.sourceHashScope}};
+  if(gapReports.length){
+    const gapIds=new Set(gapReports.flatMap(r=>r.evidenceEventIds));
+    trace.gapEvidence=events.filter(e=>gapIds.has(e.id)).map(e=>sanitizeCurationEvidence(e,'',0,{complete:true}));
+  }
   trace.traceSha256=traceSha256(trace);assertCurationJson(trace,{maxDepth:32,maxBytes:65536});return trace;
 }

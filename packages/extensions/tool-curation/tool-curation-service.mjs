@@ -67,7 +67,7 @@ export function createToolCurationService({store,preview,curator}){
       try{snapshot=preview.snapshot(taskId,binding.runId);}catch(error){if(Number.isInteger(error.statusCode))fail(error.statusCode,error.message);fail(503,'Saved preview evidence is unavailable.');}
       if(!snapshot.preview)fail(404,'No saved run was found.');
       if(snapshot.preview.sourceSha256!==binding.sourceSha256||snapshot.preview.previewSha256!==binding.previewSha256)fail(409,'Preview changed; refresh before requesting review.');
-      if(!snapshot.preview.eligibleForReview||!snapshot.preview.signals.some(s=>s.evidenceComplete))fail(409,'No complete eligible triggering evidence is available.');
+      if(!snapshot.preview.eligibleForReview||!snapshot.preview.signals.some(s=>s.evidenceComplete)&&!snapshot.preview.gapReports?.length)fail(409,'No complete eligible triggering evidence is available.');
       let trace;
       try{trace=buildToolCurationTrace({id:randomUUID(),snapshot});}catch(error){fail(error instanceof RangeError?413:409,'Frozen evidence cannot be represented completely within the review envelope.');}
       const result=storage(()=>store.create(trace));

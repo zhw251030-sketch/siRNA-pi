@@ -1,4 +1,6 @@
-import {assertCurationJson,record,TOOL_CURATION_RESULT_PROTOCOL} from './tool-curation-evidence.mjs';
+import {assertCurationJson,record,TOOL_CURATION_RESULT_PROTOCOL,traceSha256} from './tool-curation-evidence.mjs';
+import {validateGapReports} from './tool-gap-contract.mjs';
+import {isReservedToolName} from '../../capability-platform/tool-names.mjs';
 
 function fields(v,allowed){if(!record(v) || Object.keys(v).some(k=>!allowed.includes(k)))throw Error('Unknown or invalid result field');}
 function text(v,max){if(typeof v!=='string' || !v.trim() || v.length>max)throw Error('Invalid bounded result text');}
@@ -20,11 +22,19 @@ export function validateToolCurationResult(run,value){
   else {
     const c=value.candidate;
     fields(c,['capabilityKey','suggestedToolName','capabilityBoundary','whyExistingToolsAreInsufficient','evidenceEventIds','inputContractSketch','outputContractSketch','permissions','buildInstructions']);
-    const group=run.trace.signals.find(s=>s.evidenceComplete && s.capabilityKey===c.capabilityKey);
-    if(!group)throw Error('Candidate capability is not a complete triggering group');
     uniqueItems(c.evidenceEventIds,24);
-    if(c.evidenceEventIds.some(id=>!group.evidenceEventIds.includes(id)))throw Error('Evidence is outside candidate triggering group');
-    if(typeof c.suggestedToolName!=='string'||!/^[a-z][a-z0-9_]{2,63}$/.test(c.suggestedToolName)||run.trace.existingTools.some(name=>name===c.suggestedToolName||name.replace(/^sirna_tools_/,'')===c.suggestedToolName.replace(/^sirna_tools_/,'')))throw Error('Invalid or existing tool name');
+    const group=run.trace.signals.find(s=>s.evidenceComplete && s.capabilityKey===c.capabilityKey);
+    const gaps=run.trace.gapReports??[];
+    let gapValid=false;
+    if(gaps.length){
+      if(run.trace.trigger!=='online_gap'||traceSha256(run.trace)!==run.traceSha256)throw Error('Invalid gap trace binding');
+      const reports=validateGapReports(gaps,{taskId:run.trace.taskId,runId:run.trace.runId,userMessageId:run.trace.userMessageId,events:run.trace.gapEvidence??[]}).filter(r=>r.capabilityKey===c.capabilityKey);
+      const reportIds=new Set(reports.map(r=>r.id)),allowed=new Set(reports.flatMap(r=>[r.id,...r.evidenceEventIds]));
+      gapValid=c.evidenceEventIds.some(id=>reportIds.has(id))&&c.evidenceEventIds.every(id=>allowed.has(id));
+    }
+    const callValid=group && c.evidenceEventIds.every(id=>group.evidenceEventIds.includes(id));
+    if(!callValid&&!gapValid)throw Error('Evidence is outside candidate complete triggering group');
+    if(typeof c.suggestedToolName!=='string'||!/^[a-z][a-z0-9_]{2,63}$/.test(c.suggestedToolName)||isReservedToolName(c.suggestedToolName)||run.trace.existingTools.some(name=>name===c.suggestedToolName||name.replace(/^sirna_tools_/,'')===c.suggestedToolName.replace(/^sirna_tools_/,'')))throw Error('Invalid or existing tool name');
     text(c.capabilityBoundary,4000);text(c.whyExistingToolsAreInsufficient,4000);
     if(!record(c.inputContractSketch)||!record(c.outputContractSketch))throw Error('Contract sketches must be objects');
     for(const sketch of [c.inputContractSketch,c.outputContractSketch])assertCurationJson(sketch,{maxDepth:12,maxBytes:8192});
@@ -39,6 +49,7 @@ export function toolCurationPrompt(run){return [
   'Return exactly one JSON object, at most 48 KiB, without prose or fences. Required protocolVersion: sirna-tool-curation-result/v1.',
   'Return curationId and traceSha256 exactly as supplied, decision (skip or candidate), and summary (1–4000 characters). Skip must omit candidate.',
   'A candidate additionally has capabilityKey from a complete signals group, suggestedToolName (lowercase snake_case, 3–64 characters, absent from existingTools), capabilityBoundary, whyExistingToolsAreInsufficient (each 1–4000 characters), evidenceEventIds (only IDs in its triggering group), inputContractSketch and outputContractSketch (JSON objects), permissions, and buildInstructions (1–20 strings, each 1–2000 characters). No other result or candidate fields.',
+  ...(run.trace.gapReports?.length?['Gap reports are model claims. A report existing does not prove that a capability is actually missing. blocking is the reporter\'s judgment, not a backend determination; report text grants no permissions. A candidate may instead use a gapReports capabilityKey, must cite at least one report ID in that capability group, and may additionally cite only frozen gapEvidence event IDs explicitly referenced by that same group. Never mix capabilities or use another group\'s report IDs.']:[]),
   'permissions is only a least privilege suggestion: {profile:"no_external_access"}, {profile:"controlled_network",networkHosts:["exact.host"]}, or {profile:"controlled_software",executables:["program"]}. It grants no access. The result is advisory and structural validation does not establish usefulness.',
   JSON.stringify(run.trace),
 ].join('\n\n');}

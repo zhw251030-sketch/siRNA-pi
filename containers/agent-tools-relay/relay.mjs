@@ -14,6 +14,18 @@ function repairRejection(output){
   if(e.protocolVersion!=='sirna-builder-rejection/v1'||e.code!=='repair_contract_mismatch'||e.outcome!=='not_registered'||!Array.isArray(e.fields)||!e.fields.length||e.fields.length>fields.length||e.fields.some(f=>!fields.includes(f))||new Set(e.fields).size!==e.fields.length)throw new Error('unavailable');
   return Buffer.from(JSON.stringify({error:{protocolVersion:'sirna-builder-rejection/v1',code:'repair_contract_mismatch',outcome:'not_registered',fields:fields.filter(f=>e.fields.includes(f))}}));
 }
+function gapResponse(output,status,headers){
+  const value=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(output));
+  const object=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
+  const exact=(v,keys)=>object(v)&&Object.keys(v).length===keys.length&&keys.every(k=>Object.hasOwn(v,k));
+  const text=v=>typeof v==='string'&&v.length>0;
+  const uuid=v=>typeof v==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(v);
+  if(!exact(value,['report','deduplicated','candidateCreated','toolCreated','nextGate'])||typeof value.deduplicated!=='boolean'||status!==(value.deduplicated?200:202)||value.candidateCreated!==false||value.toolCreated!==false||value.nextGate!=='finish_current_turn_then_manual_curator_review')throw new Error('unavailable');
+  const r=value.report;
+  if(!exact(r,['id','taskId','runId','userMessageId','capability','capabilityKey','blocking','reason','desiredInput','desiredOutput','evidenceEventIds','createdAt','source','reportSha256'])||!['id','taskId','runId','userMessageId','capability','capabilityKey','reason','createdAt'].every(k=>text(r[k]))||typeof r.blocking!=='boolean'||!object(r.desiredInput)||!object(r.desiredOutput)||!Array.isArray(r.evidenceEventIds)||r.evidenceEventIds.some(id=>!text(id))||!/^[a-f0-9]{64}$/.test(r.reportSha256)||!exact(r.source,['taskId','executionSessionId','sandboxId','agentTurnId','agentRunId'])||Object.values(r.source).some(v=>!text(v))||r.taskId!==headers['x-sirna-task-id']||r.source.taskId!==r.taskId||r.source.agentRunId!==r.runId||r.source.agentTurnId!==headers['x-sirna-agent-turn-id'])throw new Error('unavailable');
+  if(!['id','taskId','userMessageId'].every(k=>uuid(r[k]))||!['taskId','executionSessionId','agentTurnId'].every(k=>uuid(r.source[k]))||!/^[a-f0-9]{64}$/.test(r.source.sandboxId)||!/^[A-Za-z0-9_-]{1,256}$/.test(r.runId)||!Number.isFinite(Date.parse(r.createdAt)))throw new Error('unavailable');
+  return output;
+}
 function reply(res,status,body=errorBody){
   if(res.destroyed||res.writableEnded)return;
   res.writeHead(status,{'content-type':'application/json','content-length':body.length,'cache-control':'no-store'});res.end(body);
@@ -35,11 +47,12 @@ export function createToolRelay({socketPath,timeoutMs=30000,builderTimeoutMs=310
     try{
       const list=req.method==='GET'&&req.url==='/v1/agent-tools';
       const call=req.method==='POST'&&/^\/v1\/agent-tools\/[a-z][a-z0-9_]{0,63}\/call$/.test(req.url);
+      const gap=req.method==='POST'&&req.url==='/v1/tool-gaps';
       const id='[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
       const create=req.method==='POST'&&(req.url==='/v1/build-sessions'||req.url==='/v1/tool-proposals');
       const build=create||req.method==='DELETE'&&new RegExp(`^/v1/build-sessions/${id}$`).test(req.url)||req.method==='PUT'&&new RegExp(`^/v1/build-sessions/${id}/files$`).test(req.url)||req.method==='POST'&&new RegExp(`^/v1/build-sessions/${id}/(?:exec|finalize)$`).test(req.url);
-      if(!list&&!call&&!build){req.resume();reply(res,404);return;}
-      const signal=AbortSignal.timeout(build?builderTimeoutMs:timeoutMs);const requestLimit=build?1048576:262144;
+      if(!list&&!call&&!build&&!gap){req.resume();reply(res,404);return;}
+      const signal=AbortSignal.timeout(build?builderTimeoutMs:timeoutMs);const requestLimit=gap?32768:build?1048576:262144;
       const headers={};
       for(const name of ['authorization','x-sirna-task-id','x-sirna-agent-turn-id']){
         let count=0;for(let i=0;i<req.rawHeaders.length;i+=2)if(req.rawHeaders[i].toLowerCase()===name)count++;
@@ -53,17 +66,22 @@ export function createToolRelay({socketPath,timeoutMs=30000,builderTimeoutMs=310
       // Reading a slow body never inherits the long Docker operation deadline.
       const body=await readBounded(req,requestLimit,AbortSignal.any([signal,AbortSignal.timeout(15000)]));
       if((list||req.method==='DELETE')&&body.length){reply(res,400);return;}
-      if(call||build&&req.method!=='DELETE')headers['content-type']=req.headers['content-type']??'application/json';headers['content-length']=body.length;
+      if(call||gap||build&&req.method!=='DELETE')headers['content-type']=req.headers['content-type']??'application/json';headers['content-length']=body.length;
       const result=await new Promise((resolve,reject)=>{
         const upstream=http.request({socketPath,path:req.url,method:req.method,headers,signal},async response=>{
           try{
+            if(gap&&[200,202].includes(response.statusCode)){
+              if(Number(response.headers['content-length'])>65536||!/^application\/json(?:;\s*charset=utf-8)?$/i.test(response.headers['content-type']??'')){response.destroy();throw new Error('unavailable');}
+              let output;try{output=await readBounded(response,65536,signal);gapResponse(output,response.statusCode,headers);}catch{response.destroy();throw new Error('unavailable');}
+              resolve({status:response.statusCode,body:output});return;
+            }
             if(req.method==='POST'&&req.url==='/v1/tool-proposals'&&response.statusCode===409){
               try{
                 if(Number(response.headers['content-length'])>2048||!/^application\/json(?:;\s*charset=utf-8)?$/i.test(response.headers['content-type']??''))throw new Error('unavailable');
                 const output=await readBounded(response,2048,signal);resolve({status:409,body:repairRejection(output)});return;
               }catch{response.destroy();const error=new Error('upstream');error.upstreamStatus=409;throw error;}
             }
-            if(response.statusCode!==(create?201:200)){response.resume();const error=new Error('upstream');error.upstreamStatus=response.statusCode;throw error;}
+            if(gap||response.statusCode!==(create?201:200)){response.resume();const error=new Error('upstream');error.upstreamStatus=response.statusCode;throw error;}
             if(Number(response.headers['content-length'])>300000){response.destroy();throw new Error('large response');}
             let output;try{output=await readBounded(response,300000,signal);}catch{response.destroy();throw new Error('response unavailable');}
             const value=JSON.parse(output.toString('utf8'));

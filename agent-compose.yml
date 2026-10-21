@@ -1,5 +1,5 @@
 # A new project identity preserves existing tasks and their guest revisions.
-name: sirna-pi-learning-builder-feedback
+name: sirna-pi-learning-tool-gap
 mcp_servers:
   sirna-tools:
     type: local
@@ -9,11 +9,12 @@ mcp_servers:
     env:
       SIRNA_APPROVED_TOOLS_URL: http://agent-tools-relay:7420
       SIRNA_TOOL_BUILDER_URL: http://agent-tools-relay:7420
+      SIRNA_TOOL_GAP_URL: http://agent-tools-relay:7420
 agents:
   designer:
     provider: pi
     model: minimax-cn/MiniMax-M3
-    image: sirna-pi-guest:pi1.2.0-mcp4
+    image: sirna-pi-guest:pi1.2.0-mcp5
     mcp_servers:
       - sirna-tools
     driver:
