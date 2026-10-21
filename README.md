@@ -33,7 +33,8 @@
 - 2026-10-21：第10I步完成1.0.1正式发布、1.0.0人工回退及恢复1.0.1。旧包/报告/镜像保留；同一MCP客户端三次真实调用及版本审计通过。schema4保存版本历史及父关系；0模型/构建/重新验证。1023测试：Linux1021通过/2跳过，Windows1010通过/13跳过。初次Linux测试隔离问题提前迁移数据库，影响核查、修复和复审完整记录见 [工具版本发布与人工回退](docs/22-工具版本发布与人工回退.md)。
 - 2026-10-21：第10J步完成六个Agent构建/提交操作及独立宿主MCP。真实协议完成数值工具构建、洁净源码打包和submitted登记，重复请求保持同一镜像/提案，5个负例及5容器清理核验通过；0模型/独立验证/批准。最终Linux1041项：1039通过/2跳过；初次测试清理失败及修正保留记录。详见 [Agent构建工具与提交候选](docs/23-Agent构建工具与提交候选.md)。
 - 2026-10-21：第10K步将六个构建工具接入真实网页Pi，保留原build/proposal路径分工，新增每轮身份、资源归属与排空清理。真实16响应/19操作，8次构建业务全部成功，数值范围工具得到3/2/6/4并仅登记submitted；另有2次工具说明参数失败，原轨迹保留。4构建容器及新任务guest已释放，文件保留；Linux1057项：1055通过/2跳过。详见 [网页Agent构建工具与任务归属](docs/24-网页Agent构建工具与任务归属.md)。
-- 当前正式工具和六个构建工具均可由新网页任务使用；原正式工具保持1.0.1，两份数值候选尚未独立验证/批准，不在正式目录。下一步学习Curator协调候选、验证与反馈；尚无自动自进化。批准继续使用可信CLI。CPU配额仍不可用，开机自启未配置。
+- 2026-10-21：第10L步完成网页候选列表、显式验证入队、持久维护作业、串行执行及报告摘要。真实网页验证数值范围工具：领域3/3、候选2/2、基线1/2，9业务运行和2语法检查，11容器全部清理；重启/刷新保持同一结果。Linux1084项：1082通过/2跳过，0模型请求。详见 [网页候选验证队列](docs/25-网页候选验证队列.md)。
+- 当前正式工具和六个构建工具均可由新网页任务使用；正式工具保持1.0.1，数值范围候选verified待人工批准，求和/均值候选仍submitted，二者均不在正式目录。先学习验证反馈与受控修订，再接从任务轨迹发现能力的真正Curator；尚无自动自进化。原版automation会自动批准，个人保留人工门是范围收紧，批准仍使用可信CLI。CPU配额仍不可用，开机自启未配置。
 
 安装位置、文件解释和验证记录见 [第 1 步 A：安装与运行 Pi](docs/01-安装与运行Pi.md)。服务器项目目录是 `/home/hanwen/Project/project/siNRA-pi/`，按用户指定拼写保留。
 
@@ -58,6 +59,7 @@ SDK 示例、逐段代码解释和实际结果见 [第 2 步：调用 Pi SDK 创
 | `npm run validate:tool -- <提案UUID>` | 从登记材料重新执行验证，保存报告并更新verified/verification_failed；不是批准 | 否；会真实执行候选和基线并创建临时容器 |
 | `npm run tools:proposals -- report <提案UUID>` | 只读查看最新验证报告，核对报告摘要与登记关系 | 否 |
 | `node scripts/verify-web-tool-builder.mjs 506ee4db-d6c6-4a8c-b1ab-d9bd5b26cb52 ended` | 只读复核第10K步网页构建、来源、清理与输出；10I/10J固定旧提案数检查不再适用 | 否，也不重新执行工具 |
+| `node scripts/verify-web-tool-maintenance.mjs` | 只读复核第10L步固定网页验证样例、报告、11容器清理及旧数据；依赖服务器私有基线 | 否，也不重新执行工具 |
 | `node scripts/tool-builder-mcp.mjs` | 启动可信宿主的六操作构建MCP；网页guest通过独立HTTP客户端使用相同内核 | 启动不调用模型；收到构建/提交call会产生相应容器/镜像/提案 |
 | `npm run tools:proposals -- approve <提案UUID> "<批准人>"` | 显式批准已验证提案；首版1.0.0，后续分配新patch并启用；重复批准不重新激活历史版本 | 否，也不执行候选 |
 | `npm run tools:proposals -- rollback <工具名> <版本> "<操作人>" "<原因>"` | 人工切换到已批准且保留的版本，核对证据、记事件并刷新目录 | 否，也不重新验证或执行工具 |
@@ -187,6 +189,11 @@ packages/capability-platform/tool-validation-static.mjs  执行范围和候选/�
 packages/capability-platform/tool-validation-runner.mjs  源码与镜像绑定、独立容器真实运行
 packages/capability-platform/tool-validation-service.mjs 七项关卡编排与候选/基线比较
 packages/capability-platform/tool-validation-reports.mjs 报告私有保存、摘要与完整性读回
+packages/capability-platform/tool-maintenance-store.mjs  独立作业库、请求去重、领取与暂停
+packages/capability-platform/tool-maintenance-worker.mjs 串行验证调度、恢复/关闭及安全摘要
+packages/capability-platform/tool-maintenance-validation.mjs 复用验证器并保存作业私有证据
+public/tools.mjs                                     全局候选面板、显式验证请求与摘要
+scripts/verify-web-tool-maintenance.mjs               第10L固定完成状态的只读复核
 packages/capability-platform/tool-approved-packages.mjs 正式五文件版本包与加载完整性
 packages/capability-platform/tool-approval-service.mjs  明确批准、首版登记、重复批准及失败状态
 packages/capability-platform/tool-catalog.mjs           从active版本生成并核对目录，显式恢复损坏目录

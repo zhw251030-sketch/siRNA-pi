@@ -276,3 +276,17 @@ finalize要求写入后成功调试，但不等于独立验证。先停止移除
 候选26883ce8-5c2e-4a0e-90fb-d96e53270b9c summarize_numeric_range仅submitted，image45b87208b560b36d8424cba95bebf0a4e3f1981c49efbf1d659aba02354bccf1、source e91e65dcea8747c0b3698faaec9223c6871585f3386e5c99fde344b8a8f405af、package b57eb4bd612e32f26a7287d3867feeb99fb4835823b831a3350364f0bbc18729。所有构建事件/冻结/提交关联有5项可信owner，登记actor web-agent。+1proposal/+1event、0validation/versions；旧21材料/12审计/11会话/2guest、旧任务/登记行、catalog/凭据元数据保持，原active1.0.1。两份数值候选都未独立验证/批准；本次未单独执行成品基准，不声称自进化或自主发现。
 
 最新docs/24-网页Agent构建工具与任务归属.md；只读复核node scripts/verify-web-tool-builder.mjs 506ee4db-d6c6-4a8c-b1ab-d9bd5b26cb52 ended，依赖私有runtime/web-builder-state-before.json且固定当前总数。10J旧总数检查不再适用，保留历史。runtime/web-builder-{completed,ended,linux-01-result,build,recreate,restart}保存证据；同步提交回执留runtime，勿提交敏感/生成目录。下一步按原tool-curation/Curator协调候选、独立验证、失败反馈及人工批准，暂不自动发布或无限循环。个人main持续同步，唯一远端目录不变，不改父级RSI项目。
+
+以上为第10K步历史；以下为当前状态。
+
+2026-10-21：第10L步完成网页候选列表、显式验证入队、独立维护作业库和报告摘要。新增tool-maintenance-store/worker/validation三模块，原validator/runner与可信CLI评分不改。jobs.sqlite为独立schema1，原registry仍schema4；UUID请求键跨重启去重，100未完成容量/每作业32键别名、列表100，FIFO事务最多1running。候选包SHA入队绑定、执行前重核；网页不传源码/命令/成绩。完整负报告job succeeded但passed=false；基础设施错误failed。生产不确定失败的failed+halt、崩溃恢复的interrupted+halt都同事务提交；pending保留，重启不解除暂停。pending-only且未halt才自动继续。暂停恢复必须停服务后查证据/资源/已有报告，当前没有网页绕过入口；可信CLI仍独立，不应与队列并发维护。
+
+公共GET /v1/tool-proposals、POST /:id/validate只接受{requestId}且≤4096B、GET /:id/validation-summary；沿用Host/Origin检查，返回固定安全摘要。全局public/tools.mjs与聊天分开，顶部“工具候选”入口；sessionStorage先存请求键、确认后移除；旧摘要通过刷新代次/选择/提交状态守卫隔离。3秒活跃/15秒空闲只读轮询。worker只在本进程成功监听后启动，SIGTERM/SIGINT先关闭接收/领取再排空。当前worker与web同宿主进程、源码只在Docker执行；原版worker独立进程，此部署差异保留待后续拆分。
+
+真实浏览器只验证第10K候选26883ce8-5c2e-4a0e-90fb-d96e53270b9c。job2f744f78-eeb9-4b86-9b44-9c41d16c57e9 succeeded，报告9c319e1d-f56c-4c99-81ec-c7fa3382e487 passed=true，SHA7596fc8dc6571bc21d83d5a6715b758121daf653ff7ed26fe0df566a982ead7e。2语法+2重复+3领域+4比较=11新容器/9业务，11均清理；领域3/3、候选2/2、基线1/2、净增1≥1。现verified未批准未激活，原正式工具active1.0.1、10J候选仍submitted。注册表4proposals/3validations/2versions/11events；旧24材料、12审计、12会话、任务表、4运行容器/catalog/凭据元数据保持。模型0；空闲重启/浏览器刷新后同job/report/请求键/队列行与证据哈希不变，没有重跑。仅项目后台重启，无系统/root变更。
+
+新增27行为测试，最终1084项：Linux默认并发1082pass/2平台skip，Windows串行1071pass/13平台skip，0fail。中途Windows默认并发两轮在旧compose-session-store:43临时JSON rename出现EPERM，不同旧case；单例/文件70项及完整串行通过，根因未确认，未改旧代码或屏蔽测试。独立复审修正恢复/不确定失败事务窗口与旧报告错配，RED/GREEN及注入SQLite中断覆盖，复审通过后才真实验收。原失败证据保留。
+
+最新docs/25-网页候选验证队列.md，当前只读验收node scripts/verify-web-tool-maintenance.mjs，依赖私有runtime/maintenance-state-before.json及maintenance-state.mjs，固定当前数量；未来新作业后不改历史迎合旧断言。runtime/maintenance-{tests-03,restart-01,restart-02,acceptance-01,acceptance-02}为私有证据，本机maintenance-browser.png截图；同步回执也留runtime。第10K旧状态检查已不适用当前提案state。
+
+角色更正：原Curator从任务trace/gaps提出能力建议、安排构建；已提交proposal验证/修复/批准属于tool automation+maintenance。原版默认自动批准；个人保留人工门是收紧，不是原版自带。本轮仅完成显式维护作业和网页结果，不是完整Curator/自动修订/自进化有效性。下一步先学习验证反馈、可信来源任务与修订谱系/预算，再接真正Curator；不要恢复已结束旧task或盲目补跑。个人main持续同步，唯一远端目录不变，不改父级RSI项目。

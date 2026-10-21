@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import fs from "node:fs/promises";
 import { TaskMessageService, TaskMessageSubmissionError } from "../../packages/task-core/task-message-service.mjs";
 import { WorkspaceFileError } from "../../packages/task-core/workspace.mjs";
+import { ToolMaintenanceError } from "../../packages/capability-platform/tool-maintenance-store.mjs";
 
 const staticFiles = new Map([
   ["/", ["index.html", "text/html; charset=utf-8"]],
@@ -9,6 +10,7 @@ const staticFiles = new Map([
   ["/sse.mjs", ["sse.mjs", "text/javascript; charset=utf-8"]],
   ["/lifecycle.mjs", ["lifecycle.mjs", "text/javascript; charset=utf-8"]],
   ["/files.mjs", ["files.mjs", "text/javascript; charset=utf-8"]],
+  ["/tools.mjs", ["tools.mjs", "text/javascript; charset=utf-8"]],
   ["/style.css", ["style.css", "text/css; charset=utf-8"]],
 ]);
 function reply(response, status, data) {
@@ -25,7 +27,7 @@ function fileDisposition(name, inline) {
   return `${inline ? 'inline' : 'attachment'}; filename="workspace-file"; filename*=UTF-8''${encoded}`;
 }
 
-async function readBody(request) {
+async function readBody(request, maxBytes=1048576) {
   if (request.headers["content-type"]?.split(";")[0].trim() !== "application/json" &&
       !(Number(request.headers["content-length"] ?? 0) === 0 && !request.headers["transfer-encoding"])) {
     request.resume();
@@ -36,9 +38,9 @@ async function readBody(request) {
   let bytes = 0;
   for await (const chunk of request) {
     bytes += chunk.length;
-    if (bytes <= 1048576) chunks.push(chunk);
+    if (bytes <= maxBytes) chunks.push(chunk);
   }
-  if (bytes > 1048576) throw new TaskMessageSubmissionError(413, "请求正文过长。");
+  if (bytes > maxBytes) throw new TaskMessageSubmissionError(413, "请求正文过长。");
   let body;
   try { body = bytes ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {}; }
   catch { invalid("无法读取 JSON 请求。"); }
@@ -48,7 +50,7 @@ async function readBody(request) {
 
 // HTTP only coordinates transport. Task state and runtime execution stay in
 // their own packages, matching the reference repository's responsibility split.
-export function createAppServer({ taskStore, agentRuntime, workspaceFiles } = {}) {
+export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolMaintenance } = {}) {
   const taskMessages = new TaskMessageService({ taskStore, agentRuntime, workspaceFiles });
   const activeTurns = new Set();
   const track = (operation) => {
@@ -84,6 +86,17 @@ export function createAppServer({ taskStore, agentRuntime, workspaceFiles } = {}
         return reply(response, 410, { error: "Unbound chat sessions are disabled; use the task-scoped /v1/tasks API" });
       }
       if (request.method === "GET" && pathname === "/v1/tasks") return reply(response, 200, { tasks: taskStore.listTasks() });
+      const proposalRoute=/^\/v1\/tool-proposals(?:\/([^/]+)\/(validate|validation-summary))?$/.exec(pathname);
+      if(proposalRoute){
+        if(!toolMaintenance)return reply(response,503,{error:'候选验证服务尚未配置。'});
+        if(request.method==='GET'&&!proposalRoute[1])return reply(response,200,{proposals:toolMaintenance.list(),maintenance:toolMaintenance.status()});
+        if(request.method==='GET'&&proposalRoute[2]==='validation-summary')return reply(response,200,{summary:toolMaintenance.summary(proposalRoute[1])});
+        if(request.method==='POST'&&proposalRoute[2]==='validate'){
+          const body=await readBody(request,4096);
+          if(Object.keys(body).length!==1||!Object.hasOwn(body,'requestId'))invalid('验证请求只接受 requestId。');
+          return reply(response,202,toolMaintenance.enqueue(proposalRoute[1],body.requestId));
+        }
+      }
       const filesRoute = /^\/v1\/tasks\/([^/]+)\/files(?:\/(input|output)\/([^/]+))?$/.exec(pathname);
       if (request.method === 'POST' && filesRoute && !filesRoute[2]) {
         const payload = await readBody(request);
@@ -174,7 +187,7 @@ export function createAppServer({ taskStore, agentRuntime, workspaceFiles } = {}
       reply(response, 404, { error: "没有这个页面或接口。" });
     } catch (error) {
       if (!response.headersSent && !response.destroyed) {
-        const known = error instanceof TaskMessageSubmissionError || error instanceof WorkspaceFileError;
+        const known = error instanceof TaskMessageSubmissionError || error instanceof WorkspaceFileError || error instanceof ToolMaintenanceError;
         reply(response, known ? error.statusCode : 500,
           { error: known ? error.message : "服务处理失败，请检查项目内运行记录。" });
       } else if (!response.destroyed) response.end();

@@ -6,12 +6,14 @@
     <title>siRNA-pi · 任务工作区</title>
     <link rel="stylesheet" href="/style.css">
     <script src="/app.js" type="module"></script>
+    <script src="/tools.mjs" type="module"></script>
   </head>
   <body>
     <div class="app-shell">
       <header class="topbar">
         <div class="brand"><span class="brand-mark" aria-hidden="true">si</span>siRNA-pi <span class="brand-label">学习工作区</span></div>
         <p>从一个任务开始，逐步理解 Agent</p>
+        <a class="button secondary" href="#tools-panel">工具候选</a>
         <button id="refresh-tasks" class="button secondary" type="button">刷新记录</button>
       </header>
       <main class="workspace">
@@ -81,6 +83,13 @@
           </dl></details>
         </aside>
       </main>
+      <section id="tools-panel" class="panel tools-panel" aria-labelledby="tools-heading">
+        <div class="panel-heading"><span class="eyebrow">TOOL CANDIDATES</span><h2 id="tools-heading">工具候选与独立验证</h2></div>
+        <button id="refresh-tools" class="button secondary" type="button">刷新候选</button>
+        <p id="tools-status" class="help" role="status" aria-live="polite">正在读取候选…</p>
+        <div id="tools-list"></div>
+        <section id="tools-summary" aria-label="验证摘要"></section>
+      </section>
     </div>
   </body>
 </html>

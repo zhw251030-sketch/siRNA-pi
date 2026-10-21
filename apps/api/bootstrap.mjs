@@ -17,6 +17,9 @@ import { DockerEngineClient } from "../../packages/capability-platform/docker-en
 import { createAgentToolsServer } from "./agent-tools.mjs";
 import { listenToolSocket } from "./tool-api-socket.mjs";
 import { createTaskToolBuilders } from "../../packages/capability-platform/task-tool-builders.mjs";
+import { ToolMaintenanceStore } from "../../packages/capability-platform/tool-maintenance-store.mjs";
+import { createToolMaintenance } from "../../packages/capability-platform/tool-maintenance-worker.mjs";
+import { createMaintenanceValidator } from "../../packages/capability-platform/tool-maintenance-validation.mjs";
 
 process.umask(0o077);
 const directory = path.join(projectRoot, "runtime", "tasks");
@@ -40,17 +43,31 @@ const agentRuntime = new RuntimeRouter({ compose, legacy: new LocalPiRuntime() }
 const taskStore = new TaskStore(database);
 const recovered = taskStore.recoverInterruptedTasks();
 const workspaceFiles = new TaskFiles({ root: projectRoot, agentRuntime });
-const server = createAppServer({ taskStore, agentRuntime, workspaceFiles });
+const maintenanceStore=new ToolMaintenanceStore({root:projectRoot});
+const toolMaintenance=createToolMaintenance({root:projectRoot,store:maintenanceStore,validate:createMaintenanceValidator({root:projectRoot,docker}),
+  onError:()=>console.error('候选验证执行失败，请检查项目内私有运行记录。')});
+const server = createAppServer({ taskStore, agentRuntime, workspaceFiles, toolMaintenance });
 server.listen(3000, "127.0.0.1", () => {
+  // Never recover or claim jobs until this instance owns the listening socket.
+  toolMaintenance.start();
   console.log(`siRNA-pi: http://127.0.0.1:3000/ ; runtime=agent-compose ; recovered=${recovered.length}`);
 });
-server.on("error", () => { console.error("网页服务启动失败，请检查端口与项目配置。"); process.exitCode = 1; toolsServer.close(); taskStore.close(); rpc.close(); });
+server.on("error", async () => { console.error("网页服务启动失败，请检查端口与项目配置。"); process.exitCode = 1; await toolMaintenance.stop(); maintenanceStore.close(); toolsServer.close(); taskStore.close(); rpc.close(); });
 // Deployment stops an idle server. Let any accepted HTTP turn finish on normal shutdown.
-process.once("SIGTERM", () => server.close(async () => {
+async function shutdown(){
+  // stop() synchronously closes acceptance/claiming before HTTP drains; its
+  // promise settles only after the current validator and durable job finish.
+  const maintenanceDrain=toolMaintenance.stop();
+  server.close(async () => {
+  await maintenanceDrain;
   await server.waitForTaskCompletion();
   await new Promise(resolve => toolsServer.close(resolve));
   await toolsServer.waitForCalls();
   taskStore.close();
+  maintenanceStore.close();
   rpc.close();
   process.exit(0);
-}));
+  });
+}
+process.once("SIGTERM", shutdown);
+process.once("SIGINT", shutdown);
