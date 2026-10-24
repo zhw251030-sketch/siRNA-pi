@@ -263,3 +263,38 @@ test('rejects a symlinked database sidecar when the platform permits symlinks', 
   catch (error) { fs.rmSync(target); t.skip(`symlink unavailable: ${error.code}`); return; }
   assert.throws(() => new ToolApprovalStore({root}), /Unsafe approval database file/);
 });
+
+test('rejects hardlinked database sidecars for WAL, SHM, and rollback journal files', t => {
+  const {root, store} = fixture(t, {isVerified: () => true});
+  store.close();
+  const folder = path.join(root, 'runtime', 'tool-approval');
+  const file = path.join(folder, 'jobs.sqlite');
+  for (const suffix of ['-wal', '-shm', '-journal']) {
+    const target = path.join(folder, `sidecar-target${suffix}`);
+    const sidecar = file + suffix;
+    fs.writeFileSync(target, 'sidecar');
+    fs.linkSync(target, sidecar);
+    assert.throws(() => new ToolApprovalStore({root}), /Unsafe approval database file/, suffix);
+    fs.rmSync(sidecar);
+    fs.rmSync(target);
+  }
+});
+
+test('reopens a valid database while SQLite has an active WAL sidecar', t => {
+  const {root, store} = fixture(t, {isVerified: () => true});
+  store.close();
+  const file = path.join(root, 'runtime', 'tool-approval', 'jobs.sqlite');
+  const writer = new DatabaseSync(file);
+  try {
+    writer.exec('PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; UPDATE control SET halted=1 WHERE id=1;');
+    if (!fs.existsSync(`${file}-wal`)) {
+      t.skip('SQLite did not leave a WAL sidecar on this platform');
+      return;
+    }
+    const reopened = new ToolApprovalStore({root, isVerified: () => true});
+    assert.equal(reopened.halted(), true);
+    reopened.close();
+  } finally {
+    writer.close();
+  }
+});
