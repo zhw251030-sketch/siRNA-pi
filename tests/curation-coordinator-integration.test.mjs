@@ -127,16 +127,16 @@ test('automation HTTP without configuration is 503 and unexpected exceptions are
   for(const response of [await broken.get(),await broken.post({enabled:true})]){assert.ok([503,409].includes(response.status));assert.equal((await response.text()).includes('PRIVATE_HOST_KEY'),false);}
 });
 
-async function curationFixture(t,{curate,readiness}={}){
+async function curationFixture(t,{curate,readiness,isTaskBusy,beforeCuration,toolCurationBuild}={}){
   const module=await import('../packages/extensions/tool-curation/tool-curation-coordinator.mjs').catch(()=>({}));
   assert.equal(typeof module.createToolCurationCoordinator,'function','real coordinator must be available');
   const f=fixture(t),curations=new ToolCurationStore({root:f.root}),gaps=new ToolGapStore({root:f.root});let calls=0;
   f.closers.push(()=>curations.close(),()=>gaps.close());
   const preview=createToolCurationPreview({taskStore:f.tasks,listExistingTools:()=>[],listGapReports:(taskId,runId)=>gaps.list(taskId,runId)});
   const modelResults=[];
-  const service=createToolCurationService({store:curations,preview,cooldownMs:604800000,curator:{async curate(run,signal,onStarted){
-    calls++;const sessionId=randomUUID(),runId=randomUUID();onStarted(sessionId,runId);
-    if(curate)return curate(run);
+  let coordinator;
+  const service=createToolCurationService({store:curations,preview,cooldownMs:604800000,onSettled:(run,metadata)=>{beforeCuration?.(run,metadata);coordinator?.observeCuration(run,metadata);},curator:{async curate(run,signal,onStarted){
+    calls++;if(curate)return curate(run,signal,onStarted);const sessionId=randomUUID(),runId=randomUUID();onStarted(sessionId,runId);
     const result={protocolVersion:'sirna-tool-curation-result/v1',curationId:run.id,traceSha256:run.traceSha256,decision:'candidate',summary:'A reusable fetch boundary.',candidate:{capabilityKey:'tool:fetch_dataset',suggestedToolName:'dataset_fetch',capabilityBoundary:'Fetch public datasets by identifier.',whyExistingToolsAreInsufficient:'No catalog fetch capability.',evidenceEventIds:run.trace.signals[0].evidenceEventIds,inputContractSketch:{identifier:'string'},outputContractSketch:{rows:'array'},permissions:{profile:'no_external_access'},buildInstructions:['Implement the bounded fetch interface.']}};
     modelResults.push(result);return {sessionId,runId,result};
   }}});
@@ -145,12 +145,63 @@ async function curationFixture(t,{curate,readiness}={}){
     for(let i=0;i<3;i++){emit({type:'tool_start',toolCallId:`call-${i}`,toolName:'fetch_dataset',args:{identifier:i}});emit({type:'tool_end',toolCallId:`call-${i}`,toolName:'fetch_dataset',isError:false,result:{rows:[1,2]}});}
     emit({type:'assistant_message',text:'saved fetch results'});emit({type:'done',runId,status:'succeeded'});
   };
-  const coordinator=module.createToolCurationCoordinator({taskStore:f.tasks,preview,curation:service,isReady:readiness??lifecycle.createCurationAutomationReadiness({taskMessages:f.messages,agentRuntime:f.runtime}),isTaskBusy:taskId=>f.messages.isTaskBusy(taskId),intervalMs:1000,maxReviews:3});
+  coordinator=module.createToolCurationCoordinator({taskStore:f.tasks,preview,curation:service,toolCurationBuild,isReady:readiness??lifecycle.createCurationAutomationReadiness({taskMessages:f.messages,agentRuntime:f.runtime}),isTaskBusy:isTaskBusy??(taskId=>f.messages.isTaskBusy(taskId)),intervalMs:1000,maxReviews:3});
   f.messages.onSettled=value=>coordinator.observeRun(value);
   service.start();coordinator.start();f.closers.push(()=>service.stop(),()=>coordinator.stop());
   const turn=async(task=f.task,requestId)=>{const value=await f.messages.start({taskId:task.id,message:'Compare datasets',...(requestId?{requestId}:{})},()=>{});const saved=await value.completion;await coordinator.runOnce();await new Promise(r=>setImmediate(r));return saved;};
   return {...f,curations,gaps,preview,service,coordinator,turn,modelResults,calls:()=>calls};
 }
+
+async function waitFor(check,{attempts=20}={}){
+  for(let i=0;i<attempts;i++){
+    const value=check();
+    if(value)return value;
+    await new Promise(resolve=>setImmediate(resolve));
+  }
+  return check();
+}
+
+test('automatic Curator candidate is handed to Builder once with the frozen binding',async t=>{
+  const starts=[];
+  const f=await curationFixture(t,{toolCurationBuild:{start:async(...args)=>{starts.push(args);return {handoff:{phase:'running',curationId:args[1]}};}}});
+  f.coordinator.configure({enabled:true});
+  const saved=await f.turn();
+  const candidate=await waitFor(()=>f.curations.list(f.task.id).find(row=>row.status==='candidate'));
+  assert.ok(candidate,'Curator candidate should settle');
+  await waitFor(()=>starts.length===1);
+  assert.equal(starts.length,1);
+  assert.equal(starts[0][0],f.task.id);
+  assert.equal(starts[0][1],candidate.id);
+  assert.deepEqual(Object.keys(starts[0][2]).sort(),['promptSha256','resultSha256','traceSha256']);
+  assert.equal(f.tasks.listMessages(f.task.id).length,2,'coordinator must not create an ordinary user turn');
+  f.coordinator.observeCuration(candidate);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(starts.length,1,'duplicate terminal notification must not re-dispatch Builder');
+  assert.equal(saved.task.status,'idle');
+});
+
+test('automatic Curator skip never starts Builder',async t=>{
+  const starts=[];
+  const f=await curationFixture(t,{curate:async (run,signal,onStarted)=>{const sessionId=randomUUID(),runId=randomUUID();onStarted(sessionId,runId);return {sessionId,runId,result:{protocolVersion:'sirna-tool-curation-result/v1',curationId:run.id,traceSha256:run.traceSha256,decision:'skip',summary:'No stable boundary.'}};},toolCurationBuild:{start:async(...args)=>{starts.push(args);}}});
+  f.coordinator.configure({enabled:true});await f.turn();
+  const terminal=await waitFor(()=>f.curations.list(f.task.id).find(row=>['skipped','error'].includes(row.status)));
+  assert.ok(terminal);assert.equal(terminal.status,'skipped');assert.equal(starts.length,0);
+  assert.ok(f.coordinator.status().recent.some(item=>item.reason==='curation_skip'));
+});
+
+test('automatic Builder dispatch refuses a busy task and leaves candidate for manual handoff',async t=>{
+  const starts=[];let busy=false;
+  const f=await curationFixture(t,{beforeCuration:()=>{busy=true;},toolCurationBuild:{start:async(...args)=>{starts.push(args);}},isTaskBusy:()=>busy});
+  f.coordinator.configure({enabled:true});
+  await f.turn();
+  const candidate=await waitFor(()=>f.curations.list(f.task.id).find(row=>row.status==='candidate'));
+  assert.ok(candidate);
+  busy=true;
+  f.coordinator.observeCuration(candidate);await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(starts.length,0);
+  assert.equal(f.curations.get(f.task.id,candidate.id).status,'candidate');
+  assert.ok(f.coordinator.status().recent.some(item=>item.reason==='builder_busy'));
+});
 
 test('real completed task and HTTP switch persist one candidate, then apply backend cooldown on a new task',async t=>{
   const f=await curationFixture(t),server=createAppServer({taskStore:f.tasks,agentRuntime:f.runtime,taskMessages:f.messages,toolCurationCoordinator:f.coordinator,toolCuration:f.service});
@@ -171,6 +222,7 @@ test('unknown curator outcome is retained as one error without retrying the comp
   f.coordinator.configure({enabled:true});await f.turn();const record=f.curations.list(f.task.id)[0];assert.equal(record.status,'error');
   await f.coordinator.runOnce();await f.coordinator.runOnce();assert.equal(f.calls(),1);assert.equal(f.coordinator.status().attempts,1);
   assert.equal(f.tasks.getTask(f.task.id).status,'idle');assert.equal(f.tasks.listMessages(f.task.id).at(-1).content,'saved fetch results');assert.equal(JSON.stringify(record).includes('PRIVATE_HOST_KEY'),false);
+  assert.ok(f.coordinator.status().recent.some(item=>item.reason==='curation_error'));
 });
 
 test('shutdown during awaited readiness prevents dispatch and closes all stores even if another drain rejects',async t=>{

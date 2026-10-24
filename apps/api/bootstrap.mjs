@@ -80,11 +80,13 @@ const curatorRuntime = new AgentComposeRuntime({root:projectRoot,agentName:'tool
 const curationStore = new ToolCurationStore({root:projectRoot});
 const gapStore = new ToolGapStore({root:projectRoot});
 toolGaps = createToolGapService({store:gapStore,taskStore,curationStore});
-const toolCuration = createToolCurationService({store:curationStore,preview:toolCurationPreview,cooldownMs:604800000,curator:createAgentToolCurator({runtime:curatorRuntime,timeoutMs:180000})});
-toolCurationCoordinator=createToolCurationCoordinator({taskStore,preview:toolCurationPreview,curation:toolCuration,
-  isReady:createCurationAutomationReadiness({taskMessages,agentRuntime}),isTaskBusy:taskId=>taskMessages.isTaskBusy(taskId),intervalMs:1000,maxReviews:3});
+const toolCuration = createToolCurationService({store:curationStore,preview:toolCurationPreview,cooldownMs:604800000,
+  onSettled:(run,metadata)=>toolCurationCoordinator?.observeCuration(run,metadata),
+  curator:createAgentToolCurator({runtime:curatorRuntime,timeoutMs:180000})});
 const curationBuildStore = new ToolCurationBuildStore({root:projectRoot});
 toolCurationBuild = createToolCurationBuildService({root:projectRoot,store:curationBuildStore,curationStore,taskStore,taskMessages,agentRuntime,listExistingTools});
+toolCurationCoordinator=createToolCurationCoordinator({taskStore,preview:toolCurationPreview,curation:toolCuration,toolCurationBuild,
+  isReady:createCurationAutomationReadiness({taskMessages,agentRuntime}),isTaskBusy:taskId=>taskMessages.isTaskBusy(taskId),intervalMs:1000,maxReviews:3});
 const server = createAppServer({ taskStore, agentRuntime, workspaceFiles, taskMessages, toolMaintenance, toolRepair, toolCurationPreview, toolCuration, toolCurationBuild, toolCurationCoordinator });
 const shutdown = createApiShutdown({server,toolMaintenance,toolRepair,toolCuration,toolCurationBuild,toolCurationCoordinator,toolsServer,
   stores:[taskStore,maintenanceStore,repairStore,curationStore,curationBuildStore,gapStore],rpcs:[rpc,curatorRpc]});

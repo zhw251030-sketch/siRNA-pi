@@ -7,10 +7,18 @@ const fail=(status,message)=>{throw new ToolCurationError(status,message);};
 const digest=/^[a-f0-9]{64}$/;
 const runIdentity=/^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{64})$/i;
 
-export function createToolCurationService({store,preview,curator,cooldownMs=0,clock=Date.now}){
+export function createToolCurationService({store,preview,curator,cooldownMs=0,clock=Date.now,onSettled}={}){
   if(!Number.isFinite(cooldownMs)||cooldownMs<0||typeof clock!=='function')throw Error('Invalid curation cooldown configuration');
+  if(onSettled!==undefined&&typeof onSettled!=='function')throw Error('Invalid curation settled callback');
   let accepting=false,initialized=false,worker=null,storageFault=false;
   const queue=[];
+  function notifySettled(taskId,id,automatic){
+    if(typeof onSettled!=='function')return;
+    let record;
+    try{record=store.get(taskId,id);}catch{return;}
+    if(!record)return;
+    try{Promise.resolve(onSettled(structuredClone(record),{automatic})).catch(()=>{});}catch{/* Notifications cannot rewrite durable curation state. */}
+  }
   function storage(action){
     try{return action();}catch{
       storageFault=true;accepting=false;queue.length=0;
@@ -20,7 +28,8 @@ export function createToolCurationService({store,preview,curator,cooldownMs=0,cl
   }
   async function consume(){
     while(queue.length){
-      const id=queue.shift();
+      const admission=queue.shift();
+      const id=admission.id;
       if(store.isAdmissionHalted()){store.fail(id,{message:'Not dispatched because a prior curator outcome requires operator recovery.'});continue;}
       let run;
       try{
@@ -46,8 +55,10 @@ export function createToolCurationService({store,preview,curator,cooldownMs=0,cl
           if(previous)result=validateToolCurationResult(run,{protocolVersion:result.protocolVersion,curationId:result.curationId,traceSha256:result.traceSha256,decision:'skip',summary:`后端冷却规则：近期同能力候选 ${previous.id} 已存在；保留原候选，本次不重复生成。`});
         }
         store.complete(id,result);
+        notifySettled(run.taskId,id,admission.automatic===true);
       }catch(error){
         store.fail(id,{halt:error?.cleanupFailed===true||error?.outcomeUnknown===true||error?.cleanupConfirmed===false,message:error?.cleanupFailed===true||error?.cleanupConfirmed===false?'Curator cleanup could not be confirmed. Operator recovery required; no retry was attempted.':error?.outcomeUnknown===true?'Curator execution outcome unconfirmed. Operator recovery required; no retry was attempted.':'Independent curator did not complete a valid review; no retry was attempted.'});
+        if(run)notifySettled(run.taskId,id,admission.automatic===true);
       }
     }
   }
@@ -78,7 +89,7 @@ export function createToolCurationService({store,preview,curator,cooldownMs=0,cl
       let trace;
       try{trace=buildToolCurationTrace({id:randomUUID(),snapshot,...(automatic?{trigger:snapshot.preview.gapReports?.length||snapshot.preview.signals.some(signal=>signal.evidenceComplete&&signal.errorCount>0)?'online_gap':'post_run'}:{})});}catch(error){fail(error instanceof RangeError?413:409,'Frozen evidence cannot be represented completely within the review envelope.');}
       const result=storage(()=>store.create(trace));
-      if(!result.deduplicated){queue.push(result.curation.id);schedule();}
+      if(!result.deduplicated){queue.push({id:result.curation.id,automatic:automatic===true});schedule();}
       return result;
     },
     // Internal coordinator lookup; unlike list(), this has no display window.
