@@ -1,0 +1,92 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {randomUUID} from 'node:crypto';
+import {ToolApprovalStore} from '../packages/capability-platform/tool-approval-store.mjs';
+
+function fixture(t, options = {}) {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sirna-approval-store-')));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  return {root, store: new ToolApprovalStore({root, ...options})};
+}
+
+test('validates UUIDs and admits only verified proposals through the binding', t => {
+  const {store} = fixture(t, {isVerified: id => id === verified});
+  const verified = randomUUID();
+  assert.throws(() => store.enqueue('not-a-uuid', randomUUID(), {approvedBy: 'reviewer'}), /UUID/i);
+  assert.throws(() => store.enqueue(randomUUID(), 'not-a-uuid', {approvedBy: 'reviewer'}), /UUID/i);
+  assert.throws(() => store.enqueue(randomUUID(), randomUUID(), {approvedBy: 'reviewer'}), /verified/i);
+  const result = store.enqueue(verified, randomUUID(), {approvedBy: 'reviewer'});
+  assert.equal(result.job.proposalId, verified);
+  assert.equal(result.job.requestedBy, 'reviewer');
+  store.close();
+});
+
+test('deduplicates the same request and rejects binding it to another proposal', t => {
+  const {store} = fixture(t, {isVerified: () => true});
+  const proposal = randomUUID(), other = randomUUID(), request = randomUUID();
+  const first = store.enqueue(proposal, request, {approvedBy: ' reviewer  one '});
+  const duplicate = store.enqueue(proposal, request, {approvedBy: 'different'});
+  assert.equal(duplicate.deduplicated, true);
+  assert.equal(duplicate.job.id, first.job.id);
+  assert.throws(() => store.enqueue(other, request, {approvedBy: 'reviewer'}), /different proposal/i);
+  assert.equal(store.getByRequest(request).id, first.job.id);
+  assert.equal(store.latest(proposal).id, first.job.id);
+  store.close();
+});
+
+test('claims one running job globally across two SQLite connections', t => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sirna-approval-connections-')));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const first = new ToolApprovalStore({root, isVerified: () => true});
+  const second = new ToolApprovalStore({root, isVerified: () => true});
+  const a = first.enqueue(randomUUID(), randomUUID(), {approvedBy: 'a'}).job;
+  const b = first.enqueue(randomUUID(), randomUUID(), {approvedBy: 'b'}).job;
+  assert.equal(first.claim().id, a.id);
+  assert.equal(second.claim(), null);
+  assert.equal(first.get(b.id).status, 'pending');
+  first.close(); second.close();
+});
+
+test('finishes running jobs only and records terminal result safely', t => {
+  const {store} = fixture(t, {isVerified: () => true});
+  const job = store.enqueue(randomUUID(), randomUUID(), {approvedBy: 'reviewer'}).job;
+  assert.throws(() => store.finish(job.id, {approved: true, activated: true}), /running/i);
+  store.claim();
+  const done = store.finish(job.id, {approved: true, activated: true});
+  assert.deepEqual({approved: done.approved, activated: done.activated}, {approved: true, activated: true});
+  assert.throws(() => store.finish(job.id, {approved: true, activated: true}), /running/i);
+  const failed = store.enqueue(randomUUID(), randomUUID(), {approvedBy: 'reviewer'}).job;
+  store.claim();
+  const error = store.finish(failed.id, {error: 'private failure'});
+  assert.equal(error.status, 'failed');
+  assert.equal(error.error, 'private failure');
+  store.close();
+});
+
+test('caps request aliases and queue size while retaining idempotent retries', t => {
+  const {store} = fixture(t, {isVerified: () => true});
+  const proposal = randomUUID(), firstRequest = randomUUID();
+  const original = store.enqueue(proposal, firstRequest, {approvedBy: 'reviewer'}).job;
+  for (let i = 1; i < 32; i++) store.enqueue(proposal, randomUUID(), {approvedBy: 'reviewer'});
+  assert.throws(() => store.enqueue(proposal, randomUUID(), {approvedBy: 'reviewer'}), /alias|capacity/i);
+  assert.equal(store.enqueue(proposal, firstRequest, {approvedBy: 'reviewer'}).job.id, original.id);
+  for (let i = 0; i < 99; i++) store.enqueue(randomUUID(), randomUUID(), {approvedBy: 'reviewer'});
+  assert.throws(() => store.enqueue(randomUUID(), randomUUID(), {approvedBy: 'reviewer'}), /capacity/i);
+  assert.ok(store.list().length <= 100);
+  store.close();
+});
+
+test('interrupts a running job and reopens it as pending', t => {
+  const {root, store} = fixture(t, {isVerified: () => true});
+  const job = store.enqueue(randomUUID(), randomUUID(), {approvedBy: 'reviewer'}).job;
+  store.claim();
+  assert.equal(store.interruptRunning(), 1);
+  assert.equal(store.get(job.id).status, 'pending');
+  store.close();
+  const reopened = new ToolApprovalStore({root, isVerified: () => true});
+  assert.equal(reopened.get(job.id).status, 'pending');
+  reopened.close();
+});
