@@ -25,7 +25,7 @@ import { ToolRepairStore } from "../../packages/capability-platform/tool-repair-
 import { ToolAutomationStore } from "../../packages/capability-platform/tool-automation-store.mjs";
 import { createToolRepair } from "../../packages/capability-platform/tool-repair-service.mjs";
 import { createToolCurationPreview } from "../../packages/extensions/tool-curation/tool-curation-preview.mjs";
-import { getRegisteredToolCatalog } from "../../packages/capability-platform/tool-approval-service.mjs";
+import { getRegisteredToolCatalog, approveRegisteredToolProposal } from "../../packages/capability-platform/tool-approval-service.mjs";
 import { ToolCurationStore } from "../../packages/extensions/tool-curation/tool-curation-store.mjs";
 import { createToolCurationService } from "../../packages/extensions/tool-curation/tool-curation-service.mjs";
 import { createToolCurationCoordinator } from "../../packages/extensions/tool-curation/tool-curation-coordinator.mjs";
@@ -93,6 +93,8 @@ toolCurationBuild = createToolCurationBuildService({root:projectRoot,store:curat
 toolCurationCoordinator=createToolCurationCoordinator({root:projectRoot,taskStore,preview:toolCurationPreview,curation:toolCuration,toolCurationBuild,toolMaintenance,toolAutomation,
   automaticValidation:process.env.SIRNA_AUTOMATIC_VALIDATION==='1',
   toolRepair,automaticRepair:process.env.SIRNA_AUTOMATIC_REPAIR==='1',
+  approveTool:(proposalId,actor)=>approveRegisteredToolProposal(proposalId,actor,{root:projectRoot}),
+  automaticApproval:process.env.SIRNA_AUTOMATIC_APPROVAL==='1',
   isReady:createCurationAutomationReadiness({taskMessages,agentRuntime}),isTaskBusy:taskId=>taskMessages.isTaskBusy(taskId),intervalMs:1000,maxReviews:3});
 const server = createAppServer({ taskStore, agentRuntime, workspaceFiles, taskMessages, toolMaintenance, toolRepair, toolCurationPreview, toolCuration, toolCurationBuild, toolCurationCoordinator });
 const shutdown = createApiShutdown({server,toolMaintenance,toolRepair,toolCuration,toolCurationBuild,toolCurationCoordinator,toolsServer,

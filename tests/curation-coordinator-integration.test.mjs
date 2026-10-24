@@ -129,7 +129,7 @@ test('automation HTTP without configuration is 503 and unexpected exceptions are
   for(const response of [await broken.get(),await broken.post({enabled:true})]){assert.ok([503,409].includes(response.status));assert.equal((await response.text()).includes('PRIVATE_HOST_KEY'),false);}
 });
 
-async function curationFixture(t,{curate,readiness,isTaskBusy,beforeCuration,toolCurationBuild,toolMaintenance,toolRepair,toolAutomation,persistentAutomation=false,automaticValidation=false,automaticRepair=false}={}){
+async function curationFixture(t,{curate,readiness,isTaskBusy,beforeCuration,toolCurationBuild,toolMaintenance,toolRepair,toolAutomation,approveTool,persistentAutomation=false,automaticValidation=false,automaticRepair=false,automaticApproval=false}={}){
   const module=await import('../packages/extensions/tool-curation/tool-curation-coordinator.mjs').catch(()=>({}));
   assert.equal(typeof module.createToolCurationCoordinator,'function','real coordinator must be available');
   const f=fixture(t),curations=new ToolCurationStore({root:f.root}),gaps=new ToolGapStore({root:f.root}),automation=toolAutomation??(persistentAutomation?new ToolAutomationStore({root:f.root}):undefined);let calls=0;
@@ -147,8 +147,8 @@ async function curationFixture(t,{curate,readiness,isTaskBusy,beforeCuration,too
     for(let i=0;i<3;i++){emit({type:'tool_start',toolCallId:`call-${i}`,toolName:'fetch_dataset',args:{identifier:i}});emit({type:'tool_end',toolCallId:`call-${i}`,toolName:'fetch_dataset',isError:false,result:{rows:[1,2]}});}
     emit({type:'assistant_message',text:'saved fetch results'});emit({type:'done',runId,status:'succeeded'});
   };
-  const coordinatorOptions={root:f.root,taskStore:f.tasks,preview,curation:service,toolCurationBuild,toolMaintenance,toolRepair,toolAutomation:automation,automaticValidation,automaticRepair,isReady:readiness??lifecycle.createCurationAutomationReadiness({taskMessages:f.messages,agentRuntime:f.runtime}),isTaskBusy:isTaskBusy??(taskId=>f.messages.isTaskBusy(taskId)),intervalMs:1000,maxReviews:3};
-  const makeCoordinator=()=>{coordinator=module.createToolCurationCoordinator(coordinatorOptions);return coordinator;};
+  const coordinatorOptions={root:f.root,taskStore:f.tasks,preview,curation:service,toolCurationBuild,toolMaintenance,toolRepair,toolAutomation:automation,approveTool,automaticValidation,automaticRepair,automaticApproval,isReady:readiness??lifecycle.createCurationAutomationReadiness({taskMessages:f.messages,agentRuntime:f.runtime}),isTaskBusy:isTaskBusy??(taskId=>f.messages.isTaskBusy(taskId)),intervalMs:1000,maxReviews:3};
+  const makeCoordinator=(overrides={})=>{coordinator=module.createToolCurationCoordinator({...coordinatorOptions,...overrides});return coordinator;};
   coordinator=makeCoordinator();
   f.messages.onSettled=value=>coordinator.observeRun(value);
   service.start();coordinator.start();f.closers.push(()=>service.stop(),()=>coordinator.stop());
@@ -254,6 +254,56 @@ test('automatic repair ignores passed, unknown and default-disabled validation o
   f.coordinator.observeBuilder({curationId:candidate.id,requestId:buildRequestId(candidate.id),phase:'submitted',proposalId,artifactSha256});await new Promise(resolve=>setImmediate(resolve));
   for(const value of [{status:'succeeded',passed:true},{status:'failed',passed:null},{status:'succeeded',passed:false,validationId,reportSha256}]){f.coordinator.observeMaintenance({proposalId,jobId:randomUUID(),artifactSha256,...value});await new Promise(resolve=>setImmediate(resolve));}
   assert.equal(repairs.length,0);
+});
+
+test('passing validation remains awaiting approval unless the explicit automatic approval switch is enabled',async t=>{
+  const starts=[],jobs=[],approvals=[],proposalId=randomUUID(),artifactSha256='9'.repeat(64);
+  const f=await curationFixture(t,{persistentAutomation:true,automaticValidation:true,toolMaintenance:{enqueue:(...args)=>{jobs.push(args);return {job:{id:randomUUID(),proposalId:args[0],status:'pending'},deduplicated:false};}},toolCurationBuild:{start:async(...args)=>{starts.push(args);return {handoff:{phase:'running',curationId:args[1]}};}}});
+  f.coordinator.configure({enabled:true});await f.turn();const candidate=await waitFor(()=>f.curations.list(f.task.id).find(row=>row.status==='candidate'));assert.ok(candidate);await waitFor(()=>starts.length===1);
+  f.coordinator.observeBuilder({curationId:candidate.id,requestId:buildRequestId(candidate.id),phase:'submitted',proposalId,artifactSha256,toolName:'dataset_fetch',taskId:f.task.id,runId:f.runId,userMessageId:randomUUID()});await new Promise(resolve=>setImmediate(resolve));
+  f.coordinator.observeMaintenance({proposalId,jobId:randomUUID(),status:'succeeded',passed:true,artifactSha256});await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(approvals.length,0);assert.equal(f.toolAutomation.get(proposalId).phase,'approving');
+  await f.coordinator.stop();
+});
+
+test('automatic approval activates only a truthful approved result and is idempotent',async t=>{
+  const starts=[],jobs=[],approvals=[],proposalId=randomUUID(),artifactSha256='8'.repeat(64);
+  const f=await curationFixture(t,{persistentAutomation:true,automaticValidation:true,automaticApproval:true,approveTool:async(...args)=>{approvals.push(args);return {approved:true,activated:true};},toolMaintenance:{enqueue:(...args)=>{jobs.push(args);return {job:{id:randomUUID(),proposalId:args[0],status:'pending'},deduplicated:false};}},toolCurationBuild:{start:async(...args)=>{starts.push(args);return {handoff:{phase:'running',curationId:args[1]}};}}});
+  f.coordinator.configure({enabled:true});await f.turn();const candidate=await waitFor(()=>f.curations.list(f.task.id).find(row=>row.status==='candidate'));assert.ok(candidate);await waitFor(()=>starts.length===1);
+  const input={curationId:candidate.id,requestId:buildRequestId(candidate.id),phase:'submitted',proposalId,artifactSha256,toolName:'dataset_fetch',taskId:f.task.id,runId:f.runId,userMessageId:randomUUID()};
+  f.coordinator.observeBuilder(input);await new Promise(resolve=>setImmediate(resolve));
+  const passed={proposalId,jobId:randomUUID(),status:'succeeded',passed:true,artifactSha256};f.coordinator.observeMaintenance(passed);f.coordinator.observeMaintenance(passed);await new Promise(resolve=>setImmediate(resolve));
+  assert.deepEqual(approvals,[[proposalId,'agent-auto-pipeline']]);assert.equal(f.toolAutomation.get(proposalId).phase,'completed');
+});
+
+test('automatic approval fails closed when the approval callback does not activate a version',async t=>{
+  const proposalId=randomUUID(),artifactSha256='7'.repeat(64),jobs=[];
+  const f=await curationFixture(t,{persistentAutomation:true,automaticValidation:true,automaticApproval:true,approveTool:async()=>({approved:true,activated:false}),toolMaintenance:{enqueue:(...args)=>{jobs.push(args);return {job:{id:randomUUID(),proposalId:args[0],status:'pending'},deduplicated:false};}},toolCurationBuild:{start:async()=>({handoff:{phase:'running'}})}});
+  f.coordinator.configure({enabled:true});await f.turn();const candidate=await waitFor(()=>f.curations.list(f.task.id).find(row=>row.status==='candidate'));assert.ok(candidate);
+  f.coordinator.observeBuilder({curationId:candidate.id,requestId:buildRequestId(candidate.id),phase:'submitted',proposalId,artifactSha256,toolName:'dataset_fetch',taskId:f.task.id,runId:f.runId,userMessageId:randomUUID()});await new Promise(resolve=>setImmediate(resolve));
+  f.coordinator.observeMaintenance({proposalId,jobId:randomUUID(),status:'succeeded',passed:true,artifactSha256});await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.toolAutomation.get(proposalId).phase,'failed');assert.equal(f.coordinator.status().recent.at(-1).reason,'approval_failed');
+});
+
+test('a late passing validation notification after shutdown cannot invoke approval',async t=>{
+  const proposalId=randomUUID(),artifactSha256='5'.repeat(64),approvals=[];
+  const f=await curationFixture(t,{persistentAutomation:true,automaticValidation:true,automaticApproval:true,approveTool:async(...args)=>{approvals.push(args);return {approved:true,activated:true};},toolMaintenance:{enqueue:()=>({job:{id:randomUUID(),proposalId,status:'pending'},deduplicated:false})},toolCurationBuild:{start:async()=>({handoff:{phase:'running'}})}});
+  f.coordinator.configure({enabled:true});await f.turn();const candidate=await waitFor(()=>f.curations.list(f.task.id).find(row=>row.status==='candidate'));assert.ok(candidate);
+  f.coordinator.observeBuilder({curationId:candidate.id,requestId:buildRequestId(candidate.id),phase:'submitted',proposalId,artifactSha256,toolName:'dataset_fetch',taskId:f.task.id,runId:f.runId,userMessageId:randomUUID()});await new Promise(resolve=>setImmediate(resolve));
+  await f.coordinator.stop();f.coordinator.observeMaintenance({proposalId,jobId:randomUUID(),status:'succeeded',passed:true,artifactSha256});await new Promise(resolve=>setImmediate(resolve));
+  assert.deepEqual(approvals,[]);assert.equal(f.toolAutomation.get(proposalId).phase,'validating');
+});
+
+test('a restarted coordinator resumes a durable approving run and invokes approval once',async t=>{
+  const proposalId=randomUUID(),artifactSha256='6'.repeat(64),jobs=[],approvals=[];
+  const f=await curationFixture(t,{persistentAutomation:true,automaticValidation:true,toolMaintenance:{enqueue:(...args)=>{jobs.push(args);return {job:{id:randomUUID(),proposalId:args[0],status:'pending'},deduplicated:false};}},toolCurationBuild:{start:async()=>({handoff:{phase:'running'}})}});
+  f.coordinator.configure({enabled:true});await f.turn();const candidate=await waitFor(()=>f.curations.list(f.task.id).find(row=>row.status==='candidate'));assert.ok(candidate);
+  f.coordinator.observeBuilder({curationId:candidate.id,requestId:buildRequestId(candidate.id),phase:'submitted',proposalId,artifactSha256,toolName:'dataset_fetch',taskId:f.task.id,runId:f.runId,userMessageId:randomUUID()});await new Promise(resolve=>setImmediate(resolve));
+  f.coordinator.observeMaintenance({proposalId,jobId:randomUUID(),status:'succeeded',passed:true,artifactSha256});await new Promise(resolve=>setImmediate(resolve));assert.equal(f.toolAutomation.get(proposalId).phase,'approving');
+  await f.coordinator.stop();
+  const approveTool=async(...args)=>{approvals.push(args);return {approved:true,activated:true};};
+  const restarted=f.makeCoordinator({automaticApproval:true,approveTool});restarted.start();restarted.configure({enabled:true});await restarted.runOnce();await new Promise(resolve=>setImmediate(resolve));
+  assert.deepEqual(approvals,[[proposalId,'agent-auto-pipeline']]);assert.equal(f.toolAutomation.get(proposalId).phase,'completed');
 });
 
 test('automatic validation persists its run and replacement registration supersedes the predecessor before revalidation',async t=>{

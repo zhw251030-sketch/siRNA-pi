@@ -10,17 +10,19 @@ const fail=(status,message)=>{throw new ToolCurationError(status,message);};
 
 // Observations are intentionally process-local. Only the existing Curator
 // store owns durable admission, task/run uniqueness, and accepted work.
-export function createToolCurationCoordinator({root,taskStore,preview,curation,toolCurationBuild,toolMaintenance,toolRepair,toolAutomation,automaticValidation=false,automaticRepair=false,isReady,isTaskBusy=()=>false,intervalMs=1000,maxReviews=3,maxBuilds=maxReviews,maxValidations=maxBuilds,maxRepairs=maxValidations}={}){
+export function createToolCurationCoordinator({root,taskStore,preview,curation,toolCurationBuild,toolMaintenance,toolRepair,toolAutomation,approveTool,automaticValidation=false,automaticRepair=false,automaticApproval=false,approvalActor='agent-auto-pipeline',isReady,isTaskBusy=()=>false,intervalMs=1000,maxReviews=3,maxBuilds=maxReviews,maxValidations=maxBuilds,maxRepairs=maxValidations,maxApprovals=maxValidations}={}){
   if(!Number.isInteger(maxReviews)||maxReviews<1||maxReviews>10||!Number.isInteger(intervalMs)||intervalMs<1||intervalMs>2147483647)throw Error('Invalid coordinator review budget or interval configuration');
   if(!Number.isInteger(maxBuilds)||maxBuilds<1||maxBuilds>10)throw Error('Invalid coordinator Builder budget configuration');
-  if(typeof automaticValidation!=='boolean'||typeof automaticRepair!=='boolean'||!Number.isInteger(maxValidations)||maxValidations<1||maxValidations>10||!Number.isInteger(maxRepairs)||maxRepairs<1||maxRepairs>10)throw Error('Invalid coordinator validation configuration');
+  if(typeof automaticValidation!=='boolean'||typeof automaticRepair!=='boolean'||typeof automaticApproval!=='boolean'||!Number.isInteger(maxValidations)||maxValidations<1||maxValidations>10||!Number.isInteger(maxRepairs)||maxRepairs<1||maxRepairs>10||!Number.isInteger(maxApprovals)||maxApprovals<1||maxApprovals>10)throw Error('Invalid coordinator validation configuration');
   if(!taskStore||!preview||!curation||typeof isReady!=='function'||typeof isTaskBusy!=='function')throw Error('Incomplete coordinator configuration');
   if(toolCurationBuild!==undefined&&typeof toolCurationBuild.start!=='function')throw Error('Invalid coordinator Builder service');
   if(toolMaintenance!==undefined&&typeof toolMaintenance.enqueue!=='function')throw Error('Invalid coordinator maintenance service');
   if(toolRepair!==undefined&&typeof toolRepair.start!=='function')throw Error('Invalid coordinator repair service');
+  if(approveTool!==undefined&&typeof approveTool!=='function')throw Error('Invalid coordinator approval service');
+  if(typeof approvalActor!=='string'||approvalActor.trim().length===0||approvalActor.length>120)throw Error('Invalid coordinator approval actor');
   if(toolAutomation!==undefined&&(typeof toolAutomation.registerProposal!=='function'||typeof toolAutomation.get!=='function'||typeof toolAutomation.listOpen!=='function'||typeof toolAutomation.setPhase!=='function'))throw Error('Invalid coordinator automation store');
-  let started=false,enabled=false,attempts=0,buildAttempts=0,validationAttempts=0,repairAttempts=0,generation=0,reason='stopped',timer,worker;
-  const pending=new Map(),seen=new Set(),automaticCurations=new Set(),dispatchedBuilds=new Set(),automaticBuilds=new Set(),validationTickets=new Set(),automaticValidationProposals=new Map(),automaticRepairTickets=new Set(),buildWork=new Set(),validationWork=new Set(),repairWork=new Set(),automationWork=new Set(),recent=[];
+  let started=false,enabled=false,attempts=0,buildAttempts=0,validationAttempts=0,repairAttempts=0,approvalAttempts=0,generation=0,reason='stopped',timer,worker;
+  const pending=new Map(),seen=new Set(),automaticCurations=new Set(),dispatchedBuilds=new Set(),automaticBuilds=new Set(),validationTickets=new Set(),automaticValidationProposals=new Map(),automaticRepairTickets=new Set(),automaticApprovalProposals=new Set(),buildWork=new Set(),validationWork=new Set(),repairWork=new Set(),approvalWork=new Set(),automationWork=new Set(),recent=[];
   const keyOf=event=>`${event.taskId}/${event.runId}`;
   function record(event,state,label,curationId){
     recent.push({taskId:event.taskId,runId:event.runId,userMessageId:event.userMessageId,state,reason:label,...(curationId?{curationId}:{})});
@@ -142,6 +144,32 @@ export function createToolCurationCoordinator({root,taskStore,preview,curation,t
     const tracked=operation.then(result=>{automationPhase(input.proposalId,'validating');record(event,'admitted',result?.deduplicated?'validation_deduplicated':'validation_queued',input.curationId);},error=>{automaticValidationProposals.delete(input.proposalId);automationPhase(input.proposalId,'failed',error?.statusCode===409?'validation_busy':'validation_enqueue_failed');record(event,'error',error?.statusCode===409?'validation_busy':'validation_error',input.curationId);});
     validationWork.add(tracked);tracked.finally(()=>validationWork.delete(tracked));
   }
+  function queueApproval(input,event){
+    if(!started||!enabled){record(event,'ignored',started?'approval_disabled':'stopped',input.curationId);return;}
+    if(!automaticApproval){automationPhase(input.proposalId,'approving');record(event,'admitted','validation_passed_waiting_approval',input.curationId);return;}
+    if(!approveTool){automationPhase(input.proposalId,'failed','approval_unconfigured');record(event,'ignored','approval_unconfigured',input.curationId);return;}
+    if(automaticApprovalProposals.has(input.proposalId))return;
+    if(approvalAttempts>=maxApprovals){automationPhase(input.proposalId,'failed','approval_budget_exhausted');record(event,'ignored','approval_budget_exhausted',input.curationId);return;}
+    if(typeof input.proposalId!=='string'){
+      automationPhase(input.proposalId,'failed','invalid_approval_binding');record(event,'ignored','invalid_approval_binding',input.curationId);return;
+    }
+    approvalAttempts++;automaticApprovalProposals.add(input.proposalId);automationPhase(input.proposalId,'approving');
+    let operation;
+    try{operation=Promise.resolve(approveTool(input.proposalId,approvalActor));}
+    catch(error){operation=Promise.reject(error);}
+    const tracked=operation.then(result=>{
+      if(!result||result.approved!==true||result.activated!==true)throw Error('Approval did not produce an active version');
+      automaticApprovalProposals.delete(input.proposalId);automationPhase(input.proposalId,'completed');record(event,'admitted','approval_completed',input.curationId);
+    }).catch(error=>{
+      automaticApprovalProposals.delete(input.proposalId);
+      if(error?.approved===true&&(error?.activated===true||error?.versionActivated===true)){
+        automationPhase(input.proposalId,'completed','approval_committed_projection_error');record(event,'admitted','approval_committed',input.curationId);
+      }else{
+        automationPhase(input.proposalId,'failed','approval_failed');record(event,'error','approval_failed',input.curationId);
+      }
+    });
+    approvalWork.add(tracked);tracked.finally(()=>approvalWork.delete(tracked));
+  }
   function observeBuilder(input){
     try{assertCurationJson(input,{maxDepth:4,maxBytes:8192});}catch{return;}
     if(!input||typeof input.curationId!=='string'||input.requestId!==buildRequestId(input.curationId)||!automaticBuilds.has(input.curationId)||validationTickets.has(input.curationId))return;
@@ -157,12 +185,13 @@ export function createToolCurationCoordinator({root,taskStore,preview,curation,t
     try{assertCurationJson(input,{maxDepth:3,maxBytes:4096});}catch{return;}
     if(!input||typeof input.proposalId!=='string')return;
     let saved;try{saved=toolAutomation?.get(input.proposalId);}catch{return;}
+    if(saved&&saved.phase!=='validating')return;
     const source=automaticValidationProposals.get(input.proposalId)??(saved?{curationId:saved.curationId,taskId:saved.sourceTaskId,runId:saved.sourceRunId??'unknown',userMessageId:saved.sourceUserMessageId??'unknown',artifactSha256:saved.artifactSha256,toolName:saved.toolName}:null);
     if(!source||automaticRepairTickets.has(input.proposalId))return;
     const event={taskId:source.taskId,runId:source.runId,userMessageId:source.userMessageId};
     if(input.status==='failed'){automationPhase(input.proposalId,'failed','validation_execution_failed');record(event,'ignored','repair_suppressed',source.curationId);return;}
     if(input.status!=='succeeded')return;
-    if(input.passed===true){automationPhase(input.proposalId,'approving');record(event,'admitted','validation_passed_waiting_approval',source.curationId);return;}
+    if(input.passed===true){queueApproval({proposalId:input.proposalId,curationId:source.curationId},event);return;}
     if(input.passed!==false)return;
     automaticRepairTickets.add(input.proposalId);
     if(!started||!enabled){record(event,'ignored',started?'repair_disabled':'stopped',source.curationId);return;}
@@ -202,10 +231,11 @@ export function createToolCurationCoordinator({root,taskStore,preview,curation,t
         if(run.phase==='validating'){
           const job=toolMaintenance?.latest?.(run.proposalId);if(!job||['pending','running'].includes(job.status))return;
           if(job.status==='failed'||job.status==='interrupted'){automationPhase(run.proposalId,'failed','validation_execution_failed');return;}
-          if(job.status==='succeeded'&&job.passed===true){automationPhase(run.proposalId,'approving');return;}
+          if(job.status==='succeeded'&&job.passed===true){queueApproval({proposalId:run.proposalId,curationId:run.curationId},event);return;}
           if(job.status==='succeeded'&&job.passed===false){let feedback=null;try{feedback=toolMaintenance.feedback(run.proposalId);}catch{}if(feedback)observeMaintenance({proposalId:run.proposalId,status:'succeeded',passed:false,validationId:feedback.validationId,reportSha256:feedback.reportSha256,artifactSha256:run.artifactSha256});else automationPhase(run.proposalId,'failed','repair_feedback_unavailable');}
           return;
         }
+        if(run.phase==='approving'){queueApproval({proposalId:run.proposalId,curationId:run.curationId},event);return;}
         if((run.phase==='repairing'||run.phase==='awaiting_replacement')&&toolRepair){let status;try{status=toolRepair.status(run.proposalId);}catch{return;}const repair=status?.repair;if(!repair)return;if(repair.replacementProposalId&&root){try{const next=getToolProposalSource(repair.replacementProposalId,{root});observeRepair({protocolVersion:'sirna-tool-repair/v1',proposalId:run.proposalId,rootProposalId:run.rootProposalId,attempt:run.attempt,phase:'superseded',replacementProposalId:repair.replacementProposalId,replacementArtifactSha256:next.registry.artifactSha256,replacementToolName:next.input.toolName});}catch{/* A malformed successor remains outside automation. */}return;}if(repair.phase==='awaiting_replacement')automationPhase(run.proposalId,'awaiting_replacement');else if(repair.phase==='failed'||repair.phase==='interrupted')automationPhase(run.proposalId,'failed',repair.phase);}
       });
       automationWork.add(task);task.finally(()=>automationWork.delete(task));await task;
@@ -217,7 +247,7 @@ export function createToolCurationCoordinator({root,taskStore,preview,curation,t
     worker=Promise.resolve().then(async()=>{await consume();await reconcileAutomation();}).finally(()=>{worker=undefined;});
     return worker;
   }
-  function status(){return structuredClone({protocolVersion:'sirna-tool-curation-automation/v1',started,enabled,maxReviews,attempts,remaining:maxReviews-attempts,maxBuilds,buildAttempts,buildRemaining:maxBuilds-buildAttempts,automaticValidation,maxValidations,validationAttempts,validationRemaining:maxValidations-validationAttempts,automaticRepair,maxRepairs,repairAttempts,repairRemaining:maxRepairs-repairAttempts,pending:pending.size,reason,recent});}
+  function status(){return structuredClone({protocolVersion:'sirna-tool-curation-automation/v1',started,enabled,maxReviews,attempts,remaining:maxReviews-attempts,maxBuilds,buildAttempts,buildRemaining:maxBuilds-buildAttempts,automaticValidation,maxValidations,validationAttempts,validationRemaining:maxValidations-validationAttempts,automaticRepair,maxRepairs,repairAttempts,repairRemaining:maxRepairs-repairAttempts,automaticApproval,maxApprovals,approvalAttempts,approvalRemaining:maxApprovals-approvalAttempts,pending:pending.size,reason,recent});}
   return {
     start(){
       if(started)return;
@@ -230,6 +260,7 @@ export function createToolCurationCoordinator({root,taskStore,preview,curation,t
       if(buildWork.size)await Promise.allSettled([...buildWork]);
       if(validationWork.size)await Promise.allSettled([...validationWork]);
       if(repairWork.size)await Promise.allSettled([...repairWork]);
+      if(approvalWork.size)await Promise.allSettled([...approvalWork]);
       if(automationWork.size)await Promise.allSettled([...automationWork]);
     },
     configure(input){
