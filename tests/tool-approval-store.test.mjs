@@ -61,6 +61,18 @@ test('claims one running job globally across two SQLite connections', t => {
   first.close(); second.close();
 });
 
+test('two connections race for pending work with exactly one claimant', t => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sirna-approval-race-')));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const first = new ToolApprovalStore({root, isVerified: () => true});
+  const second = new ToolApprovalStore({root, isVerified: () => true});
+  first.enqueue(randomUUID(), randomUUID(), {approvedBy: 'a'});
+  second.enqueue(randomUUID(), randomUUID(), {approvedBy: 'b'});
+  const claims = [first.claim(), second.claim()];
+  assert.equal(claims.filter(Boolean).length, 1);
+  first.close(); second.close();
+});
+
 test('finishes running jobs only and records terminal result safely', t => {
   const {store} = fixture(t, {isVerified: () => true});
   const job = store.enqueue(randomUUID(), randomUUID(), {approvedBy: 'reviewer'}).job;
@@ -75,6 +87,23 @@ test('finishes running jobs only and records terminal result safely', t => {
   assert.equal(error.status, 'failed');
   assert.equal(error.error, 'private failure');
   store.close();
+});
+
+test('two connections can finish a running job only once', t => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sirna-approval-finish-race-')));
+  t.after(() => fs.rmSync(root, {recursive: true, force: true}));
+  const first = new ToolApprovalStore({root, isVerified: () => true});
+  const second = new ToolApprovalStore({root, isVerified: () => true});
+  const job = first.enqueue(randomUUID(), randomUUID(), {approvedBy: 'reviewer'}).job;
+  assert.equal(second.claim().id, job.id);
+  const results = [];
+  results.push(() => first.finish(job.id, {approved: true, activated: true}));
+  results.push(() => second.finish(job.id, {approved: true, activated: true}));
+  const outcomes = results.map(run => { try { return {ok: true, value: run()}; } catch (error) { return {ok: false, error}; } });
+  assert.equal(outcomes.filter(item => item.ok).length, 1);
+  assert.equal(outcomes.filter(item => !item.ok).length, 1);
+  assert.equal(first.get(job.id).status, 'succeeded');
+  first.close(); second.close();
 });
 
 test('caps request aliases and queue size while retaining idempotent retries', t => {
@@ -127,4 +156,34 @@ test('rejects an existing database with the wrong application identity', t => {
   db.exec('PRAGMA application_id=123');
   db.close();
   assert.throws(() => new ToolApprovalStore({root}), /Unknown approval database/);
+});
+
+test('rejects an existing database with the wrong user version', t => {
+  const {root, store} = fixture(t, {isVerified: () => true});
+  store.close();
+  const file = path.join(root, 'runtime', 'tool-approval', 'jobs.sqlite');
+  const db = new DatabaseSync(file);
+  db.exec('PRAGMA user_version=99');
+  db.close();
+  assert.throws(() => new ToolApprovalStore({root}), /Unknown approval database/);
+});
+
+test('rejects an existing database with an unknown schema', t => {
+  const {root, store} = fixture(t, {isVerified: () => true});
+  store.close();
+  const file = path.join(root, 'runtime', 'tool-approval', 'jobs.sqlite');
+  const db = new DatabaseSync(file);
+  db.exec('DROP TABLE control');
+  db.close();
+  assert.throws(() => new ToolApprovalStore({root}), /Unknown approval schema/);
+});
+
+test('rejects a hardlinked approval database', t => {
+  const {root, store} = fixture(t, {isVerified: () => true});
+  store.close();
+  const folder = path.join(root, 'runtime', 'tool-approval');
+  const file = path.join(folder, 'jobs.sqlite');
+  const linked = path.join(folder, 'jobs-copy.sqlite');
+  fs.linkSync(file, linked);
+  assert.throws(() => new ToolApprovalStore({root}), /Unsafe approval database file/);
 });
