@@ -22,6 +22,6 @@
 
 冷却：生产service显式604800000ms，未配置默认0。自动请求有gap/合格错误信号用online_gap，否则post_run；旧默认摘要不变。候选校验后通过store.findRecentCandidate查全部持久candidate、精确能力键、其他ID、包含边界的合法完成时间，排除未来记录。采用前校验trace/result绑定，损坏即拒绝；查找到complete无await。重复写标准skip且说明后端规则/原ID，原模型对象不变，skip不延长期限。模型调用已经发生，不能声称节约该次费用。
 
-边界：规则预览和报告本身不派发；启用的coordinator在任务收尾后安排独立审查。Curator的candidate是建议；本进程自动审查产生的candidate可以在有界条件下交给Builder，人工审查仍需用户显式交接，且实际登记后才有能力平台的submitted提案。构建沿用原任务的Pi与六个OCI构建操作；仅接受node/空dependencies/exact/no_external_access/无parent，工具名称冻结。未接自动验证、Goal限制/验证后回调或自动批准。结构与引用检查不证明建议正确或有收益；JSON.parse沿用标准重复键语义。预览/trace仅常见字段脱敏，不承诺消除任意私密文本。
+边界：规则预览和报告本身不派发；启用的coordinator在任务收尾后安排独立审查。Curator的candidate是建议；本进程自动审查产生的candidate可以在有界条件下交给Builder，人工审查仍需用户显式交接，且实际登记后才有能力平台的submitted提案。构建沿用原任务的Pi与六个OCI构建操作；仅接受node/空dependencies/exact/no_external_access/无parent，工具名称冻结。12B已接入可选的`submitted → maintenance.enqueue`观察器，但默认关闭；它只接受本进程自动Builder的持久submitted终态，并把proposal/artifact身份再次绑定到维护请求。维护成功不改变工具状态，人工批准仍是独立操作。自动修订、Goal限制/验证后回调和自动批准尚未接入。结构与引用检查不证明建议正确或有收益；JSON.parse沿用标准重复键语义。预览/trace仅常见字段脱敏，不承诺消除任意私密文本。
 
 参考：sirna-pi-agent-service-refactor@67d275494c50f1e5c205b96b72a7b1623acfbe1d 的同目录 MODULE、trace、coordinator 和 agent-tool-curator。未发现参考根目录 LICENSE/NOTICE，本模块按公开职责与行为独立实现，未复制原模块。

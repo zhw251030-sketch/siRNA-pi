@@ -31,12 +31,12 @@ export function createToolMaintenance({root,store,validate,canValidate=()=>true,
     start(){if(!started){store.interruptRunning();started=true;if(store.halted())accepting=false;wake();}return Promise.resolve();},
     status(){return {accepting:accepting&&!store.halted(),halted:store.halted()};},
     latest(id){proposal(id);return store.latest(id);},
-    enqueue(id,requestId){if(!accepting)throw new ToolMaintenanceError(503,'Maintenance is stopping');maintenanceId(id);maintenanceId(requestId);
+    enqueue(id,requestId,{artifactSha256=null}={}){if(!accepting)throw new ToolMaintenanceError(503,'Maintenance is stopping');maintenanceId(id);maintenanceId(requestId);if(artifactSha256!==null&&(!/^[a-f0-9]{64}$/.test(artifactSha256)))throw new ToolMaintenanceError(400,'Invalid artifact binding');
       const previous=store.getByRequest(requestId);
       // A retry still receives its original result if validation already changed
       // proposal state; it must not become a new execution or a spurious 409.
-      if(previous){if(previous.proposalId!==id)throw new ToolMaintenanceError(409,'Request key belongs to a different proposal');return {job:previous,deduplicated:true};}
-      const current=ready(id);const result=store.enqueue(id,requestId,{artifactSha256:current.artifactSha256});wake();return result;},
+      if(previous){if(previous.proposalId!==id)throw new ToolMaintenanceError(409,'Request key belongs to a different proposal');if(artifactSha256!==null&&previous.artifactSha256!==artifactSha256)throw new ToolMaintenanceError(409,'Request key is bound to a different artifact.');return {job:previous,deduplicated:true};}
+      const current=ready(id);if(artifactSha256!==null&&current.artifactSha256!==artifactSha256)throw new ToolMaintenanceError(409,'候选产物摘要已变化，拒绝自动入队。');const result=store.enqueue(id,requestId,{artifactSha256:current.artifactSha256});wake();return result;},
     list(){return listRegisteredToolProposals({root}).map(p=>({id:p.id,toolName:p.toolName,state:p.state,createdAt:p.createdAt,updatedAt:p.updatedAt,latestValidationId:p.latestValidationId??null,latestJob:store.latest(p.id)}));},
     feedback(id){proposal(id);if(['pending','running'].includes(store.latest(id)?.status))return null;return getToolRepairFeedback(id,{root});},
     summary(id){proposal(id);const latest=getLatestToolValidationReport(id,{root});if(!latest)return null;

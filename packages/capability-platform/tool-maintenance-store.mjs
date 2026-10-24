@@ -60,7 +60,7 @@ export class ToolMaintenanceStore {
   halted(){return this.#db.prepare('SELECT halted FROM control WHERE id=1').get()?.halted!==0;}
   halt(){this.#db.prepare('UPDATE control SET halted=1 WHERE id=1').run();}
   enqueue(proposalId,requestId,{artifactSha256=null}={}){maintenanceId(proposalId);maintenanceId(requestId);if(artifactSha256!==null&&!/^[a-f0-9]{64}$/.test(artifactSha256))throw new Error('Invalid artifact binding');return this.#transaction(()=>{
-    const previous=this.getByRequest(requestId);if(previous){if(previous.proposalId!==proposalId)throw new ToolMaintenanceError(409,'Request key belongs to a different proposal');return {job:previous,deduplicated:true};}
+    const previous=this.getByRequest(requestId);if(previous){if(previous.proposalId!==proposalId)throw new ToolMaintenanceError(409,'Request key belongs to a different proposal');if(artifactSha256!==null&&previous.artifactSha256!==artifactSha256)throw new ToolMaintenanceError(409,'Request key is bound to a different artifact.');return {job:previous,deduplicated:true};}
     let job=row(this.#db.prepare("SELECT * FROM jobs WHERE proposal_id=? AND status IN ('pending','running')").get(proposalId));const deduplicated=!!job;
     if(!job){if(this.#db.prepare("SELECT count(*) AS n FROM jobs WHERE status IN ('pending','running')").get().n>=100)throw new ToolMaintenanceError(429,'Maintenance queue capacity reached');
       const id=randomUUID(),now=new Date().toISOString();this.#db.prepare("INSERT INTO jobs(id,proposal_id,status,created_at,updated_at,artifact_sha256) VALUES (?,?,'pending',?,?,?)").run(id,proposalId,now,now,artifactSha256);job=this.get(id);}

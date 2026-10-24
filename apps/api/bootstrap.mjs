@@ -84,8 +84,10 @@ const toolCuration = createToolCurationService({store:curationStore,preview:tool
   onSettled:(run,metadata)=>toolCurationCoordinator?.observeCuration(run,metadata),
   curator:createAgentToolCurator({runtime:curatorRuntime,timeoutMs:180000})});
 const curationBuildStore = new ToolCurationBuildStore({root:projectRoot});
-toolCurationBuild = createToolCurationBuildService({root:projectRoot,store:curationBuildStore,curationStore,taskStore,taskMessages,agentRuntime,listExistingTools});
-toolCurationCoordinator=createToolCurationCoordinator({taskStore,preview:toolCurationPreview,curation:toolCuration,toolCurationBuild,
+toolCurationBuild = createToolCurationBuildService({root:projectRoot,store:curationBuildStore,curationStore,taskStore,taskMessages,agentRuntime,listExistingTools,
+  onSettled:ticket=>toolCurationCoordinator?.observeBuilder(ticket)});
+toolCurationCoordinator=createToolCurationCoordinator({taskStore,preview:toolCurationPreview,curation:toolCuration,toolCurationBuild,toolMaintenance,
+  automaticValidation:process.env.SIRNA_AUTOMATIC_VALIDATION==='1',
   isReady:createCurationAutomationReadiness({taskMessages,agentRuntime}),isTaskBusy:taskId=>taskMessages.isTaskBusy(taskId),intervalMs:1000,maxReviews:3});
 const server = createAppServer({ taskStore, agentRuntime, workspaceFiles, taskMessages, toolMaintenance, toolRepair, toolCurationPreview, toolCuration, toolCurationBuild, toolCurationCoordinator });
 const shutdown = createApiShutdown({server,toolMaintenance,toolRepair,toolCuration,toolCurationBuild,toolCurationCoordinator,toolsServer,

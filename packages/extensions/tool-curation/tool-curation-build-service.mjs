@@ -13,9 +13,17 @@ const safeError=e=>e instanceof ToolCurationBuildError?e:new ToolCurationBuildEr
 const ids=(taskId,id)=>{if(!buildId(taskId)||!buildId(id))fail('invalid_id');};
 const normalize=name=>name.replace(/^sirna_tools_/,'');
 
-export function createToolCurationBuildService({root,store,curationStore,taskStore,taskMessages,agentRuntime,listExistingTools}){
+export function createToolCurationBuildService({root,store,curationStore,taskStore,taskMessages,agentRuntime,listExistingTools,onSettled}={}){
+  if(onSettled!==undefined&&typeof onSettled!=='function')throw Error('Invalid Builder settled callback');
   let accepting=true;
   const pending=new Map(),turns=new Set(),uncertain=new Set();
+  function notifySettled(id,extra={}){
+    if(typeof onSettled!=='function')return;
+    let ticket;try{ticket=store.get(id);}catch{return;}
+    if(!ticket)return;
+    const notification={protocolVersion:'sirna-tool-curation-builder/v1',curationId:ticket.curationId,taskId:ticket.taskId,sourceTaskId:ticket.taskId,requestId:ticket.requestId,phase:ticket.phase,userMessageId:ticket.userMessageId??null,runId:ticket.runId??null,...(extra.proposalId?{proposalId:extra.proposalId}:{}),...(extra.artifactSha256?{artifactSha256:extra.artifactSha256}:{})};
+    try{Promise.resolve(onSettled(notification)).catch(()=>{});}catch{/* Notification failure cannot rewrite the durable Builder phase. */}
+  }
   function candidate(taskId,id){
     const run=curationStore.get(taskId,id);if(!run)fail('not_found');if(run.status!=='candidate')fail('not_candidate');
     let frozen;try{frozen=curationBuildPrompt(run);}catch(e){fail(e instanceof RangeError?'context_too_large':'invalid_evidence');}
@@ -69,10 +77,13 @@ export function createToolCurationBuildService({root,store,curationStore,taskSto
     const confirmed=!ticket.submissionUncertain&&!uncertain.has(id)&&completionKnown&&assistant.status==='complete'&&result?.task?.status==='idle'&&done.payload.status==='succeeded'&&!events.some(e=>e.type==='error');
     // currentRunId can still describe an earlier run; only this result and its
     // durable message/event association establish the actual dispatch identity.
-    store.update(id,confirmed?(proposalId?'submitted':'no_proposal'):(proposalId||!completionKnown||ticket.submissionUncertain||uncertain.has(id)?'outcome_unknown':'failed'),{...(user?{userMessageId:user.id}:{}),...(events.length?{runId:result.finalRunId}:{}),submissionUncertain:uncertain.has(id)});
+    const phase=confirmed?(proposalId?'submitted':'no_proposal'):(proposalId||!completionKnown||ticket.submissionUncertain||uncertain.has(id)?'outcome_unknown':'failed');
+    const artifactSha256=proposalId?getToolProposalSource(proposalId,{root}).registry.artifactSha256:undefined;
+    store.update(id,phase,{...(user?{userMessageId:user.id}:{}),...(events.length?{runId:result.finalRunId}:{}),submissionUncertain:uncertain.has(id)});
+    notifySettled(id,{...(proposalId?{proposalId,artifactSha256}:{} )});
   }
   function track(id,completion){
-    const tracked=Promise.resolve(completion).then(result=>finish(id,result)).catch(()=>{try{store.update(id,'outcome_unknown');}catch{/* Ticket remains reserved; never replay. */}});
+    const tracked=Promise.resolve(completion).then(result=>finish(id,result)).catch(()=>{try{store.update(id,'outcome_unknown');notifySettled(id);}catch{/* Ticket remains reserved; never replay. */}});
     turns.add(tracked);tracked.then(()=>turns.delete(tracked));
   }
   async function dispatch(taskId,id,binding){

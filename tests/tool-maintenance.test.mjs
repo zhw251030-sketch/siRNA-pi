@@ -60,6 +60,15 @@ test('pending-only startup without a previous halt resumes the accepted job',asy
   const worker=createToolMaintenance({root,store,validate:async id=>{runs.push(id);return {validationId:randomUUID(),passed:false};}});
   const job=worker.enqueue(p.id,randomUUID()).job;await worker.start();await worker.drain();assert.deepEqual(runs,[p.id]);assert.equal(store.get(job.id).status,'succeeded');assert.equal(store.halted(),false);await worker.stop();
 });
+test('enqueue refuses when an automatic handoff artifact digest differs from the registered proposal',async t=>{
+  const {root,store,proposal}=setup(t),p=proposal();const worker=createToolMaintenance({root,store,validate:async()=>({validationId:randomUUID(),passed:false})});
+  assert.throws(()=>worker.enqueue(p.id,randomUUID(),{artifactSha256:'0'.repeat(64)}),e=>e.statusCode===409);assert.equal(store.list().length,0);await worker.stop();
+});
+test('duplicate maintenance request refuses a different artifact binding',async t=>{
+  const {root,store,proposal}=setup(t),p=proposal(),worker=createToolMaintenance({root,store,validate:async()=>({validationId:randomUUID(),passed:false})}),requestId=randomUUID();
+  worker.enqueue(p.id,requestId,{artifactSha256:p.saved.integrity.artifactSha256});
+  assert.throws(()=>worker.enqueue(p.id,requestId,{artifactSha256:'0'.repeat(64)}),e=>e.statusCode===409);assert.equal(store.list().length,1);await worker.stop();
+});
 test('recovery rolls back interrupted rows if halt persistence fails and commits both outcomes on retry',t=>{
   const {root,store,cleanup}=setup(t);const job=store.enqueue(randomUUID(),randomUUID()).job;store.claim();
   const file=path.join(root,'runtime/tool-maintenance/jobs.sqlite'),db=new DatabaseSync(file);cleanup.push(()=>db.close());

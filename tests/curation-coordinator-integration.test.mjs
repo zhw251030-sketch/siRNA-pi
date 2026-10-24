@@ -13,6 +13,7 @@ import {ToolCurationStore} from '../packages/extensions/tool-curation/tool-curat
 import {ToolGapStore} from '../packages/extensions/tool-curation/tool-gap-store.mjs';
 import {createToolCurationPreview} from '../packages/extensions/tool-curation/tool-curation-preview.mjs';
 import {createToolCurationService} from '../packages/extensions/tool-curation/tool-curation-service.mjs';
+import {buildRequestId} from '../packages/extensions/tool-curation/tool-curation-build-contract.mjs';
 
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 function fixture(t,{onSettled,workspaceFiles,run}={}) {
@@ -127,7 +128,7 @@ test('automation HTTP without configuration is 503 and unexpected exceptions are
   for(const response of [await broken.get(),await broken.post({enabled:true})]){assert.ok([503,409].includes(response.status));assert.equal((await response.text()).includes('PRIVATE_HOST_KEY'),false);}
 });
 
-async function curationFixture(t,{curate,readiness,isTaskBusy,beforeCuration,toolCurationBuild}={}){
+async function curationFixture(t,{curate,readiness,isTaskBusy,beforeCuration,toolCurationBuild,toolMaintenance,automaticValidation=false}={}){
   const module=await import('../packages/extensions/tool-curation/tool-curation-coordinator.mjs').catch(()=>({}));
   assert.equal(typeof module.createToolCurationCoordinator,'function','real coordinator must be available');
   const f=fixture(t),curations=new ToolCurationStore({root:f.root}),gaps=new ToolGapStore({root:f.root});let calls=0;
@@ -145,7 +146,7 @@ async function curationFixture(t,{curate,readiness,isTaskBusy,beforeCuration,too
     for(let i=0;i<3;i++){emit({type:'tool_start',toolCallId:`call-${i}`,toolName:'fetch_dataset',args:{identifier:i}});emit({type:'tool_end',toolCallId:`call-${i}`,toolName:'fetch_dataset',isError:false,result:{rows:[1,2]}});}
     emit({type:'assistant_message',text:'saved fetch results'});emit({type:'done',runId,status:'succeeded'});
   };
-  coordinator=module.createToolCurationCoordinator({taskStore:f.tasks,preview,curation:service,toolCurationBuild,isReady:readiness??lifecycle.createCurationAutomationReadiness({taskMessages:f.messages,agentRuntime:f.runtime}),isTaskBusy:isTaskBusy??(taskId=>f.messages.isTaskBusy(taskId)),intervalMs:1000,maxReviews:3});
+  coordinator=module.createToolCurationCoordinator({taskStore:f.tasks,preview,curation:service,toolCurationBuild,toolMaintenance,automaticValidation,isReady:readiness??lifecycle.createCurationAutomationReadiness({taskMessages:f.messages,agentRuntime:f.runtime}),isTaskBusy:isTaskBusy??(taskId=>f.messages.isTaskBusy(taskId)),intervalMs:1000,maxReviews:3});
   f.messages.onSettled=value=>coordinator.observeRun(value);
   service.start();coordinator.start();f.closers.push(()=>service.stop(),()=>coordinator.stop());
   const turn=async(task=f.task,requestId)=>{const value=await f.messages.start({taskId:task.id,message:'Compare datasets',...(requestId?{requestId}:{})},()=>{});const saved=await value.completion;await coordinator.runOnce();await new Promise(r=>setImmediate(r));return saved;};
@@ -189,6 +190,12 @@ test('automatic Curator skip never starts Builder',async t=>{
   assert.ok(f.coordinator.status().recent.some(item=>item.reason==='curation_skip'));
 });
 
+test('automatic candidate remains manual while the coordinator switch is disabled',async t=>{
+  const starts=[];let f;f=await curationFixture(t,{beforeCuration:()=>f.coordinator.configure({enabled:false}),toolCurationBuild:{start:async(...args)=>{starts.push(args);}}});
+  f.coordinator.configure({enabled:true});await f.turn();const candidate=await waitFor(()=>f.curations.list(f.task.id).find(row=>row.status==='candidate'));
+  assert.ok(candidate);assert.equal(starts.length,0);assert.ok(f.coordinator.status().recent.some(item=>item.reason==='builder_disabled'));
+});
+
 test('automatic Builder dispatch refuses a busy task and leaves candidate for manual handoff',async t=>{
   const starts=[];let busy=false;
   const f=await curationFixture(t,{beforeCuration:()=>{busy=true;},toolCurationBuild:{start:async(...args)=>{starts.push(args);}},isTaskBusy:()=>busy});
@@ -201,6 +208,30 @@ test('automatic Builder dispatch refuses a busy task and leaves candidate for ma
   assert.equal(starts.length,0);
   assert.equal(f.curations.get(f.task.id,candidate.id).status,'candidate');
   assert.ok(f.coordinator.status().recent.some(item=>item.reason==='builder_busy'));
+});
+
+test('submitted automatic Builder ticket enters maintenance only when automatic validation is enabled',async t=>{
+  const starts=[],jobs=[];const proposalId=randomUUID(),artifactSha256='a'.repeat(64);
+  const f=await curationFixture(t,{automaticValidation:true,toolMaintenance:{enqueue:(...args)=>{jobs.push(args);return {job:{id:randomUUID(),proposalId:args[0],status:'pending'},deduplicated:false};}},toolCurationBuild:{start:async(...args)=>{starts.push(args);return {handoff:{phase:'running',curationId:args[1]}};}}});
+  f.coordinator.configure({enabled:true});await f.turn();const candidate=await waitFor(()=>f.curations.list(f.task.id).find(row=>row.status==='candidate'));assert.ok(candidate);await waitFor(()=>starts.length===1);
+  f.coordinator.observeBuilder({curationId:candidate.id,requestId:buildRequestId(candidate.id),phase:'submitted',proposalId,artifactSha256});await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(jobs.length,1);assert.equal(jobs[0][0],proposalId);assert.match(jobs[0][1],/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);assert.deepEqual(jobs[0][2],{artifactSha256});
+  f.coordinator.observeBuilder({curationId:candidate.id,requestId:buildRequestId(candidate.id),phase:'submitted',proposalId,artifactSha256});await new Promise(resolve=>setImmediate(resolve));assert.equal(jobs.length,1);
+});
+
+test('automatic validation stays side-effect free by default and suppresses no-proposal tickets',async t=>{
+  const jobs=[],starts=[],proposalId=randomUUID();const f=await curationFixture(t,{toolMaintenance:{enqueue:(...args)=>{jobs.push(args);}},toolCurationBuild:{start:async(...args)=>{starts.push(args);return {handoff:{phase:'running',curationId:args[1]}};}}});
+  f.coordinator.configure({enabled:true});await f.turn();const candidate=await waitFor(()=>f.curations.list(f.task.id).find(row=>row.status==='candidate'));assert.ok(candidate);await waitFor(()=>starts.length===1);
+  f.coordinator.observeBuilder({curationId:candidate.id,requestId:buildRequestId(candidate.id),phase:'submitted',proposalId,artifactSha256:'b'.repeat(64)});
+  f.coordinator.observeBuilder({curationId:candidate.id,requestId:buildRequestId(candidate.id),phase:'no_proposal',proposalId,artifactSha256:'b'.repeat(64)});await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(jobs.length,0);assert.ok(f.coordinator.status().recent.some(item=>item.reason==='validation_disabled'));
+});
+
+test('late Builder terminal notification after coordinator stop cannot enqueue validation',async t=>{
+  const jobs=[],starts=[];const f=await curationFixture(t,{automaticValidation:true,toolMaintenance:{enqueue:(...args)=>{jobs.push(args);}},toolCurationBuild:{start:async(...args)=>{starts.push(args);return {handoff:{phase:'running',curationId:args[1]}};}}});
+  f.coordinator.configure({enabled:true});await f.turn();const candidate=await waitFor(()=>f.curations.list(f.task.id).find(row=>row.status==='candidate'));assert.ok(candidate);await waitFor(()=>starts.length===1);
+  await f.coordinator.stop();f.coordinator.observeBuilder({curationId:candidate.id,requestId:buildRequestId(candidate.id),phase:'submitted',proposalId:randomUUID(),artifactSha256:'c'.repeat(64)});
+  assert.equal(jobs.length,0);assert.ok(f.coordinator.status().recent.some(item=>item.reason==='stopped'));
 });
 
 test('real completed task and HTTP switch persist one candidate, then apply backend cooldown on a new task',async t=>{

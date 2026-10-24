@@ -1,7 +1,7 @@
-import {randomUUID} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {ToolCurationError} from './tool-curation-service.mjs';
 import {assertCurationJson,buildToolCurationTrace} from './tool-curation-evidence.mjs';
-import {curationBuildPrompt} from './tool-curation-build-contract.mjs';
+import {buildRequestId,curationBuildPrompt} from './tool-curation-build-contract.mjs';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const runIdentity=/^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{64})$/i;
@@ -9,13 +9,15 @@ const fail=(status,message)=>{throw new ToolCurationError(status,message);};
 
 // Observations are intentionally process-local. Only the existing Curator
 // store owns durable admission, task/run uniqueness, and accepted work.
-export function createToolCurationCoordinator({taskStore,preview,curation,toolCurationBuild,isReady,isTaskBusy=()=>false,intervalMs=1000,maxReviews=3,maxBuilds=maxReviews}={}){
+export function createToolCurationCoordinator({taskStore,preview,curation,toolCurationBuild,toolMaintenance,automaticValidation=false,isReady,isTaskBusy=()=>false,intervalMs=1000,maxReviews=3,maxBuilds=maxReviews,maxValidations=maxBuilds}={}){
   if(!Number.isInteger(maxReviews)||maxReviews<1||maxReviews>10||!Number.isInteger(intervalMs)||intervalMs<1||intervalMs>2147483647)throw Error('Invalid coordinator review budget or interval configuration');
   if(!Number.isInteger(maxBuilds)||maxBuilds<1||maxBuilds>10)throw Error('Invalid coordinator Builder budget configuration');
+  if(typeof automaticValidation!=='boolean'||!Number.isInteger(maxValidations)||maxValidations<1||maxValidations>10)throw Error('Invalid coordinator validation configuration');
   if(!taskStore||!preview||!curation||typeof isReady!=='function'||typeof isTaskBusy!=='function')throw Error('Incomplete coordinator configuration');
   if(toolCurationBuild!==undefined&&typeof toolCurationBuild.start!=='function')throw Error('Invalid coordinator Builder service');
-  let started=false,enabled=false,attempts=0,buildAttempts=0,generation=0,reason='stopped',timer,worker;
-  const pending=new Map(),seen=new Set(),automaticCurations=new Set(),dispatchedBuilds=new Set(),buildWork=new Set(),recent=[];
+  if(toolMaintenance!==undefined&&typeof toolMaintenance.enqueue!=='function')throw Error('Invalid coordinator maintenance service');
+  let started=false,enabled=false,attempts=0,buildAttempts=0,validationAttempts=0,generation=0,reason='stopped',timer,worker;
+  const pending=new Map(),seen=new Set(),automaticCurations=new Set(),dispatchedBuilds=new Set(),automaticBuilds=new Set(),validationTickets=new Set(),buildWork=new Set(),validationWork=new Set(),recent=[];
   const keyOf=event=>`${event.taskId}/${event.runId}`;
   function record(event,state,label,curationId){
     recent.push({taskId:event.taskId,runId:event.runId,userMessageId:event.userMessageId,state,reason:label,...(curationId?{curationId}:{})});
@@ -84,9 +86,10 @@ export function createToolCurationCoordinator({taskStore,preview,curation,toolCu
   function observeCuration(input,metadata={}){
     try{assertCurationJson(input,{maxDepth:32,maxBytes:65536});}catch{record({taskId:'unknown',runId:'unknown',userMessageId:'unknown'},'ignored','invalid_curation');return;}
     if(!input||metadata?.automatic!==true||typeof input.id!=='string'||dispatchedBuilds.has(input.id))return;
+    const event={taskId:input.taskId,runId:input.runId,userMessageId:input.userMessageId};
+    if(!started||!enabled){record(event,'ignored',started?'builder_disabled':'stopped',input.id);return;}
     automaticCurations.add(input.id);
     dispatchedBuilds.add(input.id);
-    const event={taskId:input.taskId,runId:input.runId,userMessageId:input.userMessageId};
     if(input.status!=='candidate'){
       record(event,'ignored',input.status==='skipped'?'curation_skip':'curation_error',input.id);return;
     }
@@ -102,11 +105,42 @@ export function createToolCurationCoordinator({taskStore,preview,curation,toolCu
     let frozen;
     try{frozen=curationBuildPrompt(input);}catch{record(event,'ignored','invalid_candidate',input.id);return;}
     buildAttempts++;
+    // Reserve provenance synchronously before invoking Builder. A very fast
+    // runtime may settle the ticket before the start promise's microtask runs.
+    automaticBuilds.add(input.id);
     let operation;
     try{operation=Promise.resolve(toolCurationBuild.start(input.taskId,input.id,frozen.binding));}
-    catch(error){record(event,'error',error?.statusCode===409?'builder_busy':'builder_error',input.id);return;}
-    const tracked=operation.then(result=>record(event,'admitted',result?.deduplicated?'builder_deduplicated':'builder_dispatched',input.id),error=>record(event,'error',error?.statusCode===409?'builder_busy':'builder_error',input.id));
+    catch(error){automaticBuilds.delete(input.id);record(event,'error',error?.statusCode===409?'builder_busy':'builder_error',input.id);return;}
+    const tracked=operation.then(result=>{if(!result?.handoff||result?.deduplicated)automaticBuilds.delete(input.id);record(event,'admitted',result?.deduplicated?'builder_deduplicated':'builder_dispatched',input.id);},error=>{automaticBuilds.delete(input.id);record(event,'error',error?.statusCode===409?'builder_busy':'builder_error',input.id);});
     buildWork.add(tracked);tracked.finally(()=>buildWork.delete(tracked));
+  }
+  const validationRequestId=(curationId,proposalId,artifactSha256)=>{
+    const chars=createHash('sha256').update(`automatic-tool-validation:v1\0${proposalId}\0${curationId}\0${artifactSha256}`).digest('hex').split('');
+    chars[12]='4';chars[16]=(Number.parseInt(chars[16],16)&3|8).toString(16);
+    return `${chars.slice(0,8).join('')}-${chars.slice(8,12).join('')}-${chars.slice(12,16).join('')}-${chars.slice(16,20).join('')}-${chars.slice(20,32).join('')}`;
+  };
+  function observeBuilder(input){
+    try{assertCurationJson(input,{maxDepth:4,maxBytes:8192});}catch{return;}
+    if(!input||typeof input.curationId!=='string'||input.requestId!==buildRequestId(input.curationId)||!automaticBuilds.has(input.curationId)||validationTickets.has(input.curationId))return;
+    validationTickets.add(input.curationId);
+    const event={taskId:input.taskId??'unknown',runId:input.runId??'unknown',userMessageId:input.userMessageId??'unknown'};
+    if(!started||!enabled){record(event,'ignored',started?'disabled':'stopped',input.curationId);return;}
+    if(input.phase!=='submitted'){
+      record(event,'ignored','validation_suppressed',input.curationId);return;
+    }
+    if(!automaticValidation){record(event,'ignored','validation_disabled',input.curationId);return;}
+    if(!toolMaintenance){record(event,'ignored','validation_unconfigured',input.curationId);return;}
+    if(validationAttempts>=maxValidations){record(event,'ignored','validation_budget_exhausted',input.curationId);return;}
+    if(typeof input.proposalId!=='string'||typeof input.artifactSha256!=='string'||!/^[a-f0-9]{64}$/.test(input.artifactSha256)){
+      record(event,'ignored','invalid_validation_binding',input.curationId);return;
+    }
+    validationAttempts++;
+    const requestId=validationRequestId(input.curationId,input.proposalId,input.artifactSha256);
+    let operation;
+    try{operation=Promise.resolve(toolMaintenance.enqueue(input.proposalId,requestId,{artifactSha256:input.artifactSha256}));}
+    catch(error){record(event,'error',error?.statusCode===409?'validation_busy':'validation_error',input.curationId);return;}
+    const tracked=operation.then(result=>record(event,'admitted',result?.deduplicated?'validation_deduplicated':'validation_queued',input.curationId),error=>record(event,'error',error?.statusCode===409?'validation_busy':'validation_error',input.curationId));
+    validationWork.add(tracked);tracked.finally(()=>validationWork.delete(tracked));
   }
   function runOnce(){
     if(worker)return worker;
@@ -114,7 +148,7 @@ export function createToolCurationCoordinator({taskStore,preview,curation,toolCu
     worker=Promise.resolve().then(consume).finally(()=>{worker=undefined;});
     return worker;
   }
-  function status(){return structuredClone({protocolVersion:'sirna-tool-curation-automation/v1',started,enabled,maxReviews,attempts,remaining:maxReviews-attempts,maxBuilds,buildAttempts,buildRemaining:maxBuilds-buildAttempts,pending:pending.size,reason,recent});}
+  function status(){return structuredClone({protocolVersion:'sirna-tool-curation-automation/v1',started,enabled,maxReviews,attempts,remaining:maxReviews-attempts,maxBuilds,buildAttempts,buildRemaining:maxBuilds-buildAttempts,automaticValidation,maxValidations,validationAttempts,validationRemaining:maxValidations-validationAttempts,pending:pending.size,reason,recent});}
   return {
     start(){
       if(started)return;
@@ -125,6 +159,7 @@ export function createToolCurationCoordinator({taskStore,preview,curation,toolCu
       started=false;close('stopped');clearInterval(timer);timer=undefined;
       if(worker)await worker;
       if(buildWork.size)await Promise.allSettled([...buildWork]);
+      if(validationWork.size)await Promise.allSettled([...validationWork]);
     },
     configure(input){
       if(!started)fail(503,'Automatic curation is unavailable.');
@@ -149,6 +184,7 @@ export function createToolCurationCoordinator({taskStore,preview,curation,toolCu
       queueMicrotask(()=>{void runOnce();});
     },
     observeCuration,
+    observeBuilder,
     runOnce,
   };
 }

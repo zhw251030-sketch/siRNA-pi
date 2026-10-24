@@ -13,7 +13,7 @@ import {createToolCurationBuildService} from '../packages/extensions/tool-curati
 import {traceSha256} from '../packages/extensions/tool-curation/tool-curation-evidence.mjs';
 import {createAppServer} from '../apps/api/router.mjs';
 
-async function fixture(t,{configured=true}={}) {
+async function fixture(t,{configured=true,onSettled}={}) {
   const root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'curation-build-api-')));
   const tasks=new TaskStore(path.join(root,'tasks.sqlite')),curations=new ToolCurationStore({root}),store=new ToolCurationBuildStore({root});
   const task=tasks.createTask({id:randomUUID()}),id=randomUUID();let runs=0;
@@ -22,7 +22,7 @@ async function fixture(t,{configured=true}={}) {
   curations.complete(id,{protocolVersion:'sirna-tool-curation-result/v1',curationId:id,traceSha256:trace.traceSha256,decision:'candidate',summary:'Reusable shape',candidate:{capabilityKey:'shape',suggestedToolName:'shape_tool',capabilityBoundary:'Shapes only',whyExistingToolsAreInsufficient:'No equivalent',evidenceEventIds:[1,2],inputContractSketch:{n:'number'},outputContractSketch:{n:'number'},permissions:{profile:'no_external_access'},buildInstructions:['test shapes']}});
   const runtime={runtimeInfo:()=>({}),describe:async()=>({backend:'agent-compose',sandboxId:'a'.repeat(64),supportsLifecycle:true,builderToolsAvailable:true}),assertWorkspaceIdle:async()=>{},run:async(input,emit)=>{runs++;const runId=randomUUID();emit({type:'run_status',status:'running',runId});emit({type:'text_delta',delta:'No proposal submitted.'});emit({type:'done',status:'succeeded',runId});}};
   const messages=new TaskMessageService({taskStore:tasks,agentRuntime:runtime});
-  const service=createToolCurationBuildService({root,store,curationStore:curations,taskStore:tasks,taskMessages:messages,agentRuntime:runtime,listExistingTools:()=>[]});
+  const service=createToolCurationBuildService({root,store,curationStore:curations,taskStore:tasks,taskMessages:messages,agentRuntime:runtime,listExistingTools:()=>[],onSettled});
   const server=createAppServer({taskStore:tasks,agentRuntime:runtime,taskMessages:messages,...(configured?{toolCurationBuild:service}:{})});server.listen(0,'127.0.0.1');await once(server,'listening');
   t.after(async()=>{await service.stop();await server.waitForTaskCompletion();await new Promise(resolve=>{server.close(resolve);server.closeAllConnections();});store.close();curations.close();tasks.close();fs.rmSync(root,{recursive:true,force:true});});
   const base=`http://127.0.0.1:${server.address().port}`,url=`${base}/v1/tasks/${task.id}/curations/${id}/build`;
@@ -35,6 +35,14 @@ test('explicit build HTTP reads without dispatch and keeps one durable task turn
   const first=await f.post(view.binding);assert.equal(first.status,202);const ticket=(await first.json()).handoff;assert.equal(ticket.curationId,f.id);
   await f.service.stop();const duplicate=await f.post(view.binding);assert.equal(duplicate.status,200);assert.equal((await duplicate.json()).handoff.requestId,ticket.requestId);
   const saved=await(await fetch(f.url)).json();assert.equal(saved.handoff.phase,'no_proposal');assert.equal(saved.eligible,false);assert.equal(f.runs(),1);assert.equal(f.tasks.listMessages(f.task.id).length,2);
+});
+
+test('Builder settled callback is a small durable terminal notification',async t=>{
+  const notifications=[];const f=await fixture(t,{onSettled:value=>notifications.push(value)}),view=await(await fetch(f.url)).json();
+  assert.equal((await f.post(view.binding)).status,202);
+  await f.service.stop();await f.service.view(f.task.id,f.id);
+  assert.equal(notifications.length,1);assert.equal(notifications[0].phase,'no_proposal');assert.equal(notifications[0].curationId,f.id);assert.equal(notifications[0].requestId.startsWith('auto-tool-curation-build:'),true);
+  assert.equal(Object.hasOwn(notifications[0],'prompt'),false);assert.equal(Object.hasOwn(notifications[0],'binding'),false);assert.equal(Object.hasOwn(notifications[0],'registrationSource'),false);
 });
 
 test('build HTTP refuses malformed binding, IDs, origin and query without starting the model',async t=>{
