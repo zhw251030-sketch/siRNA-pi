@@ -131,6 +131,7 @@ export class ToolApprovalStore {
       const existing = this.getByRequest(requestId);
       if (existing) {
         if (existing.proposalId !== proposalId) fail('Request key belongs to a different proposal');
+        if (this.#isVerified && !this.#isVerified(proposalId)) fail('Only a verified proposal can be approved');
         return {job: existing, deduplicated: true};
       }
       if (this.#isVerified && !this.#isVerified(proposalId)) fail('Only a verified proposal can be approved');
@@ -162,10 +163,12 @@ export class ToolApprovalStore {
     if (terminal && (typeof result.approved !== 'boolean' || typeof result.activated !== 'boolean')) fail('Invalid approval result');
     const succeeded = terminal && !result.error;
     const error = succeeded ? null : String(result?.error ?? 'Approval job failed').slice(0, 2000);
-    const changed = this.#db.prepare("UPDATE jobs SET status=?,updated_at=?,approved=?,activated=?,error=? WHERE id=? AND status='running'")
-      .run(succeeded ? 'succeeded' : 'failed', new Date().toISOString(), succeeded ? Number(result.approved) : null, succeeded ? Number(result.activated) : null, error, id);
-    if (changed.changes !== 1) fail('Only a running approval job can finish');
-    return this.get(id);
+    return this.#transaction(() => {
+      const changed = this.#db.prepare("UPDATE jobs SET status=?,updated_at=?,approved=?,activated=?,error=? WHERE id=? AND status='running'")
+        .run(succeeded ? 'succeeded' : 'failed', new Date().toISOString(), succeeded ? Number(result.approved) : null, succeeded ? Number(result.activated) : null, error, id);
+      if (changed.changes !== 1) fail('Only a running approval job can finish');
+      return this.get(id);
+    });
   }
   interruptRunning() {
     return this.#transaction(() => this.#db.prepare("UPDATE jobs SET status='pending',updated_at=?,error=NULL WHERE status='running'").run(new Date().toISOString()).changes);

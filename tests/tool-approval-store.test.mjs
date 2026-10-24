@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
+import {DatabaseSync} from 'node:sqlite';
 import {ToolApprovalStore} from '../packages/capability-platform/tool-approval-store.mjs';
 
 function fixture(t, options = {}) {
@@ -34,6 +35,16 @@ test('deduplicates the same request and rejects binding it to another proposal',
   assert.throws(() => store.enqueue(other, request, {approvedBy: 'reviewer'}), /different proposal/i);
   assert.equal(store.getByRequest(request).id, first.job.id);
   assert.equal(store.latest(proposal).id, first.job.id);
+  store.close();
+});
+
+test('rechecks verified admission on an idempotent retry', t => {
+  let verified = true;
+  const {store} = fixture(t, {isVerified: () => verified});
+  const proposal = randomUUID(), request = randomUUID();
+  store.enqueue(proposal, request, {approvedBy: 'reviewer'});
+  verified = false;
+  assert.throws(() => store.enqueue(proposal, request, {approvedBy: 'reviewer'}), /verified/i);
   store.close();
 });
 
@@ -89,4 +100,31 @@ test('interrupts a running job and reopens it as pending', t => {
   const reopened = new ToolApprovalStore({root, isVerified: () => true});
   assert.equal(reopened.get(job.id).status, 'pending');
   reopened.close();
+});
+
+test('halt blocks claims until resume and malformed finish leaves a job running', t => {
+  const {store} = fixture(t, {isVerified: () => true});
+  const job = store.enqueue(randomUUID(), randomUUID(), {approvedBy: 'reviewer'}).job;
+  store.halt();
+  assert.equal(store.halted(), true);
+  assert.equal(store.claim(), null);
+  store.resume();
+  assert.equal(store.halted(), false);
+  assert.equal(store.claim().id, job.id);
+  assert.throws(() => store.finish(job.id, {approved: true, activated: 'yes'}), /Invalid approval result/);
+  assert.equal(store.get(job.id).status, 'running');
+  const failed = store.finish(job.id, {error: 'x'.repeat(10000)});
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.error.length, 2000);
+  store.close();
+});
+
+test('rejects an existing database with the wrong application identity', t => {
+  const {root, store} = fixture(t, {isVerified: () => true});
+  store.close();
+  const file = path.join(root, 'runtime', 'tool-approval', 'jobs.sqlite');
+  const db = new DatabaseSync(file);
+  db.exec('PRAGMA application_id=123');
+  db.close();
+  assert.throws(() => new ToolApprovalStore({root}), /Unknown approval database/);
 });
