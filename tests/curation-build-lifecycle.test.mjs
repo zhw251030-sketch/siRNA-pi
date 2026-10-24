@@ -9,6 +9,14 @@ test('API startup recovers handoffs only after listening and starts no automatic
   server.listening=true;lifecycle.startApiServices(services);assert.deepEqual(events,['repair','build','maintenance','curation']);
 });
 
+test('API starts approval worker before coordinator and drains it during shutdown',async()=>{
+  const events=[],server={listening:true,close:cb=>{events.push('http');cb();},waitForTaskCompletion:async()=>{}};
+  const services={server,toolApproval:{start:()=>events.push('approval-start'),stop:async()=>events.push('approval-stop')},toolCurationCoordinator:{start:()=>events.push('coordinator-start'),stop:async()=>events.push('coordinator-stop')}};
+  lifecycle.startApiServices(services);assert.deepEqual(events,['approval-start','coordinator-start']);
+  await lifecycle.createApiShutdown({...services,stores:[{close:()=>events.push('store')}]} )();
+  assert.deepEqual(events,['approval-start','coordinator-start','coordinator-stop','approval-stop','http','store']);
+});
+
 test('shutdown stops build admission synchronously and drains accepted handoffs before closing every resource',async()=>{
   const events=[];let release;const gate=new Promise(resolve=>release=resolve);
   const shutdown=lifecycle.createApiShutdown({server:{close:cb=>{events.push('http');cb();},waitForTaskCompletion:async()=>events.push('messages')},toolCurationBuild:{stop(){events.push('build-stop');return gate;}},stores:[{close:()=>events.push('store')}],rpcs:[{close:()=>events.push('rpc')}]});

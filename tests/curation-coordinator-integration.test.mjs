@@ -129,7 +129,20 @@ test('automation HTTP without configuration is 503 and unexpected exceptions are
   for(const response of [await broken.get(),await broken.post({enabled:true})]){assert.ok([503,409].includes(response.status));assert.equal((await response.text()).includes('PRIVATE_HOST_KEY'),false);}
 });
 
-async function curationFixture(t,{curate,readiness,isTaskBusy,beforeCuration,toolCurationBuild,toolMaintenance,toolRepair,toolAutomation,approveTool,persistentAutomation=false,automaticValidation=false,automaticRepair=false,automaticApproval=false}={}){
+test('approval HTTP validates the bounded envelope and only enqueues verified proposals',async t=>{
+  const f=fixture(t),proposalId=randomUUID(),requestId=randomUUID(),jobs=[];
+  const toolApproval={enqueue:(...args)=>{jobs.push(args);return {job:{id:randomUUID(),proposalId:args[0],status:'pending',requestedBy:args[2].approvedBy},deduplicated:jobs.length>1};},list:()=>[]};
+  const server=createAppServer({taskStore:f.tasks,agentRuntime:f.runtime,toolApproval});server.listen(0,'127.0.0.1');await once(server,'listening');
+  t.after(()=>new Promise(resolve=>{server.close(resolve);server.closeAllConnections();}));
+  const url=`http://127.0.0.1:${server.address().port}/v1/tool-proposals/${proposalId}/approve`,headers={'Content-Type':'application/json'};
+  assert.equal((await fetch(url,{method:'POST',headers,body:JSON.stringify({requestId,approvedBy:'operator'})})).status,202);
+  assert.equal((await fetch(url,{method:'POST',headers,body:JSON.stringify({requestId,approvedBy:'operator'})})).status,200);
+  assert.equal(jobs.length,2);
+  for(const body of [{requestId:'bad',approvedBy:'operator'},{requestId,approvedBy:''},{requestId,approvedBy:'operator',extra:true}])assert.equal((await fetch(url,{method:'POST',headers,body:JSON.stringify(body)})).status,400);
+  assert.equal((await fetch(url,{method:'POST',headers:{...headers,Origin:'https://foreign.example'},body:JSON.stringify({requestId,approvedBy:'operator'})})).status,403);
+});
+
+async function curationFixture(t,{curate,readiness,isTaskBusy,beforeCuration,toolCurationBuild,toolMaintenance,toolRepair,toolAutomation,toolApproval,approveTool,persistentAutomation=false,automaticValidation=false,automaticRepair=false,automaticApproval=false}={}){
   const module=await import('../packages/extensions/tool-curation/tool-curation-coordinator.mjs').catch(()=>({}));
   assert.equal(typeof module.createToolCurationCoordinator,'function','real coordinator must be available');
   const f=fixture(t),curations=new ToolCurationStore({root:f.root}),gaps=new ToolGapStore({root:f.root}),automation=toolAutomation??(persistentAutomation?new ToolAutomationStore({root:f.root}):undefined);let calls=0;
@@ -147,7 +160,7 @@ async function curationFixture(t,{curate,readiness,isTaskBusy,beforeCuration,too
     for(let i=0;i<3;i++){emit({type:'tool_start',toolCallId:`call-${i}`,toolName:'fetch_dataset',args:{identifier:i}});emit({type:'tool_end',toolCallId:`call-${i}`,toolName:'fetch_dataset',isError:false,result:{rows:[1,2]}});}
     emit({type:'assistant_message',text:'saved fetch results'});emit({type:'done',runId,status:'succeeded'});
   };
-  const coordinatorOptions={root:f.root,taskStore:f.tasks,preview,curation:service,toolCurationBuild,toolMaintenance,toolRepair,toolAutomation:automation,approveTool,automaticValidation,automaticRepair,automaticApproval,isReady:readiness??lifecycle.createCurationAutomationReadiness({taskMessages:f.messages,agentRuntime:f.runtime}),isTaskBusy:isTaskBusy??(taskId=>f.messages.isTaskBusy(taskId)),intervalMs:1000,maxReviews:3};
+  const coordinatorOptions={root:f.root,taskStore:f.tasks,preview,curation:service,toolCurationBuild,toolMaintenance,toolRepair,toolAutomation:automation,toolApproval,approveTool,automaticValidation,automaticRepair,automaticApproval,isReady:readiness??lifecycle.createCurationAutomationReadiness({taskMessages:f.messages,agentRuntime:f.runtime}),isTaskBusy:isTaskBusy??(taskId=>f.messages.isTaskBusy(taskId)),intervalMs:1000,maxReviews:3};
   const makeCoordinator=(overrides={})=>{coordinator=module.createToolCurationCoordinator({...coordinatorOptions,...overrides});return coordinator;};
   coordinator=makeCoordinator();
   f.messages.onSettled=value=>coordinator.observeRun(value);
@@ -274,6 +287,27 @@ test('automatic approval activates only a truthful approved result and is idempo
   f.coordinator.observeBuilder(input);await new Promise(resolve=>setImmediate(resolve));
   const passed={proposalId,jobId:randomUUID(),status:'succeeded',passed:true,artifactSha256};f.coordinator.observeMaintenance(passed);f.coordinator.observeMaintenance(passed);await new Promise(resolve=>setImmediate(resolve));
   assert.deepEqual(approvals,[[proposalId,'agent-auto-pipeline']]);assert.equal(f.toolAutomation.get(proposalId).phase,'completed');
+});
+
+test('automatic approval uses the durable approval queue and terminal observation',async t=>{
+  const starts=[],jobs=[],approvals=[],proposalId=randomUUID(),artifactSha256='4'.repeat(64);
+  let approvalJobId;
+  let latestJob;
+  const toolApproval={
+    enqueue:(...args)=>{approvalJobId=randomUUID();latestJob={id:approvalJobId,proposalId:args[0],status:'pending',requestedBy:args[2]?.approvedBy};jobs.push(args);return {job:latestJob,deduplicated:false};},
+    latest:()=>latestJob,
+  };
+  const f=await curationFixture(t,{persistentAutomation:true,automaticValidation:true,automaticApproval:true,toolApproval,approveTool:async(...args)=>{approvals.push(args);return {approved:true,activated:true};},toolMaintenance:{enqueue:(...args)=>({job:{id:randomUUID(),proposalId:args[0],status:'pending'},deduplicated:false})},toolCurationBuild:{start:async(...args)=>{starts.push(args);return {handoff:{phase:'running',curationId:args[1]}};}}});
+  f.coordinator.configure({enabled:true});await f.turn();const candidate=await waitFor(()=>f.curations.list(f.task.id).find(row=>row.status==='candidate'));assert.ok(candidate);await waitFor(()=>starts.length===1);
+  const input={curationId:candidate.id,requestId:buildRequestId(candidate.id),phase:'submitted',proposalId,artifactSha256,toolName:'dataset_fetch',taskId:f.task.id,runId:f.runId,userMessageId:randomUUID()};
+  f.coordinator.observeBuilder(input);await new Promise(resolve=>setImmediate(resolve));
+  f.coordinator.observeMaintenance({proposalId,jobId:randomUUID(),status:'succeeded',passed:true,artifactSha256});await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(jobs.length,1);assert.equal(approvals.length,0);assert.match(jobs[0][1],/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);assert.deepEqual(jobs[0][2],{approvedBy:'agent-auto-pipeline'});
+  f.coordinator.observeApproval({protocolVersion:'sirna-tool-approval/v1',jobId:randomUUID(),proposalId,status:'succeeded',approved:true,activated:true});
+  assert.equal(f.toolAutomation.get(proposalId).phase,'approving');
+  latestJob={...latestJob,status:'succeeded',approved:true,activated:true};
+  f.coordinator.observeApproval({protocolVersion:'sirna-tool-approval/v1',jobId:approvalJobId,proposalId,status:'succeeded',approved:true,activated:true});
+  assert.equal(f.toolAutomation.get(proposalId).phase,'completed');
 });
 
 test('automatic approval fails closed when the approval callback does not activate a version',async t=>{

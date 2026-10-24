@@ -26,6 +26,9 @@ import { ToolAutomationStore } from "../../packages/capability-platform/tool-aut
 import { createToolRepair } from "../../packages/capability-platform/tool-repair-service.mjs";
 import { createToolCurationPreview } from "../../packages/extensions/tool-curation/tool-curation-preview.mjs";
 import { getRegisteredToolCatalog, approveRegisteredToolProposal } from "../../packages/capability-platform/tool-approval-service.mjs";
+import { getRegisteredToolProposal } from "../../packages/capability-platform/tool-lifecycle.mjs";
+import { ToolApprovalStore } from "../../packages/capability-platform/tool-approval-store.mjs";
+import { createToolApproval } from "../../packages/capability-platform/tool-approval-worker.mjs";
 import { ToolCurationStore } from "../../packages/extensions/tool-curation/tool-curation-store.mjs";
 import { createToolCurationService } from "../../packages/extensions/tool-curation/tool-curation-service.mjs";
 import { createToolCurationCoordinator } from "../../packages/extensions/tool-curation/tool-curation-coordinator.mjs";
@@ -52,7 +55,7 @@ if (fs.realpathSync(dockerSocket) !== dockerSocket || !fs.lstatSync(dockerSocket
 const docker = new DockerEngineClient(dockerSocket);
 const runner = createDockerValidationRunner({ docker, purpose: 'approved-call' });
 const toolCallLeases = createToolCallLeases();
-let toolRepair, toolCurationBuild, toolGaps, toolCurationCoordinator;
+let toolRepair, toolCurationBuild, toolGaps, toolCurationCoordinator, toolApproval;
 const builders = createTaskToolBuilders({root: projectRoot,docker,registrationPolicy:(input,context)=>{
   if(!toolRepair)throw new Error('Tool repair admission is unavailable');
   return toolRepair.registration(input,context);
@@ -69,6 +72,13 @@ const workspaceFiles = new TaskFiles({ root: projectRoot, agentRuntime });
 const taskMessages=new TaskMessageService({taskStore,agentRuntime,workspaceFiles,onSettled:run=>toolCurationCoordinator?.observeRun(run)});
 const maintenanceStore=new ToolMaintenanceStore({root:projectRoot});
 const toolAutomation=new ToolAutomationStore({root:projectRoot});
+const isVerified = proposalId => {
+  try {
+    const detail = getRegisteredToolProposal(proposalId, {root: projectRoot});
+    return ['verified','approved'].includes(detail.registry.state) && detail.validation?.passed === true;
+  } catch { return false; }
+};
+const toolApprovalStore = new ToolApprovalStore({root: projectRoot, isVerified, verifyProposal: isVerified});
 const toolMaintenance=createToolMaintenance({root:projectRoot,store:maintenanceStore,validate:createMaintenanceValidator({root:projectRoot,docker}),
   canValidate:id=>!toolRepair?.active(id),
   onError:()=>console.error('候选验证执行失败，请检查项目内私有运行记录。'),
@@ -90,19 +100,24 @@ const toolCuration = createToolCurationService({store:curationStore,preview:tool
 const curationBuildStore = new ToolCurationBuildStore({root:projectRoot});
 toolCurationBuild = createToolCurationBuildService({root:projectRoot,store:curationBuildStore,curationStore,taskStore,taskMessages,agentRuntime,listExistingTools,
   onSettled:ticket=>toolCurationCoordinator?.observeBuilder(ticket)});
+toolApproval=createToolApproval({root:projectRoot,store:toolApprovalStore,
+  approve:(proposalId,actor)=>approveRegisteredToolProposal(proposalId,actor,{root:projectRoot}),
+  onError:()=>console.error('候选批准执行失败，请检查项目内私有运行记录。'),
+  onSettled:notification=>toolCurationCoordinator?.observeApproval(notification)});
 toolCurationCoordinator=createToolCurationCoordinator({root:projectRoot,taskStore,preview:toolCurationPreview,curation:toolCuration,toolCurationBuild,toolMaintenance,toolAutomation,
   automaticValidation:process.env.SIRNA_AUTOMATIC_VALIDATION==='1',
   toolRepair,automaticRepair:process.env.SIRNA_AUTOMATIC_REPAIR==='1',
+  toolApproval,
   approveTool:(proposalId,actor)=>approveRegisteredToolProposal(proposalId,actor,{root:projectRoot}),
   automaticApproval:process.env.SIRNA_AUTOMATIC_APPROVAL==='1',
   isReady:createCurationAutomationReadiness({taskMessages,agentRuntime}),isTaskBusy:taskId=>taskMessages.isTaskBusy(taskId),intervalMs:1000,maxReviews:3});
-const server = createAppServer({ taskStore, agentRuntime, workspaceFiles, taskMessages, toolMaintenance, toolRepair, toolCurationPreview, toolCuration, toolCurationBuild, toolCurationCoordinator });
-const shutdown = createApiShutdown({server,toolMaintenance,toolRepair,toolCuration,toolCurationBuild,toolCurationCoordinator,toolsServer,
-  stores:[taskStore,maintenanceStore,toolAutomation,repairStore,curationStore,curationBuildStore,gapStore],rpcs:[rpc,curatorRpc]});
+const server = createAppServer({ taskStore, agentRuntime, workspaceFiles, taskMessages, toolMaintenance, toolApproval, toolRepair, toolCurationPreview, toolCuration, toolCurationBuild, toolCurationCoordinator });
+const shutdown = createApiShutdown({server,toolMaintenance,toolApproval,toolRepair,toolCuration,toolCurationBuild,toolCurationCoordinator,toolsServer,
+  stores:[taskStore,maintenanceStore,toolAutomation,toolApprovalStore,repairStore,curationStore,curationBuildStore,gapStore],rpcs:[rpc,curatorRpc]});
 const shutdownFailure = () => {console.error('服务停止未完全确认，请检查项目内私有运行记录。');process.exitCode=1;};
 server.listen(3000, "127.0.0.1", () => {
   // Never recover or claim jobs until this instance owns the listening socket.
-  try {startApiServices({server,toolRepair,toolCurationBuild,toolMaintenance,toolCuration,toolCurationCoordinator});}
+  try {startApiServices({server,toolRepair,toolCurationBuild,toolMaintenance,toolCuration,toolApproval,toolCurationCoordinator});}
   catch {shutdownFailure();void shutdown().catch(shutdownFailure);return;}
   console.log(`siRNA-pi: http://127.0.0.1:3000/ ; runtime=agent-compose ; recovered=${recovered.length}`);
 });

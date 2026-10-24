@@ -10,7 +10,7 @@ const fail=(status,message)=>{throw new ToolCurationError(status,message);};
 
 // Observations are intentionally process-local. Only the existing Curator
 // store owns durable admission, task/run uniqueness, and accepted work.
-export function createToolCurationCoordinator({root,taskStore,preview,curation,toolCurationBuild,toolMaintenance,toolRepair,toolAutomation,approveTool,automaticValidation=false,automaticRepair=false,automaticApproval=false,approvalActor='agent-auto-pipeline',isReady,isTaskBusy=()=>false,intervalMs=1000,maxReviews=3,maxBuilds=maxReviews,maxValidations=maxBuilds,maxRepairs=maxValidations,maxApprovals=maxValidations}={}){
+export function createToolCurationCoordinator({root,taskStore,preview,curation,toolCurationBuild,toolMaintenance,toolRepair,toolAutomation,toolApproval,approveTool,automaticValidation=false,automaticRepair=false,automaticApproval=false,approvalActor='agent-auto-pipeline',isReady,isTaskBusy=()=>false,intervalMs=1000,maxReviews=3,maxBuilds=maxReviews,maxValidations=maxBuilds,maxRepairs=maxValidations,maxApprovals=maxValidations}={}){
   if(!Number.isInteger(maxReviews)||maxReviews<1||maxReviews>10||!Number.isInteger(intervalMs)||intervalMs<1||intervalMs>2147483647)throw Error('Invalid coordinator review budget or interval configuration');
   if(!Number.isInteger(maxBuilds)||maxBuilds<1||maxBuilds>10)throw Error('Invalid coordinator Builder budget configuration');
   if(typeof automaticValidation!=='boolean'||typeof automaticRepair!=='boolean'||typeof automaticApproval!=='boolean'||!Number.isInteger(maxValidations)||maxValidations<1||maxValidations>10||!Number.isInteger(maxRepairs)||maxRepairs<1||maxRepairs>10||!Number.isInteger(maxApprovals)||maxApprovals<1||maxApprovals>10)throw Error('Invalid coordinator validation configuration');
@@ -18,6 +18,7 @@ export function createToolCurationCoordinator({root,taskStore,preview,curation,t
   if(toolCurationBuild!==undefined&&typeof toolCurationBuild.start!=='function')throw Error('Invalid coordinator Builder service');
   if(toolMaintenance!==undefined&&typeof toolMaintenance.enqueue!=='function')throw Error('Invalid coordinator maintenance service');
   if(toolRepair!==undefined&&typeof toolRepair.start!=='function')throw Error('Invalid coordinator repair service');
+  if(toolApproval!==undefined&&(typeof toolApproval.enqueue!=='function'||typeof toolApproval.latest!=='function'))throw Error('Invalid coordinator approval worker');
   if(approveTool!==undefined&&typeof approveTool!=='function')throw Error('Invalid coordinator approval service');
   if(typeof approvalActor!=='string'||approvalActor.trim().length===0||approvalActor.length>120)throw Error('Invalid coordinator approval actor');
   if(toolAutomation!==undefined&&(typeof toolAutomation.registerProposal!=='function'||typeof toolAutomation.get!=='function'||typeof toolAutomation.listOpen!=='function'||typeof toolAutomation.setPhase!=='function'))throw Error('Invalid coordinator automation store');
@@ -124,6 +125,11 @@ export function createToolCurationCoordinator({root,taskStore,preview,curation,t
     chars[12]='4';chars[16]=(Number.parseInt(chars[16],16)&3|8).toString(16);
     return `${chars.slice(0,8).join('')}-${chars.slice(8,12).join('')}-${chars.slice(12,16).join('')}-${chars.slice(16,20).join('')}-${chars.slice(20,32).join('')}`;
   };
+  const approvalRequestId=proposalId=>{
+    const chars=createHash('sha256').update(`automatic-tool-approval:v1\0${proposalId}\0${approvalActor}`).digest('hex').split('');
+    chars[12]='4';chars[16]=(Number.parseInt(chars[16],16)&3|8).toString(16);
+    return `${chars.slice(0,8).join('')}-${chars.slice(8,12).join('')}-${chars.slice(12,16).join('')}-${chars.slice(16,20).join('')}-${chars.slice(20,32).join('')}`;
+  };
   function automationEvent(run){return {taskId:run.sourceTaskId,runId:run.sourceRunId??'unknown',userMessageId:run.sourceUserMessageId??'unknown'};}
   function automationPhase(proposalId,phase,error=null){try{toolAutomation?.setPhase(proposalId,phase,error);}catch{/* Durable automation state is fail-closed and never replaces the source evidence. */}}
   function queueValidation(input,event){
@@ -147,13 +153,22 @@ export function createToolCurationCoordinator({root,taskStore,preview,curation,t
   function queueApproval(input,event){
     if(!started||!enabled){record(event,'ignored',started?'approval_disabled':'stopped',input.curationId);return;}
     if(!automaticApproval){automationPhase(input.proposalId,'approving');record(event,'admitted','validation_passed_waiting_approval',input.curationId);return;}
-    if(!approveTool){automationPhase(input.proposalId,'failed','approval_unconfigured');record(event,'ignored','approval_unconfigured',input.curationId);return;}
+    if(!toolApproval&&!approveTool){automationPhase(input.proposalId,'failed','approval_unconfigured');record(event,'ignored','approval_unconfigured',input.curationId);return;}
     if(automaticApprovalProposals.has(input.proposalId))return;
     if(approvalAttempts>=maxApprovals){automationPhase(input.proposalId,'failed','approval_budget_exhausted');record(event,'ignored','approval_budget_exhausted',input.curationId);return;}
     if(typeof input.proposalId!=='string'){
       automationPhase(input.proposalId,'failed','invalid_approval_binding');record(event,'ignored','invalid_approval_binding',input.curationId);return;
     }
     approvalAttempts++;automaticApprovalProposals.add(input.proposalId);automationPhase(input.proposalId,'approving');
+    if(toolApproval){
+      const requestId=approvalRequestId(input.proposalId);
+      let operation;
+      try{operation=Promise.resolve(toolApproval.enqueue(input.proposalId,requestId,{approvedBy:approvalActor}));}
+      catch(error){operation=Promise.reject(error);}
+      const tracked=operation.then(result=>{record(event,'admitted',result?.deduplicated?'approval_deduplicated':'approval_queued',input.curationId);},error=>{automaticApprovalProposals.delete(input.proposalId);automationPhase(input.proposalId,'failed',error?.statusCode===409?'approval_conflict':'approval_enqueue_failed');record(event,'error',error?.statusCode===409?'approval_conflict':'approval_enqueue_failed',input.curationId);});
+      approvalWork.add(tracked);tracked.finally(()=>approvalWork.delete(tracked));
+      return;
+    }
     let operation;
     try{operation=Promise.resolve(approveTool(input.proposalId,approvalActor));}
     catch(error){operation=Promise.reject(error);}
@@ -169,6 +184,18 @@ export function createToolCurationCoordinator({root,taskStore,preview,curation,t
       }
     });
     approvalWork.add(tracked);tracked.finally(()=>approvalWork.delete(tracked));
+  }
+  function observeApproval(input){
+    try{assertCurationJson(input,{maxDepth:2,maxBytes:4096});}catch{return;}
+    if(!toolApproval||!input||input.protocolVersion!=='sirna-tool-approval/v1'||typeof input.proposalId!=='string'||typeof input.jobId!=='string'||!['succeeded','failed'].includes(input.status))return;
+    let run;try{run=toolAutomation?.get(input.proposalId);}catch{return;}
+    if(!run||run.phase!=='approving')return;
+    let durable;try{durable=toolApproval.latest(input.proposalId);}catch{return;}
+    if(!durable||durable.id!==input.jobId||!['succeeded','failed'].includes(durable.status)||durable.status!==input.status)return;
+    const event=automationEvent(run);
+    automaticApprovalProposals.delete(input.proposalId);
+    if(durable.status==='succeeded'&&durable.approved===true&&durable.activated===true){automationPhase(input.proposalId,'completed');record(event,'admitted','approval_completed',run.curationId);}
+    else{automationPhase(input.proposalId,'failed','approval_failed');record(event,'error','approval_failed',run.curationId);}
   }
   function observeBuilder(input){
     try{assertCurationJson(input,{maxDepth:4,maxBytes:8192});}catch{return;}
@@ -235,7 +262,11 @@ export function createToolCurationCoordinator({root,taskStore,preview,curation,t
           if(job.status==='succeeded'&&job.passed===false){let feedback=null;try{feedback=toolMaintenance.feedback(run.proposalId);}catch{}if(feedback)observeMaintenance({proposalId:run.proposalId,status:'succeeded',passed:false,validationId:feedback.validationId,reportSha256:feedback.reportSha256,artifactSha256:run.artifactSha256});else automationPhase(run.proposalId,'failed','repair_feedback_unavailable');}
           return;
         }
-        if(run.phase==='approving'){queueApproval({proposalId:run.proposalId,curationId:run.curationId},event);return;}
+        if(run.phase==='approving'){
+          if(toolApproval){const job=toolApproval.latest(run.proposalId);if(job&&['succeeded','failed'].includes(job.status))observeApproval({protocolVersion:'sirna-tool-approval/v1',jobId:job.id,proposalId:run.proposalId,status:job.status,approved:job.approved===true,activated:job.activated===true});}
+          else queueApproval({proposalId:run.proposalId,curationId:run.curationId},event);
+          return;
+        }
         if((run.phase==='repairing'||run.phase==='awaiting_replacement')&&toolRepair){let status;try{status=toolRepair.status(run.proposalId);}catch{return;}const repair=status?.repair;if(!repair)return;if(repair.replacementProposalId&&root){try{const next=getToolProposalSource(repair.replacementProposalId,{root});observeRepair({protocolVersion:'sirna-tool-repair/v1',proposalId:run.proposalId,rootProposalId:run.rootProposalId,attempt:run.attempt,phase:'superseded',replacementProposalId:repair.replacementProposalId,replacementArtifactSha256:next.registry.artifactSha256,replacementToolName:next.input.toolName});}catch{/* A malformed successor remains outside automation. */}return;}if(repair.phase==='awaiting_replacement')automationPhase(run.proposalId,'awaiting_replacement');else if(repair.phase==='failed'||repair.phase==='interrupted')automationPhase(run.proposalId,'failed',repair.phase);}
       });
       automationWork.add(task);task.finally(()=>automationWork.delete(task));await task;
@@ -289,6 +320,7 @@ export function createToolCurationCoordinator({root,taskStore,preview,curation,t
     observeBuilder,
     observeMaintenance,
     observeRepair,
+    observeApproval,
     runOnce,
   };
 }

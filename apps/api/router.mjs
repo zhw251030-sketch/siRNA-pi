@@ -9,6 +9,8 @@ import { ToolCurationError } from "../../packages/extensions/tool-curation/tool-
 import { ToolCurationBuildError } from "../../packages/extensions/tool-curation/tool-curation-build-service.mjs";
 import { buildId, buildDigest } from "../../packages/extensions/tool-curation/tool-curation-build-contract.mjs";
 
+const uuidV4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 const staticFiles = new Map([
   ["/", ["index.html", "text/html; charset=utf-8"]],
   ["/app.js", ["app.js", "text/javascript; charset=utf-8"]],
@@ -57,7 +59,7 @@ async function readBody(request, maxBytes=1048576) {
 
 // HTTP only coordinates transport. Task state and runtime execution stay in
 // their own packages, matching the reference repository's responsibility split.
-export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolMaintenance, toolRepair, toolCurationPreview, toolCuration, toolCurationBuild, toolCurationCoordinator, taskMessages: sharedTaskMessages } = {}) {
+export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolMaintenance, toolApproval, toolRepair, toolCurationPreview, toolCuration, toolCurationBuild, toolCurationCoordinator, taskMessages: sharedTaskMessages } = {}) {
   const taskMessages = sharedTaskMessages ?? new TaskMessageService({ taskStore, agentRuntime, workspaceFiles });
   const activeTurns = new Set();
   const track = (operation) => {
@@ -138,8 +140,23 @@ export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolM
         if (!toolCurationPreview) return reply(response, 503, {error: '轨迹预览服务尚未配置。'});
         return reply(response, 200, toolCurationPreview.read(curationRoute[1], url.searchParams.get('runId') ?? undefined));
       }
-      const proposalRoute=/^\/v1\/tool-proposals(?:\/([^/]+)\/(validate|validation-summary|repair-feedback|repair-status|repair))?$/.exec(pathname);
+      const proposalRoute=/^\/v1\/tool-proposals(?:\/([^/]+)\/(approve|validate|validation-summary|repair-feedback|repair-status|repair))?$/.exec(pathname);
       if(proposalRoute){
+        if(proposalRoute[2]==='approve'){
+          if(request.method!=='POST') { request.resume(); return reply(response,404,{error:'没有这个页面或接口。'}); }
+          if(url.searchParams.size) invalid('批准请求不接受查询参数。');
+          if(!toolApproval)return reply(response,503,{error:'候选批准服务尚未配置。'});
+          const body=await readBody(request,4096);
+          if(Object.keys(body).length!==2||!Object.hasOwn(body,'requestId')||!Object.hasOwn(body,'approvedBy'))invalid('批准请求只接受 requestId 和 approvedBy。');
+          if(typeof body.requestId!=='string'||!uuidV4.test(body.requestId)||typeof body.approvedBy!=='string'||!body.approvedBy.trim()||body.approvedBy.length>120)invalid('批准请求的 requestId 或 approvedBy 无效。');
+          try{
+            const result=toolApproval.enqueue(proposalRoute[1],body.requestId,{approvedBy:body.approvedBy});
+            return reply(response,result?.deduplicated?200:202,result);
+          }catch(error){
+            const status=/verified|proposal|request|actor|approvedBy|UUID/i.test(String(error?.message??''))?409:503;
+            return reply(response,status,{error:status===409?'候选尚未满足批准条件或请求已冲突。':'候选批准服务暂不可用。'});
+          }
+        }
         if(['repair-status','repair'].includes(proposalRoute[2])){
           if(!toolRepair)return reply(response,503,{error:'候选修订服务尚未配置。'});
           if(request.method==='GET'&&proposalRoute[2]==='repair-status')return reply(response,200,toolRepair.status(proposalRoute[1]));
@@ -149,8 +166,11 @@ export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolM
             const result=await toolRepair.start(proposalRoute[1],body);return reply(response,result.deduplicated?200:202,result);
           }
         }
+        if(request.method==='GET'&&!proposalRoute[1]){
+          if(!toolMaintenance&&!toolApproval)return reply(response,503,{error:'候选维护服务尚未配置。'});
+          return reply(response,200,{proposals:toolMaintenance?.list?.()??[],...(toolMaintenance?.status?{maintenance:toolMaintenance.status()}:{}),...(toolApproval?.list?{approvals:toolApproval.list().map(job=>({id:job.id,proposalId:job.proposalId,status:job.status,requestedBy:job.requestedBy,createdAt:job.createdAt,updatedAt:job.updatedAt,...(job.approved===undefined?{}:{approved:job.approved}),...(job.activated===undefined?{}:{activated:job.activated})}))}: {})});
+        }
         if(!toolMaintenance)return reply(response,503,{error:'候选验证服务尚未配置。'});
-        if(request.method==='GET'&&!proposalRoute[1])return reply(response,200,{proposals:toolMaintenance.list(),maintenance:toolMaintenance.status()});
         if(request.method==='GET'&&proposalRoute[2]==='validation-summary')return reply(response,200,{summary:toolMaintenance.summary(proposalRoute[1])});
         if(request.method==='GET'&&proposalRoute[2]==='repair-feedback')return reply(response,200,{feedback:toolMaintenance.feedback(proposalRoute[1])});
         if(request.method==='POST'&&proposalRoute[2]==='validate'){

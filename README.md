@@ -6,11 +6,11 @@
 
 ## 当前进度
 
-最新：第12E步在第12D持久化自动修订状态机上接通“验证通过后的批准边界”。默认仍停在 `approving`，只有明确设置 `SIRNA_AUTOMATIC_APPROVAL=1` 才调用已有的可信批准服务；回调必须报告 `approved: true` 且 `activated: true` 才能进入 `completed`，停止、重复通知、非激活结果和旧验证通知都会安全拒绝。当前实现是协调器批准回调，尚未复制原仓库独立 approval maintenance job/worker；逐文件机制和差异见 [自动批准边界](docs/38-自动批准边界.md) 与 [持久化自动修订状态机](docs/37-持久化自动修订状态机.md)。
+最新：第12F步完成持久化 approval job/worker 与协调器、bootstrap、生命周期和 HTTP 入队整合。默认 `SIRNA_AUTOMATIC_APPROVAL=0`，只有明确设置为 `1` 才允许自动入队；HTTP 和 coordinator 不直接调用批准服务，worker 才调用可信的 `approveRegisteredToolProposal`，并以 durable terminal 推进 `completed`/`failed`。个人仓库使用独立 `runtime/tool-approval/jobs.sqlite`，参考仓库使用共享 registry maintenance queue；职责边界一致、存储布局不同。机制和差异见 [自动批准边界](docs/38-自动批准边界.md) 与 [持久化自动修订状态机](docs/37-持久化自动修订状态机.md)。
 
 上一轮第11D已接入 `report_tool_gap`，任务Pi的明确缺口报告可以单独成为审查线索。报告是Agent主张，不能证明缺口真实或授予权限，机制与当时验收见 [Agent主动报告能力缺口](docs/32-Agent主动报告能力缺口.md)。
 
-12E定向回归 `tests/curation-coordinator-integration.test.mjs` 为32项全通过；本轮完整 `npm test` 为1482项：1467通过、15项平台/环境条件跳过、0失败。新增测试覆盖等待批准、显式自动批准、重启恢复、非激活结果拒绝和停止后的迟到通知。第12E步的逐文件解释和边界见 [自动批准边界](docs/38-自动批准边界.md)。
+12F 定向回归包含 coordinator、HTTP 去重、worker 终态、重启恢复和迟到通知边界；完整测试结果以本轮验收记录为准。第12F步的逐文件解释和边界见 [自动批准边界](docs/38-自动批准边界.md)。
 
 上一阶段第11B的真实合成审查返回skip（1模型响应/0工具）；Windows全套曾有间歇文件锁失败，历史证据不改，见 [独立Curator审查与冻结证据](docs/30-独立Curator审查与冻结证据.md)。以下日期条目保留各阶段完成时的状态，以本节和最新教学文档为准。
 
