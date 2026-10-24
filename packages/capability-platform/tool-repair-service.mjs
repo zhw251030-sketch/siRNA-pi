@@ -16,9 +16,17 @@ const fail=(code,status=409)=>{throw new ToolRepairError(status,code);};
 function body(value){if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).length!==2||!uuid.test(value.validationId)||!/^[a-f0-9]{64}$/.test(value.reportSha256))fail('invalid_request',400);return {validationId:value.validationId,reportSha256:value.reportSha256};}
 function id(value){if(typeof value!=='string'||!uuid.test(value))fail('invalid_id',400);return value;}
 
-export function createToolRepair({root,store,taskStore,taskMessages,agentRuntime,maintenance}){
+export function createToolRepair({root,store,taskStore,taskMessages,agentRuntime,maintenance,onSettled}={}){
+  if(onSettled!==undefined&&typeof onSettled!=='function')throw Error('Invalid repair settled callback');
   let accepting=true;
   const pending=new Map(),turns=new Set();
+  function notifySettled(proposalId,ticket,phase,replacementProposalId){
+    if(typeof onSettled!=='function')return;
+    let replacementArtifactSha256,replacementToolName;
+    if(replacementProposalId){try{const next=source(replacementProposalId);replacementArtifactSha256=next.registry.artifactSha256;replacementToolName=next.input.toolName;}catch{/* A malformed successor is never exposed as trusted identity. */}}
+    const notification={protocolVersion:'sirna-tool-repair/v1',proposalId,sourceTaskId:ticket.source.taskId,rootProposalId:ticket.rootProposalId,attempt:ticket.attempt,validationId:ticket.validationId,reportSha256:ticket.reportSha256,phase,...(replacementProposalId?{replacementProposalId}:{}),...(replacementArtifactSha256?{replacementArtifactSha256}:{}),...(replacementToolName?{replacementToolName}:{})};
+    try{Promise.resolve(onSettled(notification)).catch(()=>{});}catch{/* Notification failure cannot rewrite durable repair state. */}
+  }
   function readRegistry(fn){const {databasePath}=resolveToolLearningPaths(root);if(!fs.existsSync(databasePath))return null;const r=new ToolRegistry(databasePath,{readOnly:true});try{return fn(r);}finally{r.close();}}
   function exists(proposalId){if(!readRegistry(r=>r.getProposal(proposalId)))fail('not_found',404);}
   function source(proposalId){try{return getToolProposalSource(proposalId,{root});}catch{fail('invalid_evidence');}}
@@ -65,17 +73,19 @@ export function createToolRepair({root,store,taskStore,taskMessages,agentRuntime
   }
   function finish(proposalId,result){
     const ticket=store.get(proposalId);
-    if(replacement(ticket)){store.update(proposalId,'superseded');return;}
+    const successor=replacement(ticket);
+    if(successor){const updated=store.update(proposalId,'superseded');notifySettled(proposalId,updated,updated.phase,successor);return;}
     const user=taskStore.getMessageByClientRequestId(ticket.source.taskId,ticket.requestId),messages=taskStore.listMessages(ticket.source.taskId);
     const assistant=messages.find(m=>m.id===result?.assistantMessage?.id&&m.role==='assistant'&&m.status==='complete'&&m.sequence===user?.sequence+1);
     const events=taskStore.listRunEvents(ticket.source.taskId).filter(e=>e.userMessageId===user?.id&&e.runId===result?.finalRunId);
     const done=events.filter(e=>e.type==='done').at(-1);
     const success=assistant&&result?.task?.status==='idle'&&taskStore.getTask(ticket.source.taskId)?.status==='idle'&&done?.payload.status==='succeeded'&&!events.some(e=>e.type==='error');
-    store.update(proposalId,success?'awaiting_replacement':'failed',success?null:'completion_failed');
+    const updated=store.update(proposalId,success?'awaiting_replacement':'failed',success?null:'completion_failed');
+    notifySettled(proposalId,updated,updated.phase);
   }
   function track(proposalId,completion){
     const tracked=Promise.resolve(completion).then(result=>finish(proposalId,result)).catch(()=>{
-      try{const ticket=store.get(proposalId);store.update(proposalId,replacement(ticket)?'superseded':'failed','completion_failed');}catch{/* Persisted dispatch/running remains unknown; never resubmit. */}
+      try{const ticket=store.get(proposalId),successor=replacement(ticket),updated=store.update(proposalId,successor?'superseded':'failed','completion_failed');notifySettled(proposalId,updated,updated.phase,successor??undefined);}catch{/* Persisted dispatch/running remains unknown; never resubmit. */}
     });
     turns.add(tracked);tracked.then(()=>turns.delete(tracked));return tracked;
   }

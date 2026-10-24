@@ -36,7 +36,7 @@ const context=()=>({taskId:randomUUID(),executionSessionId:randomUUID(),sandboxI
 const input=()=>({...structuredClone(draft),runtimeArtifact:{protocolVersion:'sirna-tool-runtime-artifact/v1',imageDigest:`sha256:${'b'.repeat(64)}`,command:['/usr/bin/node','/opt/tool/main.mjs'],platform:'linux/amd64',createdAt:'2026-10-20T00:00:00.000Z',buildSessionId:randomUUID()}});
 function temporary(t,cleanup=[]){const root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'sirna-repair-')));t.after(async()=>{for(const close of cleanup.reverse())await close();assert.equal(path.dirname(root),fs.realpathSync(os.tmpdir()));assert.match(path.basename(root),/^sirna-repair-[A-Za-z0-9]+$/);function unlock(dir){fs.chmodSync(dir,0o700);for(const e of fs.readdirSync(dir,{withFileTypes:true})){const p=path.join(dir,e.name);if(e.isDirectory()&&!e.isSymbolicLink())unlock(p);else if(!e.isSymbolicLink())fs.chmodSync(p,0o600);}}unlock(root);fs.rmSync(root,{recursive:true});});return root;}
 function registry(root,fn){const r=new ToolRegistry(resolveToolLearningPaths(root).databasePath);try{return fn(r);}finally{r.close();}}
-async function setup(t,{source=true,changes={},run}={}){
+async function setup(t,{source=true,changes={},run,onSettled}={}){
   assert.equal(typeof api.createToolRepair,'function','controlled repair service is implemented');
   const cleanup=[],root=temporary(t,cleanup),tasks=new TaskStore(path.join(root,'tasks.sqlite')),ctx=context();
   const task=tasks.createTask({id:ctx.executionSessionId});ctx.taskId=task.id;
@@ -47,7 +47,7 @@ async function setup(t,{source=true,changes={},run}={}){
     assertWorkspaceIdle:async()=>({status:'idle'}),run:async(request,emit,signal)=>{const c={...ctx,agentRunId:randomUUID(),agentTurnId:randomUUID()};emit({type:'run_status',status:'running',runId:c.agentRunId});if(run){try{await run({request,emit,signal,ctx:c,repair,tasks,root});}catch(error){runErrors.push(error);throw error;}}else{emit({type:'text_delta',delta:'I submitted a tool (words only).'});emit({type:'done',status:'succeeded',runId:c.agentRunId});}}};
   const messages=new TaskMessageService({taskStore:tasks,agentRuntime:runtime});
   let store=new storage.ToolRepairStore({root});
-  const create=()=>api.createToolRepair({root,store,taskStore:tasks,taskMessages:messages,agentRuntime:runtime,maintenance});
+  const create=()=>api.createToolRepair({root,store,taskStore:tasks,taskMessages:messages,agentRuntime:runtime,maintenance,onSettled});
   repair=create();
   cleanup.push(async()=>{await repair.stop();await maintenance.stop();store.close();queue.close();tasks.close();assert.deepEqual(runErrors,[],'runtime callback assertions must not be swallowed by the task service');});
   async function validate(id=saved.proposal.id,allPass=false){const row=registry(root,r=>r.getProposal(id));const {readToolProposal}=await import('../packages/capability-platform/tool-proposals.mjs');const material=readToolProposal(id,{proposalsRoot:resolveToolLearningPaths(root).proposalsRoot,expectedArtifactSha256:row.artifactSha256});const docker=new DockerBoundary(material,{runResult:({target,envelope})=>({exitCode:allPass&&target==='baseline'&&envelope.input.sequence.startsWith('>')?1:0,timedOut:false,outputLimitExceeded:false,stdout:JSON.stringify({length:allPass?4:99,gcFraction:0.5}),stderr:''})});await validateRegisteredToolProposal(id,{root,runner:createDockerValidationRunner({docker})});const v=getLatestToolValidationReport(id,{root});return {validationId:v.id,reportSha256:v.reportSha256};}
@@ -105,10 +105,11 @@ for(const mode of ['canceled','failed','no-done','save-failed'])test(`${mode} co
 });
 
 test('real replacement event wins over late completion failure and transaction admits only one candidate per ticket',async t=>{
-  let replacement;
-  const f=await setup(t,{run:async({ctx,repair,root,emit})=>{const p={...input(),script:draft.script+'\n// fixed'};const association=repair.registration(p,ctx);replacement=submitRegisteredToolProposal(p,{root,actor:'web-agent',taskContext:ctx,repair:association});assert.throws(()=>repair.registration({...p,runtimeArtifact:{...p.runtimeArtifact,buildSessionId:randomUUID()}},ctx));assert.throws(()=>submitRegisteredToolProposal({...p,runtimeArtifact:{...p.runtimeArtifact,buildSessionId:randomUUID()}},{root,actor:'web-agent',taskContext:ctx,repair:association}));emit({type:'done',status:'failed',runId:ctx.agentRunId});}});
+  let replacement;const notifications=[];
+  const f=await setup(t,{onSettled:value=>notifications.push(value),run:async({ctx,repair,root,emit})=>{const p={...input(),script:draft.script+'\n// fixed'};const association=repair.registration(p,ctx);replacement=submitRegisteredToolProposal(p,{root,actor:'web-agent',taskContext:ctx,repair:association});assert.throws(()=>repair.registration({...p,runtimeArtifact:{...p.runtimeArtifact,buildSessionId:randomUUID()}},ctx));assert.throws(()=>submitRegisteredToolProposal({...p,runtimeArtifact:{...p.runtimeArtifact,buildSessionId:randomUUID()}},{root,actor:'web-agent',taskContext:ctx,repair:association}));emit({type:'done',status:'failed',runId:ctx.agentRunId});}});
   await f.repair.start(f.id,f.body);await f.repair.drain();assert.equal(f.repair.status(f.id).repair.phase,'superseded');assert.equal(f.repair.status(f.id).repair.replacementProposalId,replacement.proposal.id);assert.equal(replacement.registry.state,'submitted');
   assert.equal(registry(f.root,r=>r.getRepairReplacement(`auto-tool-repair:${f.id}`)).proposalId,replacement.proposal.id);
+  assert.equal(notifications.length,1);assert.equal(notifications[0].phase,'superseded');assert.equal(notifications[0].replacementProposalId,replacement.proposal.id);assert.equal(notifications[0].replacementArtifactSha256,replacement.registry.artifactSha256);assert.equal(notifications[0].replacementToolName,replacement.proposal.toolName);
 });
 
 test('only current task, session, run and repair message can register and frozen fields cannot be changed',async t=>{

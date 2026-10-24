@@ -21,7 +21,7 @@ export function createToolCurationBuildService({root,store,curationStore,taskSto
     if(typeof onSettled!=='function')return;
     let ticket;try{ticket=store.get(id);}catch{return;}
     if(!ticket)return;
-    const notification={protocolVersion:'sirna-tool-curation-builder/v1',curationId:ticket.curationId,taskId:ticket.taskId,sourceTaskId:ticket.taskId,requestId:ticket.requestId,phase:ticket.phase,userMessageId:ticket.userMessageId??null,runId:ticket.runId??null,...(extra.proposalId?{proposalId:extra.proposalId}:{}),...(extra.artifactSha256?{artifactSha256:extra.artifactSha256}:{})};
+    const notification={protocolVersion:'sirna-tool-curation-builder/v1',curationId:ticket.curationId,taskId:ticket.taskId,sourceTaskId:ticket.taskId,requestId:ticket.requestId,phase:ticket.phase,userMessageId:ticket.userMessageId??null,runId:ticket.runId??null,...(extra.proposalId?{proposalId:extra.proposalId}:{}),...(extra.artifactSha256?{artifactSha256:extra.artifactSha256}:{}),...(extra.toolName?{toolName:extra.toolName}:{})};
     try{Promise.resolve(onSettled(notification)).catch(()=>{});}catch{/* Notification failure cannot rewrite the durable Builder phase. */}
   }
   function candidate(taskId,id){
@@ -78,9 +78,10 @@ export function createToolCurationBuildService({root,store,curationStore,taskSto
     // currentRunId can still describe an earlier run; only this result and its
     // durable message/event association establish the actual dispatch identity.
     const phase=confirmed?(proposalId?'submitted':'no_proposal'):(proposalId||!completionKnown||ticket.submissionUncertain||uncertain.has(id)?'outcome_unknown':'failed');
-    const artifactSha256=proposalId?getToolProposalSource(proposalId,{root}).registry.artifactSha256:undefined;
+    let artifactSha256,toolName;
+    if(proposalId){try{const source=getToolProposalSource(proposalId,{root});artifactSha256=source.registry.artifactSha256;toolName=source.input.toolName;}catch{/* The durable phase remains authoritative; omit optional identity. */}}
     store.update(id,phase,{...(user?{userMessageId:user.id}:{}),...(events.length?{runId:result.finalRunId}:{}),submissionUncertain:uncertain.has(id)});
-    notifySettled(id,{...(proposalId?{proposalId,artifactSha256}:{} )});
+    notifySettled(id,{...(proposalId?{proposalId,artifactSha256,toolName}:{} )});
   }
   function track(id,completion){
     const tracked=Promise.resolve(completion).then(result=>finish(id,result)).catch(()=>{try{store.update(id,'outcome_unknown');notifySettled(id);}catch{/* Ticket remains reserved; never replay. */}});
