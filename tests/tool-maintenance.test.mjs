@@ -69,6 +69,10 @@ test('duplicate maintenance request refuses a different artifact binding',async 
   worker.enqueue(p.id,requestId,{artifactSha256:p.saved.integrity.artifactSha256});
   assert.throws(()=>worker.enqueue(p.id,requestId,{artifactSha256:'0'.repeat(64)}),e=>e.statusCode===409);assert.equal(store.list().length,1);await worker.stop();
 });
+test('maintenance worker emits a small terminal notification after durable job completion',async t=>{
+  const {root,store,proposal}=setup(t),p=proposal(),notifications=[];const worker=createToolMaintenance({root,store,validate:async()=>({validationId:randomUUID(),passed:false}),onSettled:value=>{notifications.push(value);assert.equal(store.get(value.jobId).status,'succeeded');}});
+  const job=worker.enqueue(p.id,randomUUID()).job;await worker.start();await worker.drain();assert.equal(notifications.length,1);assert.deepEqual(Object.keys(notifications[0]).sort(),['artifactSha256','jobId','passed','proposalId','protocolVersion','status','validationId']);assert.equal(notifications[0].jobId,job.id);assert.equal(notifications[0].proposalId,p.id);assert.equal(notifications[0].passed,false);await worker.stop();
+});
 test('recovery rolls back interrupted rows if halt persistence fails and commits both outcomes on retry',t=>{
   const {root,store,cleanup}=setup(t);const job=store.enqueue(randomUUID(),randomUUID()).job;store.claim();
   const file=path.join(root,'runtime/tool-maintenance/jobs.sqlite'),db=new DatabaseSync(file);cleanup.push(()=>db.close());

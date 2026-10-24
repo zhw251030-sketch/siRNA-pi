@@ -69,7 +69,8 @@ const taskMessages=new TaskMessageService({taskStore,agentRuntime,workspaceFiles
 const maintenanceStore=new ToolMaintenanceStore({root:projectRoot});
 const toolMaintenance=createToolMaintenance({root:projectRoot,store:maintenanceStore,validate:createMaintenanceValidator({root:projectRoot,docker}),
   canValidate:id=>!toolRepair?.active(id),
-  onError:()=>console.error('候选验证执行失败，请检查项目内私有运行记录。')});
+  onError:()=>console.error('候选验证执行失败，请检查项目内私有运行记录。'),
+  onSettled:notification=>toolCurationCoordinator?.observeMaintenance(notification)});
 const repairStore=new ToolRepairStore({root:projectRoot});
 toolRepair=createToolRepair({root:projectRoot,store:repairStore,taskStore,taskMessages,agentRuntime,maintenance:toolMaintenance});
 const listExistingTools = () => [
@@ -88,6 +89,7 @@ toolCurationBuild = createToolCurationBuildService({root:projectRoot,store:curat
   onSettled:ticket=>toolCurationCoordinator?.observeBuilder(ticket)});
 toolCurationCoordinator=createToolCurationCoordinator({taskStore,preview:toolCurationPreview,curation:toolCuration,toolCurationBuild,toolMaintenance,
   automaticValidation:process.env.SIRNA_AUTOMATIC_VALIDATION==='1',
+  toolRepair,automaticRepair:process.env.SIRNA_AUTOMATIC_REPAIR==='1',
   isReady:createCurationAutomationReadiness({taskMessages,agentRuntime}),isTaskBusy:taskId=>taskMessages.isTaskBusy(taskId),intervalMs:1000,maxReviews:3});
 const server = createAppServer({ taskStore, agentRuntime, workspaceFiles, taskMessages, toolMaintenance, toolRepair, toolCurationPreview, toolCuration, toolCurationBuild, toolCurationCoordinator });
 const shutdown = createApiShutdown({server,toolMaintenance,toolRepair,toolCuration,toolCurationBuild,toolCurationCoordinator,toolsServer,

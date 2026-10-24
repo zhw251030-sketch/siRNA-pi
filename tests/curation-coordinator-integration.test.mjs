@@ -128,7 +128,7 @@ test('automation HTTP without configuration is 503 and unexpected exceptions are
   for(const response of [await broken.get(),await broken.post({enabled:true})]){assert.ok([503,409].includes(response.status));assert.equal((await response.text()).includes('PRIVATE_HOST_KEY'),false);}
 });
 
-async function curationFixture(t,{curate,readiness,isTaskBusy,beforeCuration,toolCurationBuild,toolMaintenance,automaticValidation=false}={}){
+async function curationFixture(t,{curate,readiness,isTaskBusy,beforeCuration,toolCurationBuild,toolMaintenance,toolRepair,automaticValidation=false,automaticRepair=false}={}){
   const module=await import('../packages/extensions/tool-curation/tool-curation-coordinator.mjs').catch(()=>({}));
   assert.equal(typeof module.createToolCurationCoordinator,'function','real coordinator must be available');
   const f=fixture(t),curations=new ToolCurationStore({root:f.root}),gaps=new ToolGapStore({root:f.root});let calls=0;
@@ -146,7 +146,7 @@ async function curationFixture(t,{curate,readiness,isTaskBusy,beforeCuration,too
     for(let i=0;i<3;i++){emit({type:'tool_start',toolCallId:`call-${i}`,toolName:'fetch_dataset',args:{identifier:i}});emit({type:'tool_end',toolCallId:`call-${i}`,toolName:'fetch_dataset',isError:false,result:{rows:[1,2]}});}
     emit({type:'assistant_message',text:'saved fetch results'});emit({type:'done',runId,status:'succeeded'});
   };
-  coordinator=module.createToolCurationCoordinator({taskStore:f.tasks,preview,curation:service,toolCurationBuild,toolMaintenance,automaticValidation,isReady:readiness??lifecycle.createCurationAutomationReadiness({taskMessages:f.messages,agentRuntime:f.runtime}),isTaskBusy:isTaskBusy??(taskId=>f.messages.isTaskBusy(taskId)),intervalMs:1000,maxReviews:3});
+  coordinator=module.createToolCurationCoordinator({taskStore:f.tasks,preview,curation:service,toolCurationBuild,toolMaintenance,toolRepair,automaticValidation,automaticRepair,isReady:readiness??lifecycle.createCurationAutomationReadiness({taskMessages:f.messages,agentRuntime:f.runtime}),isTaskBusy:isTaskBusy??(taskId=>f.messages.isTaskBusy(taskId)),intervalMs:1000,maxReviews:3});
   f.messages.onSettled=value=>coordinator.observeRun(value);
   service.start();coordinator.start();f.closers.push(()=>service.stop(),()=>coordinator.stop());
   const turn=async(task=f.task,requestId)=>{const value=await f.messages.start({taskId:task.id,message:'Compare datasets',...(requestId?{requestId}:{})},()=>{});const saved=await value.completion;await coordinator.runOnce();await new Promise(r=>setImmediate(r));return saved;};
@@ -232,6 +232,25 @@ test('late Builder terminal notification after coordinator stop cannot enqueue v
   f.coordinator.configure({enabled:true});await f.turn();const candidate=await waitFor(()=>f.curations.list(f.task.id).find(row=>row.status==='candidate'));assert.ok(candidate);await waitFor(()=>starts.length===1);
   await f.coordinator.stop();f.coordinator.observeBuilder({curationId:candidate.id,requestId:buildRequestId(candidate.id),phase:'submitted',proposalId:randomUUID(),artifactSha256:'c'.repeat(64)});
   assert.equal(jobs.length,0);assert.ok(f.coordinator.status().recent.some(item=>item.reason==='stopped'));
+});
+
+test('failed automatic validation enters the existing repair service only when repair is enabled',async t=>{
+  const starts=[],jobs=[],repairs=[],curationId=randomUUID(),proposalId=randomUUID(),validationId=randomUUID(),artifactSha256='d'.repeat(64),reportSha256='e'.repeat(64);
+  const f=await curationFixture(t,{automaticValidation:true,automaticRepair:true,toolMaintenance:{enqueue:(...args)=>{jobs.push(args);return {job:{id:randomUUID(),proposalId:args[0],status:'pending'},deduplicated:false};}},toolRepair:{start:async(...args)=>{repairs.push(args);return {repair:{phase:'running',proposalId:args[0]},deduplicated:false};}},toolCurationBuild:{start:async(...args)=>{starts.push(args);return {handoff:{phase:'running',curationId:args[1]}};}}});
+  f.coordinator.configure({enabled:true});await f.turn();const candidate=await waitFor(()=>f.curations.list(f.task.id).find(row=>row.status==='candidate'));assert.ok(candidate);await waitFor(()=>starts.length===1);
+  f.coordinator.observeBuilder({curationId:candidate.id,requestId:buildRequestId(candidate.id),phase:'submitted',proposalId,artifactSha256});await new Promise(resolve=>setImmediate(resolve));assert.equal(jobs.length,1);
+  f.coordinator.observeMaintenance({proposalId,jobId:randomUUID(),status:'succeeded',passed:false,validationId,reportSha256,artifactSha256});await new Promise(resolve=>setImmediate(resolve));
+  assert.deepEqual(repairs,[[proposalId,{validationId,reportSha256}]]);
+  f.coordinator.observeMaintenance({proposalId,jobId:randomUUID(),status:'succeeded',passed:false,validationId,reportSha256,artifactSha256});await new Promise(resolve=>setImmediate(resolve));assert.equal(repairs.length,1);
+});
+
+test('automatic repair ignores passed, unknown and default-disabled validation outcomes',async t=>{
+  const starts=[],jobs=[],repairs=[],proposalId=randomUUID(),validationId=randomUUID(),artifactSha256='f'.repeat(64),reportSha256='1'.repeat(64);
+  const f=await curationFixture(t,{automaticValidation:true,toolMaintenance:{enqueue:(...args)=>{jobs.push(args);return {job:{id:randomUUID(),proposalId:args[0],status:'pending'},deduplicated:false};}},toolRepair:{start:async(...args)=>{repairs.push(args);}},toolCurationBuild:{start:async(...args)=>{starts.push(args);return {handoff:{phase:'running',curationId:args[1]}};}}});
+  f.coordinator.configure({enabled:true});await f.turn();const candidate=await waitFor(()=>f.curations.list(f.task.id).find(row=>row.status==='candidate'));assert.ok(candidate);await waitFor(()=>starts.length===1);
+  f.coordinator.observeBuilder({curationId:candidate.id,requestId:buildRequestId(candidate.id),phase:'submitted',proposalId,artifactSha256});await new Promise(resolve=>setImmediate(resolve));
+  for(const value of [{status:'succeeded',passed:true},{status:'failed',passed:null},{status:'succeeded',passed:false,validationId,reportSha256}]){f.coordinator.observeMaintenance({proposalId,jobId:randomUUID(),artifactSha256,...value});await new Promise(resolve=>setImmediate(resolve));}
+  assert.equal(repairs.length,0);
 });
 
 test('real completed task and HTTP switch persist one candidate, then apply backend cooldown on a new task',async t=>{

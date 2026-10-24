@@ -7,8 +7,16 @@ import {getToolRepairFeedback} from './tool-repair-feedback.mjs';
 
 // One trusted web process owns this worker. A restart never assumes an unknown
 // Docker execution is safe to repeat. Other maintenance CLIs remain manual.
-export function createToolMaintenance({root,store,validate,canValidate=()=>true,onError=()=>{}}){
+export function createToolMaintenance({root,store,validate,canValidate=()=>true,onError=()=>{},onSettled}={}){
+  if(onSettled!==undefined&&typeof onSettled!=='function')throw Error('Invalid maintenance settled callback');
   let started=false,accepting=true,pump=null,wakeRequested=false;
+  function notifySettled(job,result,terminal){
+    if(typeof onSettled!=='function')return;
+    let reportSha256;
+    if(result?.passed===false){try{const feedback=getToolRepairFeedback(job.proposalId,{root});if(feedback?.validationId===result.validationId)reportSha256=feedback.reportSha256;}catch{/* A damaged report is not repair evidence. */}}
+    const notification={protocolVersion:'sirna-tool-maintenance/v1',jobId:job.id,proposalId:job.proposalId,status:terminal?.status??'failed',passed:typeof result?.passed==='boolean'?result.passed:null,validationId:result?.validationId??null,artifactSha256:job.artifactSha256,...(reportSha256?{reportSha256}:{})};
+    try{Promise.resolve(onSettled(notification)).catch(()=>{});}catch{/* Notification failure cannot rewrite durable maintenance state. */}
+  }
   function proposal(id){maintenanceId(id);const {databasePath}=resolveToolLearningPaths(root);let found;
     if(fs.existsSync(databasePath)){const registry=new ToolRegistry(databasePath,{readOnly:true});try{found=registry.getProposal(id);}finally{registry.close();}}
     if(!found)throw new ToolMaintenanceError(404,'没有找到这个候选。');return found;}
@@ -19,11 +27,13 @@ export function createToolMaintenance({root,store,validate,canValidate=()=>true,
   }
   function wake(){if(!started||!accepting)return;if(pump){wakeRequested=true;return;}wakeRequested=false;
     pump=Promise.resolve().then(async()=>{
-      while(accepting){const job=store.claim();if(!job)break;
+      while(accepting){const job=store.claim();if(!job)break;let report=null,terminal;
         try{const current=ready(job.proposalId);const binding=store.binding(job.id);if(binding&&binding!==current.artifactSha256)throw new Error('Queued artifact identity changed');
-          const report=await validate(job.proposalId,job);store.finish(job.id,report);}
-        catch(error){if(error.cleanupError||error.containerId||error.maintenanceUnsafe){accepting=false;store.failUnsafe(job.id);}else store.finish(job.id,null);
+          report=await validate(job.proposalId,job);terminal=store.finish(job.id,report);}
+        catch(error){if(error.cleanupError||error.containerId||error.maintenanceUnsafe){accepting=false;terminal=store.failUnsafe(job.id);}else terminal=store.finish(job.id,null);
+          notifySettled(job,report,terminal);
           try{onError(error,job);}catch{/* diagnostics must not restart execution */}}
+        if(terminal&&report)notifySettled(job,report,terminal);
       }
     }).catch(error=>{accepting=false;try{onError(error);}catch{}}).finally(()=>{pump=null;if(wakeRequested)wake();});
   }

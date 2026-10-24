@@ -55,4 +55,4 @@ Builder 原本已经把 `dispatching`、`running`、`submitted`、`no_proposal`�
 
 定向测试覆盖以下事实：Builder 终态回调在持久写入之后发生且不泄漏 prompt/binding；自动候选只有在开关打开时才入队；`no_proposal`、重复通知、重复请求和错误来源不会重复执行；proposal/artifact 摘要错配在 Docker 之前拒绝；维护 worker 的重启、中断和不确定清理规则仍由原测试保护。
 
-这一轮完成后，下一阶段才是参考仓库中更复杂的“验证失败 → 原任务受控修订 → 替代候选继承与 supersede”。自动批准、Goal 限制、Memory/Data Pool、Workbench 和 Black-box 仍未实现。
+第12C步已经把验证失败接到既有受控修订服务，具体见 [自动验证失败触发受控修订](36-自动验证失败触发受控修订.md)。后续仍需把替代候选接回持久自动化状态机；自动批准、Goal 限制、Memory/Data Pool、Workbench 和 Black-box 仍未实现。
