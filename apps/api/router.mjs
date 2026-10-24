@@ -8,6 +8,7 @@ import { ToolCurationPreviewError } from "../../packages/extensions/tool-curatio
 import { ToolCurationError } from "../../packages/extensions/tool-curation/tool-curation-service.mjs";
 import { ToolCurationBuildError } from "../../packages/extensions/tool-curation/tool-curation-build-service.mjs";
 import { buildId, buildDigest } from "../../packages/extensions/tool-curation/tool-curation-build-contract.mjs";
+import { maintenanceText } from "../../packages/capability-platform/tool-version.mjs";
 
 const uuidV4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -148,7 +149,8 @@ export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolM
           if(!toolApproval)return reply(response,503,{error:'候选批准服务尚未配置。'});
           const body=await readBody(request,4096);
           if(Object.keys(body).length!==2||!Object.hasOwn(body,'requestId')||!Object.hasOwn(body,'approvedBy'))invalid('批准请求只接受 requestId 和 approvedBy。');
-          if(typeof body.requestId!=='string'||!uuidV4.test(body.requestId)||typeof body.approvedBy!=='string'||!body.approvedBy.trim()||body.approvedBy.length>120)invalid('批准请求的 requestId 或 approvedBy 无效。');
+          if(typeof body.requestId!=='string'||!uuidV4.test(body.requestId))invalid('批准请求的 requestId 或 approvedBy 无效。');
+          try { maintenanceText(body.approvedBy,'approvedBy'); } catch { invalid('批准请求的 requestId 或 approvedBy 无效。'); }
           try{
             const result=toolApproval.enqueue(proposalRoute[1],body.requestId,{approvedBy:body.approvedBy});
             return reply(response,result?.deduplicated?200:202,result);

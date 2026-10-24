@@ -15,6 +15,7 @@ import {createToolCurationPreview} from '../packages/extensions/tool-curation/to
 import {createToolCurationService} from '../packages/extensions/tool-curation/tool-curation-service.mjs';
 import {buildRequestId} from '../packages/extensions/tool-curation/tool-curation-build-contract.mjs';
 import {ToolAutomationStore} from '../packages/capability-platform/tool-automation-store.mjs';
+import {ToolApprovalStore} from '../packages/capability-platform/tool-approval-store.mjs';
 
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 function fixture(t,{onSettled,workspaceFiles,run}={}) {
@@ -130,16 +131,33 @@ test('automation HTTP without configuration is 503 and unexpected exceptions are
 });
 
 test('approval HTTP validates the bounded envelope and only enqueues verified proposals',async t=>{
-  const f=fixture(t),proposalId=randomUUID(),requestId=randomUUID(),jobs=[];
-  const toolApproval={enqueue:(...args)=>{jobs.push(args);return {job:{id:randomUUID(),proposalId:args[0],status:'pending',requestedBy:args[2].approvedBy},deduplicated:jobs.length>1};},list:()=>[]};
+  const f=fixture(t),proposalId=randomUUID(),requestId=randomUUID();
+  const approvalRoot=fs.mkdtempSync(path.join(os.tmpdir(),'approval-http-'));
+  const store=new ToolApprovalStore({root:approvalRoot,isVerified:id=>id===proposalId});
+  const toolApproval={enqueue:(...args)=>store.enqueue(...args),list:()=>store.list()};
   const server=createAppServer({taskStore:f.tasks,agentRuntime:f.runtime,toolApproval});server.listen(0,'127.0.0.1');await once(server,'listening');
-  t.after(()=>new Promise(resolve=>{server.close(resolve);server.closeAllConnections();}));
+  t.after(async()=>{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));store.close();fs.rmSync(approvalRoot,{recursive:true,force:true});});
   const url=`http://127.0.0.1:${server.address().port}/v1/tool-proposals/${proposalId}/approve`,headers={'Content-Type':'application/json'};
-  assert.equal((await fetch(url,{method:'POST',headers,body:JSON.stringify({requestId,approvedBy:'operator'})})).status,202);
-  assert.equal((await fetch(url,{method:'POST',headers,body:JSON.stringify({requestId,approvedBy:'operator'})})).status,200);
-  assert.equal(jobs.length,2);
+  const first=await fetch(url,{method:'POST',headers,body:JSON.stringify({requestId,approvedBy:'operator'})});
+  const firstBody=await first.json();
+  const duplicate=await fetch(url,{method:'POST',headers,body:JSON.stringify({requestId,approvedBy:'operator'})});
+  const duplicateBody=await duplicate.json();
+  assert.equal(first.status,202);assert.equal(duplicate.status,200);
+  assert.equal(firstBody.job.id,duplicateBody.job.id);assert.equal(store.list().length,1);
+  assert.equal(store.getByRequest(requestId).id,firstBody.job.id);
   for(const body of [{requestId:'bad',approvedBy:'operator'},{requestId,approvedBy:''},{requestId,approvedBy:'operator',extra:true}])assert.equal((await fetch(url,{method:'POST',headers,body:JSON.stringify(body)})).status,400);
+  const control=await fetch(url,{method:'POST',headers,body:JSON.stringify({requestId:randomUUID(),approvedBy:'operator\nforged'})});
+  assert.equal(control.status,400);assert.equal(store.list().length,1);
   assert.equal((await fetch(url,{method:'POST',headers:{...headers,Origin:'https://foreign.example'},body:JSON.stringify({requestId,approvedBy:'operator'})})).status,403);
+  const unverifiedRoot=fs.mkdtempSync(path.join(os.tmpdir(),'approval-http-unverified-'));
+  const unverified=new ToolApprovalStore({root:unverifiedRoot,isVerified:()=>false});
+  t.after(()=>{unverified.close();fs.rmSync(unverifiedRoot,{recursive:true,force:true});});
+  const unverifiedServer=createAppServer({taskStore:f.tasks,agentRuntime:f.runtime,toolApproval:{enqueue:(...args)=>unverified.enqueue(...args),list:()=>unverified.list()}});
+  unverifiedServer.listen(0,'127.0.0.1');await once(unverifiedServer,'listening');
+  t.after(async()=>{unverifiedServer.closeAllConnections();await new Promise(resolve=>unverifiedServer.close(resolve));});
+  const unverifiedUrl=`http://127.0.0.1:${unverifiedServer.address().port}/v1/tool-proposals/${proposalId}/approve`;
+  const rejected=await fetch(unverifiedUrl,{method:'POST',headers,body:JSON.stringify({requestId:randomUUID(),approvedBy:'operator'})});
+  assert.equal(rejected.status,409);assert.equal(unverified.list().length,0);
 });
 
 async function curationFixture(t,{curate,readiness,isTaskBusy,beforeCuration,toolCurationBuild,toolMaintenance,toolRepair,toolAutomation,toolApproval,approveTool,persistentAutomation=false,automaticValidation=false,automaticRepair=false,automaticApproval=false}={}){

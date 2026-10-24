@@ -54,6 +54,15 @@ test('validates UUIDs and admits only verified proposals through the binding', t
   store.close();
 });
 
+test('enqueue rejects actor control characters before creating a job', t => {
+  const {store} = fixture(t, {isVerified: () => true});
+  const proposalId = randomUUID();
+  const requestId = randomUUID();
+  assert.throws(() => store.enqueue(proposalId, requestId, {approvedBy: 'reviewer\noperator'}), /control|characters|approvedBy/i);
+  assert.equal(store.list().length, 0);
+  store.close();
+});
+
 test('deduplicates the same request and rejects binding it to another proposal', t => {
   const {store} = fixture(t, {isVerified: () => true});
   const proposal = randomUUID(), other = randomUUID(), request = randomUUID();

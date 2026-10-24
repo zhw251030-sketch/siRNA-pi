@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
+import {maintenanceText} from './tool-version.mjs';
 
 const applicationId = 1397903955;
 const schema = `CREATE TABLE jobs (
@@ -125,8 +126,9 @@ export class ToolApprovalStore {
   resume() { this.#db.prepare('UPDATE control SET halted=0 WHERE id=1').run(); }
   enqueue(proposalId, requestId, {approvedBy} = {}) {
     checkedId(proposalId, 'Proposal ID'); checkedId(requestId, 'Request ID');
-    const actor = typeof approvedBy === 'string' ? approvedBy.replace(/\s+/g, ' ').trim() : '';
-    if (!actor || actor.length > 120) fail('approvedBy must contain 1 to 120 characters');
+    let actor;
+    try { actor = maintenanceText(approvedBy, 'approvedBy'); }
+    catch { fail('approvedBy must be nonempty text of at most 120 characters without controls'); }
     return this.#transaction(() => {
       const existing = this.getByRequest(requestId);
       if (existing) {
