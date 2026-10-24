@@ -190,6 +190,7 @@ export function createToolCurationCoordinator({root,taskStore,preview,curation,t
     if(!toolApproval||!input||input.protocolVersion!=='sirna-tool-approval/v1'||typeof input.proposalId!=='string'||typeof input.jobId!=='string'||!['succeeded','failed'].includes(input.status))return;
     let run;try{run=toolAutomation?.get(input.proposalId);}catch{return;}
     if(!run||run.phase!=='approving')return;
+    if(!started||!enabled)return;
     let durable;try{durable=toolApproval.latest(input.proposalId);}catch{return;}
     if(!durable||durable.id!==input.jobId||!['succeeded','failed'].includes(durable.status)||durable.status!==input.status)return;
     const event=automationEvent(run);

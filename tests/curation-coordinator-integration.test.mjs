@@ -310,6 +310,18 @@ test('automatic approval uses the durable approval queue and terminal observatio
   assert.equal(f.toolAutomation.get(proposalId).phase,'completed');
 });
 
+test('late approval terminal notification after coordinator stop cannot change approving state',async t=>{
+  const proposalId=randomUUID(),artifactSha256='3'.repeat(64);let latestJob;
+  const toolApproval={enqueue:(proposalId,requestId,options)=>{latestJob={id:randomUUID(),proposalId,status:'pending',requestedBy:options.approvedBy};return {job:latestJob,deduplicated:false};},latest:()=>latestJob};
+  const f=await curationFixture(t,{persistentAutomation:true,automaticValidation:true,automaticApproval:true,toolApproval,toolMaintenance:{enqueue:()=>({job:{id:randomUUID(),proposalId,status:'pending'},deduplicated:false})},toolCurationBuild:{start:async()=>({handoff:{phase:'running'}})}});
+  f.coordinator.configure({enabled:true});await f.turn();const candidate=await waitFor(()=>f.curations.list(f.task.id).find(row=>row.status==='candidate'));assert.ok(candidate);
+  f.coordinator.observeBuilder({curationId:candidate.id,requestId:buildRequestId(candidate.id),phase:'submitted',proposalId,artifactSha256,toolName:'dataset_fetch',taskId:f.task.id,runId:f.runId,userMessageId:randomUUID()});await new Promise(resolve=>setImmediate(resolve));
+  f.coordinator.observeMaintenance({proposalId,jobId:randomUUID(),status:'succeeded',passed:true,artifactSha256});await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.toolAutomation.get(proposalId).phase,'approving');await f.coordinator.stop();
+  latestJob={...latestJob,status:'succeeded',approved:true,activated:true};f.coordinator.observeApproval({protocolVersion:'sirna-tool-approval/v1',jobId:latestJob.id,proposalId,status:'succeeded',approved:true,activated:true});
+  assert.equal(f.toolAutomation.get(proposalId).phase,'approving');
+});
+
 test('automatic approval fails closed when the approval callback does not activate a version',async t=>{
   const proposalId=randomUUID(),artifactSha256='7'.repeat(64),jobs=[];
   const f=await curationFixture(t,{persistentAutomation:true,automaticValidation:true,automaticApproval:true,approveTool:async()=>({approved:true,activated:false}),toolMaintenance:{enqueue:(...args)=>{jobs.push(args);return {job:{id:randomUUID(),proposalId:args[0],status:'pending'},deduplicated:false};}},toolCurationBuild:{start:async()=>({handoff:{phase:'running'}})}});
