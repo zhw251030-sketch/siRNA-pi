@@ -56,9 +56,12 @@ export function createToolApproval({root, store, approve, onError = () => {}, on
         let terminal;
         try {
           const result = await approve(job.proposalId, job.requestedBy);
+          if (!result || result.approved !== true || result.activated !== true) {
+            throw new Error('Approval did not produce an affirmative terminal result');
+          }
           terminal = store.finish(job.id, result);
         } catch (error) {
-          const committed = error?.approved === true && (error?.activated === true || error?.versionActivated === true);
+          const committed = error?.approved === true && error?.activated === true && error?.versionActivated === true;
           if (committed) {
             terminal = store.finish(job.id, {approved: true, activated: true});
             notify(job, terminal);
@@ -91,6 +94,7 @@ export function createToolApproval({root, store, approve, onError = () => {}, on
     status() { return {accepting: accepting && !store.halted(), halted: store.halted()}; },
     enqueue(proposalId, requestId, {approvedBy} = {}) {
       if (!accepting) throw new Error('Approval worker is stopping');
+      if (store.halted()) throw new Error('Approval worker is halted');
       const result = store.enqueue(proposalId, requestId, {approvedBy});
       wake();
       return result;
