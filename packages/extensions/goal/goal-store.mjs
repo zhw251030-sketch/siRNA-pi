@@ -204,6 +204,19 @@ export class GoalStore {
       return {goal: updated, leaseId, automaticTurnNumber: turn};
     });
   }
+  releaseLease(taskId, leaseId, refundTurn = false) {
+    checkId(taskId); checkId(leaseId, 'leaseId');
+    if (typeof refundTurn !== 'boolean') fail('refundTurn must be boolean');
+    return this.#transaction(() => {
+      const goal = this.get(taskId);
+      if (!goal || goal.leaseId !== leaseId) return goal;
+      const automaticTurns = refundTurn ? Math.max(0, goal.automaticTurnsUsed - 1) : goal.automaticTurnsUsed;
+      const timestamp = now();
+      this.#db.prepare('UPDATE task_goals SET automatic_turns_used=?, lease_id=NULL, lease_expires_at=NULL, revision=revision+1, updated_at=? WHERE task_id=? AND lease_id=?')
+        .run(automaticTurns, timestamp, taskId, leaseId);
+      return this.get(taskId);
+    });
+  }
   completeLease(taskId, leaseId, outcome) {
     checkId(taskId); checkId(leaseId, 'leaseId');
     if (!outcome || typeof outcome !== 'object' || typeof outcome.success !== 'boolean' || typeof outcome.productive !== 'boolean') fail('Invalid Goal turn outcome');

@@ -78,6 +78,20 @@ test('GoalStore supports pause/resume, budget accounting, leases and restart rec
   limitedStore.close();
 });
 
+test('GoalStore can release an unaccepted lease and refund its reserved turn', t => {
+  const {root} = fixture(t);
+  const taskId = randomUUID();
+  const store = new GoalStore({root});
+  store.create(taskId, '未接受的自动回合', 2);
+  const lease = store.acquireLease(taskId, 1000);
+  assert.equal(store.get(taskId).automaticTurnsUsed, 1);
+  const released = store.releaseLease(taskId, lease.leaseId, true);
+  assert.equal(released.automaticTurnsUsed, 0);
+  assert.equal(released.leaseId, undefined);
+  assert.equal(store.acquireLease(taskId, 1000).automaticTurnNumber, 1);
+  store.close();
+});
+
 test('GoalStore rejects duplicate unfinished goals and only accepts safe statuses', t => {
   const {root} = fixture(t);
   const taskId = randomUUID();
