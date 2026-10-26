@@ -1,8 +1,8 @@
 # siRNA-pi 协作规则
 
-## 最新完成：第13C-A步（2026-10-26）
+## 最新完成：第13C-B步（2026-10-26）
 
-已完成 Goal 核心、调度内核和完成验证门控：`packages/extensions/goal/goal-plan.mjs` 生成最多12项有限计划，`goal-store.mjs` 将目标、状态、revision、自动回合预算和 lease 持久化到独立 `runtime/goal/goals.sqlite`，并提供 `releaseLease`、`completeVerified`、`continueAfterVerification`、`pauseAfterVerification` 和 checkpoint 状态路径；`apps/api/goal-api.mjs` 和 `/v1/tasks/:id/goal` 提供 GET/POST/PATCH/DELETE，Agent 的完成申请返回 `verifying`；`goal-tools.mjs` 对齐原仓库的 `get_goal/create_goal/update_goal` 合同；`goal-coordinator.mjs` 负责空闲/待输入门控、requestId、失败退避、重启回收和并发去重。13C-A 定向测试通过；协调器暂不接入 bootstrap 的真实 TaskMessageService，不启动真实自动回合，Verification Bundle/Policy/独立 verifier 尚未实现。下一步是冻结不可变验证证据包；Memory/Data Pool/Workbench/Black-box仍未实现。
+已完成 Goal 核心、调度内核、完成验证门控和最小不可变 Verification Bundle：`packages/extensions/goal/goal-plan.mjs` 生成最多12项有限计划，`goal-store.mjs` 将目标、状态、revision、自动回合预算和 lease 持久化到独立 `runtime/goal/goals.sqlite`，并提供 `releaseLease`、`completeVerified`、`continueAfterVerification`、`pauseAfterVerification` 和 checkpoint 状态路径；`goal-verification-bundle.mjs` 冻结消息、tool_end 回执和 input/output 文件，绑定 SHA-256、Goal revision、脱敏预览和 bundleSha256；`apps/api/goal-api.mjs` 和 `/v1/tasks/:id/goal` 提供 GET/POST/PATCH/DELETE，Agent 的完成申请返回 `verifying`；`goal-tools.mjs` 对齐原仓库的 `get_goal/create_goal/update_goal` 合同；`goal-coordinator.mjs` 负责空闲/待输入门控、requestId、失败退避、重启回收和并发去重。13C-B 定向测试通过；协调器暂不接入 bootstrap 的真实 TaskMessageService，不启动真实自动回合，Verification Policy/Store/独立 verifier 尚未实现。下一步是本地确定性 policy 和假 verifier；Memory/Data Pool/Workbench/Black-box仍未实现。
 
 ## 历史完成：第11E步（2026-10-22）
 
