@@ -6,7 +6,9 @@
 
 ## 当前进度
 
-最新：第12F步完成持久化 approval job/worker 与协调器、bootstrap、生命周期和 HTTP 入队整合。默认 `SIRNA_AUTOMATIC_APPROVAL=0`，只有明确设置为 `1` 才允许自动入队；HTTP 和 coordinator 不直接调用批准服务，worker 才调用可信的 `approveRegisteredToolProposal`，并以 durable terminal 推进 `completed`/`failed`。个人仓库使用独立 `runtime/tool-approval/jobs.sqlite`，参考仓库使用共享 registry maintenance queue；职责边界一致、存储布局不同。机制和差异见 [自动批准边界](docs/38-自动批准边界.md) 与 [持久化自动修订状态机](docs/37-持久化自动修订状态机.md)。
+最新：第13A步完成持久化 Goal 核心、有限计划、revision/租约/预算字段、HTTP API 和 `get_goal/create_goal/update_goal` 工具合同。Goal 创建后保存到独立 `runtime/goal/goals.sqlite`，完成申请必须先完成所有必需工作项；默认不启动自动续作，也没有把“模型自报完成”当成独立验收。GoalCoordinator、独立证据包/Verifier、Memory/Data Pool、Workbench 和 Black-box仍待实现。逐文件说明见 [Goal核心状态与计划](docs/39-Goal核心状态与计划.md)。
+
+上一阶段第12F步完成持久化 approval job/worker 与协调器、bootstrap、生命周期和 HTTP 入队整合。默认 `SIRNA_AUTOMATIC_APPROVAL=0`，只有明确设置为 `1` 才允许自动入队；HTTP 和 coordinator 不直接调用批准服务，worker 才调用可信的 `approveRegisteredToolProposal`，并以 durable terminal 推进 `completed`/`failed`。个人仓库使用独立 `runtime/tool-approval/jobs.sqlite`，参考仓库使用共享 registry maintenance queue；职责边界一致、存储布局不同。机制和差异见 [自动批准边界](docs/38-自动批准边界.md)。
 
 上一轮第11D已接入 `report_tool_gap`，任务Pi的明确缺口报告可以单独成为审查线索。报告是Agent主张，不能证明缺口真实或授予权限，机制与当时验收见 [Agent主动报告能力缺口](docs/32-Agent主动报告能力缺口.md)。
 
@@ -48,6 +50,7 @@
 - 第10N步接通可信来源绑定和显式一轮修订：失败报告交回原任务，保存固定请求与有界替代链，冻结原测试/基线/权限。真实一轮修订已改写、调试和打包，但模型新增parent违反原合同，提交失败；页面如实显示未收到新候选，不冒称闭环成功。1170项代码回归两端均0失败。逐文件说明、实际验收及边界见 [可信来源与一轮工具修订](docs/27-可信来源与一轮工具修订.md)。
 - 2026-10-21：第10O步完成明确合同拒绝反馈，并用独立新任务d72bc8cc…补齐合法替代与独立验证。根候选32b9a044…领域2/3、基准1/2对基线1/2；Pi一轮修订改用Math.min/Math.max，替代5fc8293d…领域3/3、基准2/2对基线1/2、净增1，现verified待人工批准。测试、基线、权限及parent等冻结合同未变。两次propose均成功、0工具错误，所以真实模型轮未经历409拒绝后改正；该反馈仅在真实Pi适配器的无模型夹具和离线集成中触发。第10N失败历史保留。详见 [明确拒绝反馈与修订闭环](docs/28-明确拒绝反馈与修订闭环.md)。
 - 第10O步验收：15次模型响应、16次Pi工具调用、113340 tokens，实际费用未知；4构建和22验证容器及新guest均释放。旧270份证据、22份原生文件、2个旧guest及正式1.0.1保持，仅在空闲时重建项目controller和relay两个管理容器。完整1223项测试：Windows1210通过/13跳过，Linux1221通过/2跳过，均0失败。
+- 2026-10-26：第13A步完成 Goal 核心闭环：新增 `goal-plan.mjs`、`goal-store.mjs`、`goal-api.mjs` 和 `goal-tools.mjs`；任务创建 Goal 时会保存 objective 消息，`/v1/tasks/:id/messages` 返回当前 Goal，完成申请受计划门控。8 项 Goal 核心/API/工具测试通过；尚未启动自动续作或独立 Goal Verifier。详见 [Goal核心状态与计划](docs/39-Goal核心状态与计划.md)。
 - 当前正式工具和六个构建工具均可由新网页任务使用；正式工具保持1.0.1，未批准候选不进入正式目录。下一步对照原仓库实现从任务轨迹发现候选能力的真正Curator；当前受控修订成功不等于自动自进化。原版automation会自动批准，个人保留人工门是范围收紧，批准仍使用可信CLI。CPU配额仍不可用，开机自启未配置。
 
 安装位置、文件解释和验证记录见 [第 1 步 A：安装与运行 Pi](docs/01-安装与运行Pi.md)。服务器项目目录是 `/home/hanwen/Project/project/siNRA-pi/`，按用户指定拼写保留。
@@ -231,6 +234,10 @@ apps/api/router.mjs         任务接口、SSE 传输与静态页面
 packages/task-core/task-store.mjs           SQLite 任务、消息和运行事件
 packages/extensions/tool-curation/         轨迹预览、独立审查与显式构建交接
 packages/extensions/tool-curation/tool-curation-coordinator.mjs 新轮次观察、开关、次数与同步准入
+packages/extensions/goal/goal-plan.mjs                     Goal 目标拆分、工作项和完成门控
+packages/extensions/goal/goal-store.mjs                    Goal SQLite 状态、revision、租约和预算
+packages/extensions/goal/goal-tools.mjs                    Agent 侧 get/create/update Goal 合同
+apps/api/goal-api.mjs                                      Goal HTTP API 与输入校验
 packages/extensions/tool-curation/tool-curation-build-contract.mjs 固定构建指令与权限/摘要合同
 packages/extensions/tool-curation/tool-curation-build-store.mjs    不可变交接单、状态和重启恢复
 packages/extensions/tool-curation/tool-curation-build-service.mjs  原任务派发、去重和精确提案来源

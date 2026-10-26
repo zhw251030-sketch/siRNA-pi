@@ -9,6 +9,7 @@ import { ToolCurationError } from "../../packages/extensions/tool-curation/tool-
 import { ToolCurationBuildError } from "../../packages/extensions/tool-curation/tool-curation-build-service.mjs";
 import { buildId, buildDigest } from "../../packages/extensions/tool-curation/tool-curation-build-contract.mjs";
 import { maintenanceText } from "../../packages/capability-platform/tool-version.mjs";
+import { createGoalApi } from "./goal-api.mjs";
 
 const uuidV4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -60,8 +61,15 @@ async function readBody(request, maxBytes=1048576) {
 
 // HTTP only coordinates transport. Task state and runtime execution stay in
 // their own packages, matching the reference repository's responsibility split.
-export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolMaintenance, toolApproval, toolRepair, toolCurationPreview, toolCuration, toolCurationBuild, toolCurationCoordinator, taskMessages: sharedTaskMessages } = {}) {
+export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolMaintenance, toolApproval, toolRepair, toolCurationPreview, toolCuration, toolCurationBuild, toolCurationCoordinator, goalStore, taskMessages: sharedTaskMessages } = {}) {
   const taskMessages = sharedTaskMessages ?? new TaskMessageService({ taskStore, agentRuntime, workspaceFiles });
+  const goalApi = goalStore ? createGoalApi({
+    taskStore,
+    goalStore,
+    readJsonBody: request => readBody(request, 64 * 1024),
+    sendJson: reply,
+    appendObjective: (taskId, content, requestId) => taskStore.appendConversationUserMessage(taskId, content, requestId),
+  }) : undefined;
   const activeTurns = new Set();
   const track = (operation) => {
     activeTurns.add(operation);
@@ -181,6 +189,10 @@ export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolM
           return reply(response,202,toolMaintenance.enqueue(proposalRoute[1],body.requestId));
         }
       }
+      const goalRoute = /^\/v1\/tasks\/([^/]+)\/goal$/.exec(pathname);
+      if (goalRoute && goalApi) {
+        return goalApi.handle(request, response, goalRoute[1]);
+      }
       const filesRoute = /^\/v1\/tasks\/([^/]+)\/files(?:\/(input|output)\/([^/]+))?$/.exec(pathname);
       if (request.method === 'POST' && filesRoute && !filesRoute[2]) {
         const payload = await readBody(request);
@@ -241,7 +253,7 @@ export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolM
           try { execution = await agentRuntime.describe(task.executionSessionId) ?? null; }
           catch { execution = { unavailable: true }; }
         }
-        return reply(response, 200, { task, messages: taskStore.listMessages(task.id), runEvents: taskStore.listRunEvents(task.id), execution, goal: null });
+        return reply(response, 200, { task, messages: taskStore.listMessages(task.id), runEvents: taskStore.listRunEvents(task.id), execution, goal: goalApi?.get(task.id) ?? null });
       }
       if (match && request.method === "POST") {
         const body = await readBody(request);

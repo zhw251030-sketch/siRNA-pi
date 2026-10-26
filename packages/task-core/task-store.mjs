@@ -195,6 +195,20 @@ export class TaskStore {
     });
   }
 
+  // Goal creation uses the same durable conversation table as ordinary user
+  // turns, but does not start a runtime execution. This mirrors the reference
+  // Goal API's objective message and keeps the objective visible after restart.
+  appendConversationUserMessage(taskId, content, clientRequestId) {
+    return this.#transaction(() => {
+      const task = this.getTask(taskId);
+      if (!task) throw new Error("Unknown design task");
+      if (clientRequestId && this.getMessageByClientRequestId(taskId, clientRequestId)) {
+        return this.getMessageByClientRequestId(taskId, clientRequestId);
+      }
+      return this.#insertMessage(taskId, "user", content.trim(), "complete", clientRequestId);
+    });
+  }
+
   #insertRunEvent(taskId, userMessageId, runId, type, payload) {
     const id = randomUUID();
     const now = timestamp();

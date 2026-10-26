@@ -1,6 +1,10 @@
 # siRNA-pi 协作规则
 
-## 最新完成：第11E步（2026-10-22）
+## 最新完成：第13A步（2026-10-26）
+
+已完成 Goal 核心闭环：`packages/extensions/goal/goal-plan.mjs` 生成最多12项有限计划，`goal-store.mjs` 将目标、状态、revision、自动回合预算和 lease 持久化到独立 `runtime/goal/goals.sqlite`，`apps/api/goal-api.mjs` 和 `/v1/tasks/:id/goal` 提供 GET/POST/PATCH/DELETE，`goal-tools.mjs` 对齐原仓库的 `get_goal/create_goal/update_goal` 合同。创建 Goal 时 objective 作为持久用户消息保存，任务消息接口返回当前 Goal。8项Goal定向测试通过；13A不启动自动续作、不实现独立Goal Verifier。下一步是13B GoalCoordinator，再后面是独立证据包/Verifier；Memory/Data Pool/Workbench/Black-box仍未实现。
+
+## 历史完成：第11E步（2026-10-22）
 
 已接通保存后onSettled→有界自动观察→既有Curator串行审查→七天候选冷却与网页全局开关。教学入口docs/33-自动观察与候选冷却.md；参考67d2754只读，个人main和唯一远端根规则保持。下一步可对照原版自动Builder；当前交接、验证、批准仍人工，未接Goal限制/验证后回调，不混入其他RSI研究项目。
 

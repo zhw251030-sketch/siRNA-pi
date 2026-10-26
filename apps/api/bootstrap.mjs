@@ -37,6 +37,7 @@ import { ToolCurationBuildStore } from "../../packages/extensions/tool-curation/
 import { createToolCurationBuildService } from "../../packages/extensions/tool-curation/tool-curation-build-service.mjs";
 import { ToolGapStore } from "../../packages/extensions/tool-curation/tool-gap-store.mjs";
 import { createToolGapService } from "../../packages/extensions/tool-curation/tool-gap-service.mjs";
+import { GoalStore } from "../../packages/extensions/goal/goal-store.mjs";
 import { createApiShutdown, startApiServices, createCurationBuildRegistrationPolicy, createCurationAutomationReadiness } from "./service-lifecycle.mjs";
 
 process.umask(0o077);
@@ -67,6 +68,7 @@ await listenToolSocket(toolsServer, {root: projectRoot});
 const compose = new AgentComposeRuntime({ root: projectRoot, executor: createComposeExecutor(projectRoot), rpc, toolCallLeases, toolBuildersAvailable:true });
 const agentRuntime = new RuntimeRouter({ compose, legacy: new LocalPiRuntime() });
 const taskStore = new TaskStore(database);
+const goalStore = new GoalStore({root: projectRoot});
 const recovered = taskStore.recoverInterruptedTasks();
 const workspaceFiles = new TaskFiles({ root: projectRoot, agentRuntime });
 const taskMessages=new TaskMessageService({taskStore,agentRuntime,workspaceFiles,onSettled:run=>toolCurationCoordinator?.observeRun(run)});
@@ -111,9 +113,9 @@ toolCurationCoordinator=createToolCurationCoordinator({root:projectRoot,taskStor
   approveTool:(proposalId,actor)=>approveRegisteredToolProposal(proposalId,actor,{root:projectRoot}),
   automaticApproval:process.env.SIRNA_AUTOMATIC_APPROVAL==='1',
   isReady:createCurationAutomationReadiness({taskMessages,agentRuntime}),isTaskBusy:taskId=>taskMessages.isTaskBusy(taskId),intervalMs:1000,maxReviews:3});
-const server = createAppServer({ taskStore, agentRuntime, workspaceFiles, taskMessages, toolMaintenance, toolApproval, toolRepair, toolCurationPreview, toolCuration, toolCurationBuild, toolCurationCoordinator });
+const server = createAppServer({ taskStore, agentRuntime, workspaceFiles, taskMessages, goalStore, toolMaintenance, toolApproval, toolRepair, toolCurationPreview, toolCuration, toolCurationBuild, toolCurationCoordinator });
 const shutdown = createApiShutdown({server,toolMaintenance,toolApproval,toolRepair,toolCuration,toolCurationBuild,toolCurationCoordinator,toolsServer,
-  stores:[taskStore,maintenanceStore,toolAutomation,toolApprovalStore,repairStore,curationStore,curationBuildStore,gapStore],rpcs:[rpc,curatorRpc]});
+  stores:[taskStore,goalStore,maintenanceStore,toolAutomation,toolApprovalStore,repairStore,curationStore,curationBuildStore,gapStore],rpcs:[rpc,curatorRpc]});
 const shutdownFailure = () => {console.error('服务停止未完全确认，请检查项目内私有运行记录。');process.exitCode=1;};
 server.listen(3000, "127.0.0.1", () => {
   // Never recover or claim jobs until this instance owns the listening socket.

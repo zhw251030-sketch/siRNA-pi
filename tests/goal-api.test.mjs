@@ -1,0 +1,66 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {once} from 'node:events';
+import {randomUUID} from 'node:crypto';
+import {TaskStore} from '../packages/task-core/task-store.mjs';
+import {GoalStore} from '../packages/extensions/goal/goal-store.mjs';
+import {createAppServer} from '../apps/api/router.mjs';
+
+async function fixture(t) {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sirna-goal-http-')));
+  const tasks = new TaskStore(path.join(root, 'tasks.sqlite'));
+  const goal = new GoalStore({root});
+  const task = tasks.createTask({id: randomUUID(), piSessionId: randomUUID()}, randomUUID());
+  const server = createAppServer({taskStore: tasks, agentRuntime: {runtimeInfo: () => ({})}, goalStore: goal});
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const base = `http://127.0.0.1:${server.address().port}`;
+  t.after(async () => {
+    await new Promise(resolve => server.close(() => resolve()));
+    tasks.close(); goal.close(); fs.rmSync(root, {recursive: true, force: true});
+  });
+  const request = (taskId = task.id, method = 'GET', body) => fetch(`${base}/v1/tasks/${taskId}/goal`, {
+    method, headers: body === undefined ? {} : {'content-type': 'application/json'}, body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  return {task, tasks, goal, request, base};
+}
+
+test('Goal HTTP create/get/update exposes durable progress and gates completion', async t => {
+  const f = await fixture(t);
+  assert.deepEqual((await (await f.request()).json()).goal, null);
+  const createdResponse = await f.request(f.task.id, 'POST', {objective: '创建一个工具'});
+  assert.equal(createdResponse.status, 201);
+  const created = await createdResponse.json();
+  assert.equal(created.goal.status, 'active');
+  assert.equal(created.message.role, 'user');
+  const messages = f.tasks.listMessages(f.task.id);
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].clientRequestId, `goal-objective:${created.goal.goalId}`);
+  const blockedCompletion = await f.request(f.task.id, 'PATCH', {action: 'agent_update', status: 'complete', expectedRevision: created.goal.revision});
+  assert.equal(blockedCompletion.status, 409);
+  const first = await f.request(f.task.id, 'PATCH', {action: 'agent_update', status: 'progress', completedItemIds: ['step-1'], expectedRevision: created.goal.revision});
+  assert.equal(first.status, 200);
+  const goal = (await first.json()).goal;
+  assert.equal(goal.plan.items[0].status, 'done');
+  const paused = await f.request(f.task.id, 'PATCH', {action: 'pause'});
+  assert.equal(paused.status, 200);
+  assert.equal((await paused.json()).goal.status, 'paused');
+  const resumed = await f.request(f.task.id, 'PATCH', {action: 'resume', additionalTurns: 2});
+  assert.equal(resumed.status, 200);
+  assert.equal((await resumed.json()).goal.status, 'active');
+  const messagesResponse = await fetch(`${f.base}/v1/tasks/${f.task.id}/messages`);
+  assert.equal((await messagesResponse.json()).goal.status, 'active');
+});
+
+test('Goal HTTP rejects unknown task, duplicate unfinished goal and malformed fields', async t => {
+  const f = await fixture(t);
+  assert.equal((await f.request(randomUUID(), 'GET')).status, 404);
+  assert.equal((await f.request(f.task.id, 'POST', {objective: '目标'})).status, 201);
+  assert.equal((await f.request(f.task.id, 'POST', {objective: '第二个'})).status, 409);
+  assert.equal((await f.request(f.task.id, 'POST', {objective: '目标', extra: true})).status, 409);
+  assert.equal((await f.request(f.task.id, 'PATCH', {action: 'agent_update', status: 'progress', completedItemIds: ['bad']})).status, 409);
+});
+
