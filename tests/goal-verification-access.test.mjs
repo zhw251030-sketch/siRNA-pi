@@ -71,3 +71,41 @@ test('check access returns a persisted deterministic receipt and token expires a
   f.store.finish(f.request.id, {decision: 'fail'});
   assert.throws(() => f.access.evidence({verificationId: f.request.id, accessToken: f.token}), /invalid|expired|failed/i);
 });
+
+test('controlled search and fetch use bounded scholarly routes and return no raw response body', async t => {
+  const f = await fixture(t);
+  const calls = [];
+  const responses = [
+    new Response(JSON.stringify({results: [{id: 'https://openalex.org/W1', title: 'RNA interference'}]}), {status: 200, headers: {'content-type': 'application/json'}}),
+    new Response(null, {status: 302, headers: {location: 'https://doi.org/10.1000/example'}}),
+    new Response('retrieved abstract', {status: 200, headers: {'content-type': 'text/plain'}}),
+  ];
+  const controlledEvidence = createGoalVerificationEvidenceAccess({
+    store: f.store,
+    bundles: f.bundles,
+    fetchImpl: async (url, options) => { calls.push({url: String(url), options}); return responses.shift(); },
+  });
+  const access = createGoalVerificationAccess({store: f.store, bundles: f.bundles, evidence: controlledEvidence});
+  const search = await access.search({verificationId: f.request.id, accessToken: f.token, provider: 'openalex', query: 'RNA interference', limit: 1});
+  assert.equal(search.responseText, undefined);
+  assert.equal(search.evidenceStatus, 'available');
+  assert.equal(search.evidenceUnits.length, 1);
+  assert.match(calls[0].url, /^https:\/\/api\.openalex\.org\/works\?/);
+  assert.equal(calls[0].options.redirect, 'manual');
+  assert.equal(calls[0].options.method, 'GET');
+  const fetched = await access.fetchSource({verificationId: f.request.id, accessToken: f.token, url: 'https://doi.org/10.1000/example'});
+  assert.equal(fetched.responseText, undefined);
+  assert.equal(fetched.evidenceStatus, 'available');
+  assert.equal(calls.length, 3);
+  assert.equal(f.store.listRetrievals(f.request.id).length, 2);
+});
+
+test('controlled fetch rejects outside hosts, excessive redirects and oversized bodies', async t => {
+  const f = await fixture(t);
+  const outside = createGoalVerificationEvidenceAccess({store: f.store, bundles: f.bundles, fetchImpl: async () => new Response('x')});
+  await assert.rejects(() => createGoalVerificationAccess({store: f.store, bundles: f.bundles, evidence: outside}).fetchSource({verificationId: f.request.id, accessToken: f.token, url: 'https://example.com/a'}), /allowlist|host/i);
+  const redirect = createGoalVerificationEvidenceAccess({store: f.store, bundles: f.bundles, fetchImpl: async () => new Response(null, {status: 302, headers: {location: 'https://doi.org/next'}})});
+  await assert.rejects(() => createGoalVerificationAccess({store: f.store, bundles: f.bundles, evidence: redirect}).fetchSource({verificationId: f.request.id, accessToken: f.token, url: 'https://doi.org/start'}), /redirect/i);
+  const oversized = createGoalVerificationEvidenceAccess({store: f.store, bundles: f.bundles, fetchImpl: async () => new Response('x'.repeat(1_500_001), {status: 200})});
+  await assert.rejects(() => createGoalVerificationAccess({store: f.store, bundles: f.bundles, evidence: oversized}).fetchSource({verificationId: f.request.id, accessToken: f.token, url: 'https://doi.org/large'}), /1500000/i);
+});

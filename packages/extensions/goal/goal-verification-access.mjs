@@ -182,8 +182,25 @@ export function createGoalVerificationAccess({store, bundles, evidence} = {}) {
       });
     },
 
+    async search(input, signal) {
+      authorize(input);
+      if (typeof evidence.search !== 'function') throw new Error('controlled search is not available');
+      return evidence.search({
+        verificationId: input.verificationId,
+        provider: input.provider,
+        query: input.query,
+        ...(input.limit === undefined ? {} : {limit: input.limit}),
+      }, signal);
+    },
+
+    async fetchSource(input, signal) {
+      authorize(input);
+      if (typeof evidence.fetchSource !== 'function') throw new Error('controlled fetch is not available');
+      return evidence.fetchSource({verificationId: input.verificationId, url: input.url}, signal);
+    },
+
     handle(kind, input) {
-      if (!['bundle', 'message', 'artifact', 'evidence', 'check'].includes(kind)) throw new Error('verification access operation is not available');
+      if (!['bundle', 'message', 'artifact', 'evidence', 'check', 'search', 'fetch'].includes(kind)) throw new Error('verification access operation is not available');
       return service[kind](input);
     },
 

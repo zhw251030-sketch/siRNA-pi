@@ -114,6 +114,11 @@ test('token-scoped verification access uses POST-only route and binds the path i
   assert.equal(bundle.status, 200);
   assert.deepEqual(await bundle.json(), {kind: 'bundle', verificationId});
   assert.equal(calls[0].input.verificationId, verificationId);
+  const search = await fetch(`${f.base}/v1/goal-verifications/${verificationId}/search`, {
+    method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({accessToken: 'access-token-for-test', provider: 'openalex', query: 'RNA interference'}),
+  });
+  assert.equal(search.status, 200);
+  assert.equal((await search.json()).kind, 'search');
   const mismatch = await fetch(`${f.base}/v1/goal-verifications/${verificationId}/bundle`, {
     method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({verificationId: randomUUID(), accessToken: 'access-token-for-test'}),
   });

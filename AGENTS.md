@@ -1,6 +1,10 @@
 # siRNA-pi 协作规则
 
-## 最新完成：第13C-F步（2026-10-26）
+## 最新完成：第13C-G步（2026-10-26）
+
+已在13C-F访问服务上增加受控学术 search/fetch：`goal-verification-evidence.mjs` 只允许固定 HTTPS allowlist，GET、最多3次手动重定向和1.5MB流式响应上限；OpenAlex/Crossref/Europe PMC 使用固定查询 URL，404与provider错误分类处理，receipt 保存完整响应但返回 verifier 的结果去掉 `responseText`。`goal-verification-access.mjs` 和 `apps/api/router.mjs` 接入 token-scoped search/fetch。新增 fake-fetch 边界测试已通过；本轮没有真实网络或模型调用。持久 Evidence Resolver、attempt、真实 Agent Compose verifier 仍未接入，下一步是 Evidence Resolver。详见 `docs/47-受控学术检索与来源抓取.md`。
+
+## 历史完成：第13C-F步（2026-10-26）
 
 已在13C-E的 Evidence Store 上实现 token-scoped 验证访问：`goal-verification-store.mjs` 只保存短期 access token 的 SHA-256，`goal-verification-coordinator.mjs` 在 Bundle 冻结后把明文 token 传给 verifier；`goal-verification-access.mjs` 提供脱敏 Bundle、分页 message/artifact、证据目录和 deterministic check，`apps/api/router.mjs` 提供五个 POST 访问路由，终态会清除令牌哈希。公共验证列表/详情只返回摘要，不返回原始 Bundle/evaluation。定向访问/API 24项通过；最新 `npm test` 为1564项、1548通过、16平台跳过、0失败。网络 search/fetch、attempt、真实 TaskMessageService 接线和独立 Agent Compose verifier 仍未接入；下一步是 controlled search/fetch。Memory/Data Pool/Workbench/Black-box仍未实现。详见 `docs/46-验证访问服务与短期令牌.md`。
 

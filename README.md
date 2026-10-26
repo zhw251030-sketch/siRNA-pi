@@ -6,7 +6,7 @@
 
 ## 当前进度
 
-最新：第13C-F步已增加 token-scoped 验证访问服务。验证开始时只在 SQLite 保存短期令牌哈希；Bundle、消息、artifact、evidence 和 deterministic check 现在有分页、脱敏、任务归属与 HTTP POST 入口；验证终止后令牌立即失效。网络 search/fetch、attempt 和真实 Agent Compose verifier 仍关闭。详见 [验证访问服务与短期令牌](docs/46-验证访问服务与短期令牌.md)。
+最新：第13C-G步已增加受控学术 search/fetch。只允许固定 HTTPS 学术域名、GET、最多3次重定向和1.5MB响应；search/fetch 保存 retrieval receipt，但只向 verifier 返回有界摘要和 evidence unit。持久 Evidence Resolver、attempt 和真实 Agent Compose verifier 仍关闭。详见 [受控学术检索与来源抓取](docs/47-受控学术检索与来源抓取.md)。
 
 上一阶段第12F步完成持久化 approval job/worker 与协调器、bootstrap、生命周期和 HTTP 入队整合。默认 `SIRNA_AUTOMATIC_APPROVAL=0`，只有明确设置为 `1` 才允许自动入队；HTTP 和 coordinator 不直接调用批准服务，worker 才调用可信的 `approveRegisteredToolProposal`，并以 durable terminal 推进 `completed`/`failed`。个人仓库使用独立 `runtime/tool-approval/jobs.sqlite`，参考仓库使用共享 registry maintenance queue；职责边界一致、存储布局不同。机制和差异见 [自动批准边界](docs/38-自动批准边界.md)。
 
@@ -57,6 +57,7 @@
 - 2026-10-26：第13C-D步把 Verification runtime 接入 `bootstrap.mjs`、Goal API、验证状态 GET 路由和服务生命周期；默认关闭，显式 `SIRNA_GOAL_VERIFICATION=deterministic` 才创建 Store/Bundle/Coordinator。27 项定向测试通过；完整 `npm test` 为 1557 项，1541 通过、16 项平台跳过、0 失败。详见 [Goal验证服务接线](docs/44-Goal验证服务接线.md)。
 - 2026-10-26：第13C-E步增加 `verification_retrievals`、`verification_checks` 和 `goal-verification-evidence.mjs`。受控来源必须 HTTPS 且在学术域名 allowlist 内，响应上限1.5MB；artifact 检查只读取不可变快照并保存文件/结果哈希。15 项验证相关测试通过；最新完整 `npm test` 为1560项、1544通过、16平台跳过、0失败，未执行网络调用。详见 [受限证据存储与确定性检查](docs/45-受限证据存储与确定性检查.md)。
 - 2026-10-26：第13C-F步增加 `goal-verification-access.mjs`、短期 access token 和五个 POST 访问路由。Bundle 读取隐藏消息/工具正文，message/artifact 采用16,000字符分页，evidence 目录不返回 retrieval 原文，终态清理令牌哈希；公共 GET 改为摘要。定向验证/API 24项通过；最新 `npm test` 为1564项、1548通过、16平台跳过、0失败。详见 [验证访问服务与短期令牌](docs/46-验证访问服务与短期令牌.md)。
+- 2026-10-26：第13C-G步增加受控学术 `search/fetch`。OpenAlex/Crossref/Europe PMC 使用固定 URL，来源只允许 HTTPS allowlist，手动重定向最多3次，响应最多1.5MB；404/provider错误分类，原始 responseText 不返回 verifier。新增 fake-fetch 边界测试，尚未访问真实网络或调用模型。详见 [受控学术检索与来源抓取](docs/47-受控学术检索与来源抓取.md)。
 - 当前正式工具和六个构建工具均可由新网页任务使用；正式工具保持1.0.1，未批准候选不进入正式目录。下一步对照原仓库实现短期 Evidence access token、裁剪后的 bundle/message/artifact/check 接口，再接 controlled search/fetch 和真实独立 Agent Compose verifier；当前受控修订成功不等于自动自进化。原版automation会自动批准，个人保留人工门是范围收紧，批准仍使用可信CLI。CPU配额仍不可用，开机自启未配置。
 
 安装位置、文件解释和验证记录见 [第 1 步 A：安装与运行 Pi](docs/01-安装与运行Pi.md)。服务器项目目录是 `/home/hanwen/Project/project/siNRA-pi/`，按用户指定拼写保留。
