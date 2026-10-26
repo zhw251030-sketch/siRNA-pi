@@ -127,3 +127,54 @@ test('unknown evidence IDs are rejected and become an infrastructure pause', asy
   assert.equal(f.store.get(request.id).status, 'error');
   assert.equal(f.goals.get(f.task.id).status, 'paused');
 });
+
+test('evidence protocol failure retries only resolve_evidence and persists attempt diagnostics', async t => {
+  const f = fixture(t);
+  const base = createDeterministicGoalVerifier();
+  let calls = 0;
+  let retryFeedback;
+  const verifier = {
+    async verify(run, token, signal, onStarted, feedback, onPrompt) {
+      calls++;
+      retryFeedback = feedback;
+      onStarted?.(`session-${calls}`, `run-${calls}`);
+      onPrompt?.(`review prompt ${calls} token=${token}`);
+      const result = await base.verify(run, token, signal, onStarted, feedback, onPrompt);
+      if (calls === 1) {
+        const claim = result.claims.find(item => item.evidence.length > 0);
+        claim.evidence = [{evidenceId: 'missing-evidence-id'}];
+      }
+      return {result, sessionId: `session-${calls}`, runId: `run-${calls}`};
+    },
+  };
+  const coordinator = new GoalVerificationCoordinator(f.goals, f.store, f.bundles, verifier, {autoRun: false});
+  const request = await coordinator.request(f.verifying);
+  await coordinator.runVerification(request.id);
+  const run = f.store.get(request.id);
+  assert.equal(run.status, 'passed');
+  assert.equal(calls, 2);
+  assert.match(retryFeedback ?? '', /EVIDENCE_REFERENCE_INVALID/);
+  assert.match(retryFeedback ?? '', /resolve_evidence/);
+  assert.match(retryFeedback ?? '', /read_verification_attempt/);
+  const attempts = f.store.listAttempts(request.id);
+  assert.deepEqual(attempts.map(attempt => attempt.status), ['protocol_failed', 'accepted']);
+  assert.equal(attempts[0].verifierSessionId, 'session-1');
+  assert.equal(attempts[0].verifierRunId, 'run-1');
+  assert.match(attempts[0].prompt, /REDACTED_SHORT_LIVED_ACCESS_TOKEN/);
+  assert.match(attempts[0].diagnostics, /EVIDENCE_REFERENCE_INVALID/);
+  assert.equal(attempts[1].verifierSessionId, 'session-2');
+});
+
+test('coordinator closes an interrupted running attempt before resuming from the next attempt number', async t => {
+  const f = fixture(t);
+  const request = f.store.createRequest(randomUUID(), f.verifying);
+  const bundle = await f.bundles.build(request.id, f.verifying);
+  f.store.attachBundle(request.id, bundle);
+  f.store.begin(request.id, 'interrupted-attempt-token-123456789');
+  f.store.startAttempt(request.id, 1);
+  const coordinator = new GoalVerificationCoordinator(f.goals, f.store, f.bundles, createDeterministicGoalVerifier(), {autoRun: false});
+  await coordinator.runVerification(request.id);
+  assert.equal(f.store.get(request.id).status, 'passed');
+  assert.deepEqual(f.store.listAttempts(request.id).map(attempt => attempt.status), ['error', 'accepted']);
+  assert.match(f.store.listAttempts(request.id)[0].diagnostics, /ended before/i);
+});

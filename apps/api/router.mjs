@@ -194,7 +194,7 @@ export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolM
       if (goalRoute && goalApi) {
         return goalApi.handle(request, response, goalRoute[1]);
       }
-      const goalVerificationAccessRoute = /^\/v1\/goal-verifications\/([0-9a-f-]{36})\/(bundle|message|artifact|evidence|check|search|fetch)$/.exec(pathname);
+      const goalVerificationAccessRoute = /^\/v1\/goal-verifications\/([0-9a-f-]{36})\/(bundle|message|artifact|evidence|check|attempt|search|fetch)$/.exec(pathname);
       if (goalVerificationAccessRoute) {
         if (!goalVerification?.access) return reply(response, 503, {error: 'Goal 验证访问服务尚未配置。'});
         if (request.method !== 'POST') {

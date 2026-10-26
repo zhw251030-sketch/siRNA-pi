@@ -72,6 +72,20 @@ test('check access returns a persisted deterministic receipt and token expires a
   assert.throws(() => f.access.evidence({verificationId: f.request.id, accessToken: f.token}), /invalid|expired|failed/i);
 });
 
+test('attempt access pages protocol diagnostics and never exposes the short-lived token', async t => {
+  const f = await fixture(t);
+  f.store.startAttempt(f.request.id, 1);
+  f.store.setAttemptIdentity(f.request.id, 1, 'session-1', 'run-1');
+  f.store.setAttemptPrompt(f.request.id, 1, 'prompt [REDACTED_SHORT_LIVED_ACCESS_TOKEN]');
+  f.store.finishAttempt({verificationId: f.request.id, attemptNumber: 1, status: 'protocol_failed', rawProposal: {bad: true}, diagnostics: '{"code":"VERIFIER_OUTPUT_INVALID"}'});
+  const page = f.access.attempt({verificationId: f.request.id, accessToken: f.token, attemptNumber: 1, field: 'diagnostics'});
+  assert.equal(page.attempt.status, 'protocol_failed');
+  assert.match(page.content, /VERIFIER_OUTPUT_INVALID/);
+  const prompt = f.access.attempt({verificationId: f.request.id, accessToken: f.token, attemptNumber: 1, field: 'prompt'});
+  assert.match(prompt.content, /REDACTED_SHORT_LIVED_ACCESS_TOKEN/);
+  assert.doesNotMatch(prompt.content, new RegExp(f.token));
+});
+
 test('controlled search and fetch use bounded scholarly routes and return no raw response body', async t => {
   const f = await fixture(t);
   const calls = [];

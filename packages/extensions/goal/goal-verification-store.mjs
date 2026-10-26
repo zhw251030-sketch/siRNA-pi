@@ -18,6 +18,7 @@ const canonical = value => {
 const hashJson = value => sha256(canonical(value));
 function checkId(value, label = 'verificationId') { if (typeof value !== 'string' || !uuid.test(value)) fail(`${label} must be a UUID v4`); return value; }
 function text(value, label, max = 8000) { if (typeof value !== 'string' || !value.trim() || value.length > max || /[\u0000-\u001f\u007f]/.test(value)) fail(`${label} must be bounded text`); return value.replace(/\s+/g, ' ').trim(); }
+function bounded(value, label, max) { if (typeof value !== 'string' || !value.trim() || Buffer.byteLength(value, 'utf8') > max || /[\u0000\u007f]/.test(value)) fail(`${label} must be bounded text`); return value.trim(); }
 function json(value) { return value == null ? undefined : JSON.parse(value); }
 function hash(value, label = 'sha256') { if (typeof value !== 'string' || !/^[a-f0-9]{64}$/i.test(value)) fail(`${label} must be a SHA-256 hex digest`); return value.toLowerCase(); }
 function record(row) {
@@ -31,7 +32,11 @@ function record(row) {
 function attemptRecord(row) {
   if (!row) return undefined;
   return {verificationId: row.verification_id, attemptNumber: Number(row.attempt_number), status: row.status,
-    proposal: json(row.proposal_json), diagnostics: row.diagnostics ?? undefined, createdAt: row.created_at, completedAt: row.completed_at ?? undefined};
+    proposal: json(row.proposal_json), rawProposal: json(row.raw_result_json),
+    ...(row.verifier_session_id ? {verifierSessionId: row.verifier_session_id} : {}),
+    ...(row.verifier_run_id ? {verifierRunId: row.verifier_run_id} : {}),
+    ...(row.prompt_text ? {prompt: row.prompt_text} : {}),
+    diagnostics: row.diagnostics ?? undefined, createdAt: row.created_at, startedAt: row.created_at, completedAt: row.completed_at ?? undefined};
 }
 
 export class GoalVerificationStore {
@@ -62,8 +67,9 @@ export class GoalVerificationStore {
       CREATE INDEX IF NOT EXISTS verification_runs_pending ON verification_runs(status, updated_at);
       CREATE TABLE IF NOT EXISTS verification_attempts (
         verification_id TEXT NOT NULL REFERENCES verification_runs(id), attempt_number INTEGER NOT NULL,
-        status TEXT NOT NULL CHECK(status IN ('running','accepted','error')),
-        proposal_json TEXT, diagnostics TEXT, created_at TEXT NOT NULL, completed_at TEXT,
+        status TEXT NOT NULL CHECK(status IN ('running','protocol_failed','accepted','error')),
+        verifier_session_id TEXT, verifier_run_id TEXT, prompt_text TEXT,
+        proposal_json TEXT, raw_result_json TEXT, diagnostics TEXT, created_at TEXT NOT NULL, completed_at TEXT,
         PRIMARY KEY(verification_id, attempt_number)
       );
       CREATE TABLE IF NOT EXISTS verification_retrievals (
@@ -108,6 +114,22 @@ export class GoalVerificationStore {
       CREATE INDEX IF NOT EXISTS verification_evidence_units_idx
         ON verification_evidence_units(verification_id, created_at, id)
       `);
+    const attemptSchema = this.#db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='verification_attempts'").get()?.sql ?? '';
+    if (attemptSchema && !attemptSchema.includes('protocol_failed')) {
+      this.#db.exec(`BEGIN IMMEDIATE;
+        ALTER TABLE verification_attempts RENAME TO verification_attempts_legacy;
+        CREATE TABLE verification_attempts (
+          verification_id TEXT NOT NULL REFERENCES verification_runs(id), attempt_number INTEGER NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('running','protocol_failed','accepted','error')),
+          verifier_session_id TEXT, verifier_run_id TEXT, prompt_text TEXT,
+          proposal_json TEXT, raw_result_json TEXT, diagnostics TEXT, created_at TEXT NOT NULL, completed_at TEXT,
+          PRIMARY KEY(verification_id, attempt_number)
+        );
+        INSERT INTO verification_attempts(verification_id,attempt_number,status,proposal_json,diagnostics,created_at,completed_at)
+          SELECT verification_id,attempt_number,status,proposal_json,diagnostics,created_at,completed_at FROM verification_attempts_legacy;
+        DROP TABLE verification_attempts_legacy;
+        COMMIT;`);
+    }
     const runColumns = new Set(this.#db.prepare('PRAGMA table_info(verification_runs)').all().map(row => row.name));
     if (!runColumns.has('access_token_sha256')) this.#db.exec('ALTER TABLE verification_runs ADD COLUMN access_token_sha256 TEXT');
   }
@@ -181,10 +203,30 @@ export class GoalVerificationStore {
     this.#db.prepare('INSERT INTO verification_attempts(verification_id,attempt_number,status,created_at) VALUES (?,?,?,?)').run(id, attemptNumber, 'running', timestamp);
     return this.listAttempts(id).find(item => item.attemptNumber === attemptNumber);
   }
-  finishAttempt({verificationId, attemptNumber, status, proposal, diagnostics}) {
-    checkId(verificationId); if (!['accepted','error'].includes(status)) fail('invalid verification attempt status');
-    this.#db.prepare('UPDATE verification_attempts SET status=?, proposal_json=?, diagnostics=?, completed_at=? WHERE verification_id=? AND attempt_number=? AND status=\'running\'')
-      .run(status, proposal ? JSON.stringify(proposal) : null, diagnostics ?? null, now(), verificationId, attemptNumber);
+  setAttemptIdentity(verificationId, attemptNumber, sessionId, runId) {
+    checkId(verificationId); text(sessionId, 'verifier session id', 500); if (runId !== undefined) text(runId, 'verifier run id', 500);
+    const result = this.#db.prepare('UPDATE verification_attempts SET verifier_session_id=?, verifier_run_id=COALESCE(?, verifier_run_id) WHERE verification_id=? AND attempt_number=? AND status=\'running\'')
+      .run(sessionId, runId ?? null, verificationId, attemptNumber);
+    if (Number(result.changes) !== 1) fail('verification attempt is not running');
+  }
+  setAttemptPrompt(verificationId, attemptNumber, prompt) {
+    if (typeof prompt !== 'string' || !prompt.trim()) fail('verification prompt must not be empty');
+    if (Buffer.byteLength(prompt, 'utf8') > 500_000) fail('verification prompt exceeds 500000 bytes');
+    const result = this.#db.prepare('UPDATE verification_attempts SET prompt_text=? WHERE verification_id=? AND attempt_number=? AND status=\'running\'')
+      .run(prompt, verificationId, attemptNumber);
+    if (Number(result.changes) !== 1) fail('verification attempt is not running');
+  }
+  finishAttempt({verificationId, attemptNumber, status, proposal, rawProposal, diagnostics, sessionId, runId}) {
+    checkId(verificationId); if (!['accepted','protocol_failed','error'].includes(status)) fail('invalid verification attempt status');
+    const raw = rawProposal ?? proposal;
+    const rawJson = raw ? JSON.stringify(raw) : null;
+    if (rawJson && Buffer.byteLength(rawJson, 'utf8') > 5_000_000) fail('verification proposal exceeds 5000000 bytes');
+    const diagnosticsText = diagnostics === undefined || diagnostics === null ? null : bounded(diagnostics, 'verification diagnostics', 500_000);
+    const result = this.#db.prepare(`UPDATE verification_attempts SET status=?, verifier_session_id=COALESCE(?, verifier_session_id),
+      verifier_run_id=COALESCE(?, verifier_run_id), proposal_json=?, raw_result_json=?, diagnostics=?, completed_at=?
+      WHERE verification_id=? AND attempt_number=? AND status='running'`)
+      .run(status, sessionId ?? null, runId ?? null, proposal ? JSON.stringify(proposal) : null, rawJson, diagnosticsText, now(), verificationId, attemptNumber);
+    if (Number(result.changes) !== 1) fail('verification attempt cannot be finalized');
     return this.listAttempts(verificationId).find(item => item.attemptNumber === attemptNumber);
   }
   listAttempts(id) { checkId(id); return this.#db.prepare('SELECT * FROM verification_attempts WHERE verification_id=? ORDER BY attempt_number').all(id).map(attemptRecord); }

@@ -1,6 +1,10 @@
 # siRNA-pi 协作规则
 
-## 最新完成：第13C-H步（2026-10-26）
+## 最新完成：第13C-I步（2026-10-26）
+
+已在13C-H持久 Evidence Resolver 上增加验证 attempt 和阶段重试：`verification_attempts` 保存 session/run、脱敏 prompt、raw proposal、diagnostics，支持 `protocol_failed`；`goal-verification-coordinator.mjs` 区分 `EVIDENCE_REFERENCE_INVALID/resolve_evidence` 与 `VERIFIER_OUTPUT_INVALID/review`，最多三次，重启遗留 running attempt 会从下一编号恢复；`goal-verification-access.mjs` 和 `apps/api/router.mjs` 增加 token-scoped `/attempt` 读取。新增未知 evidenceId 二次成功、脱敏和恢复测试；完整 `npm test` 为1571项、1555通过、16平台跳过、0失败；本轮无真实网络、模型或 Agent Compose 调用。真实独立 Agent Compose verifier 仍未接入，下一步是协议回放和真实 verifier。详见 `docs/49-验证Attempt与阶段重试.md`。
+
+## 历史完成：第13C-H步（2026-10-26）
 
 已在13C-G受控 search/fetch 上增加 `goal-verification-evidence-resolver.mjs` 和 `verification_evidence_units` 表。Resolver 为 bundle、message、artifact、tool receipt、retrieval、deterministic check 生成随机 UUID evidence unit，按 `(verificationId,dedupeKey)` 幂等重放；`goal-verification-coordinator.mjs` 在 running 后预建 inventory，`goal-verification-policy.mjs` 解析当前验证的持久 evidenceId，确定性假 verifier 也已改用后端 ID。完整 `npm test` 为1568项、1552通过、16平台跳过、0失败；本轮没有真实网络或模型调用。完整 attempt/retry feedback、真实 Agent Compose verifier 仍未接入，下一步是 attempt/retry。详见 `docs/48-持久EvidenceResolver与证据单元.md`。
 

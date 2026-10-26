@@ -192,6 +192,26 @@ export function createGoalVerificationAccess({store, bundles, evidence} = {}) {
       });
     },
 
+    attempt(input) {
+      const run = authorize(input);
+      const attemptNumber = boundedInteger(input?.attemptNumber, 1, 1, 3, 'attemptNumber');
+      const attempt = (typeof store.listAttempts === 'function' ? store.listAttempts(run.id) : []).find(item => item.attemptNumber === attemptNumber);
+      if (!attempt) throw new Error('verification attempt not found');
+      const field = input?.field === undefined ? 'diagnostics' : requireString(input.field, 'field');
+      if (!['diagnostics', 'proposal', 'prompt'].includes(field)) throw new Error('attempt field is invalid');
+      let content = '';
+      if (field === 'diagnostics') content = attempt.diagnostics ?? '';
+      else if (field === 'prompt') content = attempt.prompt ?? '';
+      else content = attempt.rawProposal === undefined ? (attempt.proposal === undefined ? '' : JSON.stringify(attempt.proposal)) : JSON.stringify(attempt.rawProposal);
+      const window = sliceText(content, input?.offset, input?.maxChars);
+      return {attempt: {
+        verificationId: attempt.verificationId, attemptNumber: attempt.attemptNumber, status: attempt.status,
+        ...(attempt.verifierSessionId ? {verifierSessionId: attempt.verifierSessionId} : {}),
+        ...(attempt.verifierRunId ? {verifierRunId: attempt.verifierRunId} : {}),
+        createdAt: attempt.createdAt, ...(attempt.startedAt ? {startedAt: attempt.startedAt} : {}), ...(attempt.completedAt ? {completedAt: attempt.completedAt} : {}),
+      }, field, ...window};
+    },
+
     async search(input, signal) {
       authorize(input);
       if (typeof evidence.search !== 'function') throw new Error('controlled search is not available');
@@ -210,7 +230,7 @@ export function createGoalVerificationAccess({store, bundles, evidence} = {}) {
     },
 
     handle(kind, input) {
-      if (!['bundle', 'message', 'artifact', 'evidence', 'check', 'search', 'fetch'].includes(kind)) throw new Error('verification access operation is not available');
+      if (!['bundle', 'message', 'artifact', 'evidence', 'check', 'attempt', 'search', 'fetch'].includes(kind)) throw new Error('verification access operation is not available');
       return service[kind](input);
     },
 
