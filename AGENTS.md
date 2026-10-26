@@ -1,6 +1,10 @@
 # siRNA-pi 协作规则
 
-## 最新完成：第13C-E步（2026-10-26）
+## 最新完成：第13C-F步（2026-10-26）
+
+已在13C-E的 Evidence Store 上实现 token-scoped 验证访问：`goal-verification-store.mjs` 只保存短期 access token 的 SHA-256，`goal-verification-coordinator.mjs` 在 Bundle 冻结后把明文 token 传给 verifier；`goal-verification-access.mjs` 提供脱敏 Bundle、分页 message/artifact、证据目录和 deterministic check，`apps/api/router.mjs` 提供五个 POST 访问路由，终态会清除令牌哈希。公共验证列表/详情只返回摘要，不返回原始 Bundle/evaluation。定向访问/API 24项通过；最新 `npm test` 为1564项、1548通过、16平台跳过、0失败。网络 search/fetch、attempt、真实 TaskMessageService 接线和独立 Agent Compose verifier 仍未接入；下一步是 controlled search/fetch。Memory/Data Pool/Workbench/Black-box仍未实现。详见 `docs/46-验证访问服务与短期令牌.md`。
+
+## 历史完成：第13C-E步（2026-10-26）
 
 已完成 Goal 核心、调度内核、完成验证门控、不可变 Verification Bundle、最小验证协调闭环、网页服务接线和离线 Evidence Store：`packages/extensions/goal/goal-plan.mjs` 生成最多12项有限计划，`goal-store.mjs` 将目标、状态、revision、自动回合预算和 lease 持久化到独立 `runtime/goal/goals.sqlite`，并提供 `releaseLease`、`completeVerified`、`continueAfterVerification`、`pauseAfterVerification` 和 checkpoint 状态路径；`goal-verification-bundle.mjs` 冻结消息、tool_end 回执和 input/output 文件，绑定 SHA-256、Goal revision、脱敏预览和 bundleSha256；`goal-verification-store.mjs` 持久化验证请求、attempts、retrieval receipts 和 deterministic checks，`goal-verification-policy.mjs` 只接受后端生成的 evidenceId 并按证据类别重新裁决，`goal-verification-coordinator.mjs` 以 revision 保护 complete/active/paused 转换，`goal-verification-fake.mjs` 提供确定性假 verifier；`goal-verification-runtime.mjs` 按开关组装这些部件，`goal-verification-evidence.mjs` 只接受 HTTPS allowlist 的预取响应并对不可变 artifact 做有限 JSON/CSV/文本检查；`apps/api/goal-api.mjs` 在验证开启时返回 HTTP 202，`router.mjs` 提供任务级验证列表/详情，`service-lifecycle.mjs` 管理 start/stop，失败入队会恢复 Goal 为 active；`goal-tools.mjs` 对齐原仓库的 `get_goal/create_goal/update_goal` 合同；`goal-coordinator.mjs` 负责空闲/待输入门控、requestId、失败退避、重启回收和并发去重。13C-D 的完整 `npm test` 为1557项、1541通过、16平台跳过、0失败；13C-E新增15项证据测试全部通过，最新完整回归为1560项、1544通过、16平台跳过、0失败。验证功能默认关闭；网络 search/fetch、短期 access token、受限 HTTP evidence API、真实 TaskMessageService 接线和独立 Agent Compose verifier 仍未接入。下一步是实现 token-scoped、裁剪后的 Evidence access；Memory/Data Pool/Workbench/Black-box仍未实现。详见 `docs/45-受限证据存储与确定性检查.md`。
 

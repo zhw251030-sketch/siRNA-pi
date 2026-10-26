@@ -45,12 +45,16 @@ export class GoalVerificationCoordinator {
         goal = this.goals.get(pending.taskId);
         if (!goal || goal.goalId !== pending.goalId || goal.revision !== pending.goalRevision || goal.status !== 'verifying') throw new Error('Goal changed while verification bundle was being frozen');
       }
-      active = this.store.begin(id);
+      // The verifier receives a one-run capability indirectly through the
+      // store. The plaintext token is never persisted; only its hash remains
+      // while this verification is running.
+      const accessToken = this.store.issueAccessToken();
+      active = this.store.begin(id, accessToken);
       let lastError;
       for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         this.store.startAttempt(id, attempt);
         try {
-          const proposal = await this.verifier.verify(active);
+          const proposal = await this.verifier.verify(active, accessToken);
           const resolved = resolveVerificationProposal(active.bundle, proposal);
           const evaluation = evaluateVerificationResult(active, resolved);
           this.store.finishAttempt({verificationId: id, attemptNumber: attempt, status: 'accepted', proposal: resolved});

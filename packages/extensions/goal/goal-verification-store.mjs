@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import {createHash, randomUUID} from 'node:crypto';
+import {createHash, randomBytes, randomUUID, timingSafeEqual} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -53,6 +53,7 @@ export class GoalVerificationStore {
         bundle_json TEXT,
         evaluation_json TEXT,
         error TEXT,
+        access_token_sha256 TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         completed_at TEXT,
@@ -88,6 +89,8 @@ export class GoalVerificationStore {
         result_json TEXT NOT NULL,
         result_sha256 TEXT NOT NULL
       );`);
+    const runColumns = new Set(this.#db.prepare('PRAGMA table_info(verification_runs)').all().map(row => row.name));
+    if (!runColumns.has('access_token_sha256')) this.#db.exec('ALTER TABLE verification_runs ADD COLUMN access_token_sha256 TEXT');
   }
   close() { if (this.#db) { this.#db.close(); this.#db = undefined; } }
   #transaction(work) { this.#db.exec('BEGIN IMMEDIATE'); try { const result = work(); this.#db.exec('COMMIT'); return result; } catch (error) { try { this.#db.exec('ROLLBACK'); } catch {} throw error; } }
@@ -121,13 +124,15 @@ export class GoalVerificationStore {
       return this.get(id);
     });
   }
-  begin(id) {
+  begin(id, accessToken = this.issueAccessToken()) {
     checkId(id);
+    if (typeof accessToken !== 'string' || accessToken.length < 20 || accessToken.length > 200) fail('access token is invalid');
     return this.#transaction(() => {
       const current = this.get(id); if (!current) fail('verification request not found');
       if (!current.bundle) fail('verification bundle is missing');
       if (!['pending', 'running'].includes(current.status)) fail(`verification request is ${current.status}`);
-      this.#db.prepare("UPDATE verification_runs SET status='running', updated_at=? WHERE id=? AND status IN ('pending','running')").run(now(), id);
+      this.#db.prepare("UPDATE verification_runs SET status='running', access_token_sha256=?, updated_at=?, error=NULL WHERE id=? AND status IN ('pending','running')")
+        .run(sha256(accessToken), now(), id);
       return this.get(id);
     });
   }
@@ -136,7 +141,7 @@ export class GoalVerificationStore {
     return this.#transaction(() => {
       const current = this.get(id); if (!current || !['running', 'pending'].includes(current.status)) fail('verification request is not running');
       const timestamp = now(); const status = evaluation.decision === 'pass' ? 'passed' : 'failed';
-      this.#db.prepare('UPDATE verification_runs SET status=?, evaluation_json=?, error=NULL, updated_at=?, completed_at=? WHERE id=? AND status IN (\'running\',\'pending\')')
+      this.#db.prepare('UPDATE verification_runs SET status=?, evaluation_json=?, error=NULL, access_token_sha256=NULL, updated_at=?, completed_at=? WHERE id=? AND status IN (\'running\',\'pending\')')
         .run(status, JSON.stringify(evaluation), timestamp, timestamp, id);
       return this.get(id);
     });
@@ -146,7 +151,7 @@ export class GoalVerificationStore {
     return this.#transaction(() => {
       const current = this.get(id); if (!current || statuses.has(current.status) && ['passed','failed','error'].includes(current.status)) return current;
       const timestamp = now();
-      this.#db.prepare("UPDATE verification_runs SET status='error', error=?, updated_at=?, completed_at=? WHERE id=? AND status IN ('waiting','pending','running')")
+      this.#db.prepare("UPDATE verification_runs SET status='error', error=?, access_token_sha256=NULL, updated_at=?, completed_at=? WHERE id=? AND status IN ('waiting','pending','running')")
         .run(message, timestamp, timestamp, id);
       return this.get(id);
     });
@@ -164,6 +169,18 @@ export class GoalVerificationStore {
     return this.listAttempts(verificationId).find(item => item.attemptNumber === attemptNumber);
   }
   listAttempts(id) { checkId(id); return this.#db.prepare('SELECT * FROM verification_attempts WHERE verification_id=? ORDER BY attempt_number').all(id).map(attemptRecord); }
+  issueAccessToken() { return randomBytes(32).toString('base64url'); }
+  authorize(id, accessToken) {
+    checkId(id);
+    if (typeof accessToken !== 'string' || accessToken.length < 20 || accessToken.length > 200) fail('verification access token is invalid or expired');
+    const row = this.#db.prepare("SELECT access_token_sha256 FROM verification_runs WHERE id=? AND status='running'").get(id);
+    const expected = row?.access_token_sha256;
+    const actual = sha256(accessToken);
+    if (typeof expected !== 'string' || expected.length !== actual.length || !timingSafeEqual(Buffer.from(expected), Buffer.from(actual))) fail('verification access token is invalid or expired');
+    const run = this.get(id);
+    if (!run?.bundle) fail('verification bundle is missing');
+    return run;
+  }
   #running(id) {
     const run = this.get(id);
     if (!run) fail('verification request not found');

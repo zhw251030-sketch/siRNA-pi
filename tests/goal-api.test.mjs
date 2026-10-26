@@ -100,6 +100,28 @@ test('enabled verification port returns 202 and exposes task verification status
   assert.equal((await (await fetch(`${f.base}/v1/tasks/${f.task.id}/goal-verifications/${verificationId}`)).json()).verification.id, verificationId);
 });
 
+test('token-scoped verification access uses POST-only route and binds the path identity', async t => {
+  const verificationId = randomUUID();
+  const calls = [];
+  const verification = {
+    request: async () => ({id: verificationId, status: 'waiting'}),
+    access: {handle: async (kind, input) => { calls.push({kind, input}); return {kind, verificationId: input.verificationId}; }},
+  };
+  const f = await fixture(t, verification);
+  const bundle = await fetch(`${f.base}/v1/goal-verifications/${verificationId}/bundle`, {
+    method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({accessToken: 'access-token-for-test'}),
+  });
+  assert.equal(bundle.status, 200);
+  assert.deepEqual(await bundle.json(), {kind: 'bundle', verificationId});
+  assert.equal(calls[0].input.verificationId, verificationId);
+  const mismatch = await fetch(`${f.base}/v1/goal-verifications/${verificationId}/bundle`, {
+    method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({verificationId: randomUUID(), accessToken: 'access-token-for-test'}),
+  });
+  assert.equal(mismatch.status, 404);
+  const get = await fetch(`${f.base}/v1/goal-verifications/${verificationId}/bundle`);
+  assert.equal(get.status, 405);
+});
+
 test('failed verification request returns an error and restores the Goal to active', async t => {
   const verification = {request: async () => { throw new Error('verification backend unavailable'); }};
   const f = await fixture(t, verification);

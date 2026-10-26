@@ -194,6 +194,30 @@ export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolM
       if (goalRoute && goalApi) {
         return goalApi.handle(request, response, goalRoute[1]);
       }
+      const goalVerificationAccessRoute = /^\/v1\/goal-verifications\/([^/]+)\/(bundle|message|artifact|evidence|check)$/.exec(pathname);
+      if (goalVerificationAccessRoute) {
+        if (!goalVerification?.access) return reply(response, 503, {error: 'Goal 验证访问服务尚未配置。'});
+        if (request.method !== 'POST') {
+          request.resume();
+          response.writeHead(405, {allow: 'POST'});
+          return response.end();
+        }
+        if (url.searchParams.size) invalid('Goal 验证访问不接受查询参数。');
+        try {
+          const body = await readBody(request, 64 * 1024);
+          const verificationId = goalVerificationAccessRoute[1];
+          if (body.verificationId !== undefined && body.verificationId !== verificationId) throw new Error('verification id does not match the route');
+          if (typeof body.accessToken !== 'string' || !body.accessToken) throw new Error('accessToken is required');
+          const result = await goalVerification.access.handle(goalVerificationAccessRoute[2], {...body, verificationId});
+          return reply(response, 200, result);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          const status = Number.isInteger(error?.statusCode) ? error.statusCode
+            : /token|expired/i.test(message) ? 403
+              : /not found|does not belong|does not match/i.test(message) ? 404 : 400;
+          return reply(response, status, {error: message});
+        }
+      }
       const goalVerificationsRoute = /^\/v1\/tasks\/([^/]+)\/goal-verifications(?:\/([^/]+))?$/.exec(pathname);
       if (goalVerificationsRoute && request.method === 'GET') {
         if (!goalVerification) return reply(response, 503, {error: 'Goal 验证服务尚未配置。'});
