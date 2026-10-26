@@ -6,7 +6,7 @@
 
 ## 当前进度
 
-最新：第13C-C步完成最小 Verification Store、Evidence Resolver、Policy 和 Coordinator。Bundle 冻结后，后端只接受真实 evidenceId，重新检查工具回执、产物、验收项和质量边界，再按 revision 安全推动 `complete`、`active` 或 `paused`；本轮使用确定性假 verifier，不调用网络或模型。详见 [Goal验证协调器与策略](docs/43-Goal验证协调器与策略.md)。
+最新：第13C-D步已把最小 Verification Coordinator 接入网页服务生命周期。默认关闭时不创建验证数据库；显式启用确定性 verifier 后，Goal 完成申请返回 HTTP 202、进入 `verifying`，并可通过列表/详情 API 查看验证记录；请求建立失败会恢复 `active`。本轮仍不调用网络或真实模型。详见 [Goal验证服务接线](docs/44-Goal验证服务接线.md)。
 
 上一阶段第12F步完成持久化 approval job/worker 与协调器、bootstrap、生命周期和 HTTP 入队整合。默认 `SIRNA_AUTOMATIC_APPROVAL=0`，只有明确设置为 `1` 才允许自动入队；HTTP 和 coordinator 不直接调用批准服务，worker 才调用可信的 `approveRegisteredToolProposal`，并以 durable terminal 推进 `completed`/`failed`。个人仓库使用独立 `runtime/tool-approval/jobs.sqlite`，参考仓库使用共享 registry maintenance queue；职责边界一致、存储布局不同。机制和差异见 [自动批准边界](docs/38-自动批准边界.md)。
 
@@ -54,7 +54,8 @@
 - 2026-10-26：第13C-A步完成 Goal 完成验证门控：Agent 完成申请进入 `verifying`，只有 revision 匹配的 `completeVerified` 才能进入 `complete`；验证失败和验证基础设施故障分别回到 `active`/`paused`，并增加 checkpoint 路径。详见 [Goal完成验证门控](docs/41-Goal完成验证门控.md)。
 - 2026-10-26：第13C-B步完成最小不可变 GoalVerificationBundle：冻结消息、tool_end 回执和任务文件，绑定大小/SHA-256，并对 token、password 等敏感字段脱敏；源文件或快照篡改会被拒绝。本轮不调用模型或 verifier。详见 [Goal不可变证据包](docs/42-Goal不可变证据包.md)。
 - 2026-10-26：第13C-C步完成最小 Verification Store、Evidence Resolver、Policy 和 Coordinator：持久化验证请求和 attempts，拒绝伪造 evidenceId，按证据类别和验收项覆盖裁决，并以 revision 保护 Goal 的 complete/active/paused 转换。本轮只用确定性假 verifier。详见 [Goal验证协调器与策略](docs/43-Goal验证协调器与策略.md)。
-- 当前正式工具和六个构建工具均可由新网页任务使用；正式工具保持1.0.1，未批准候选不进入正式目录。下一步对照原仓库实现从任务轨迹发现候选能力的真正Curator；当前受控修订成功不等于自动自进化。原版automation会自动批准，个人保留人工门是范围收紧，批准仍使用可信CLI。CPU配额仍不可用，开机自启未配置。
+- 2026-10-26：第13C-D步把 Verification runtime 接入 `bootstrap.mjs`、Goal API、验证状态 GET 路由和服务生命周期；默认关闭，显式 `SIRNA_GOAL_VERIFICATION=deterministic` 才创建 Store/Bundle/Coordinator。27 项定向测试通过；完整 `npm test` 为 1557 项，1541 通过、16 项平台跳过、0 失败。详见 [Goal验证服务接线](docs/44-Goal验证服务接线.md)。
+- 当前正式工具和六个构建工具均可由新网页任务使用；正式工具保持1.0.1，未批准候选不进入正式目录。下一步对照原仓库实现受限 EvidenceStore/检索回执，再接真实独立 Agent Compose verifier；当前受控修订成功不等于自动自进化。原版automation会自动批准，个人保留人工门是范围收紧，批准仍使用可信CLI。CPU配额仍不可用，开机自启未配置。
 
 安装位置、文件解释和验证记录见 [第 1 步 A：安装与运行 Pi](docs/01-安装与运行Pi.md)。服务器项目目录是 `/home/hanwen/Project/project/siNRA-pi/`，按用户指定拼写保留。
 

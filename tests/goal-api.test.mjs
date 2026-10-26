@@ -9,12 +9,12 @@ import {TaskStore} from '../packages/task-core/task-store.mjs';
 import {GoalStore} from '../packages/extensions/goal/goal-store.mjs';
 import {createAppServer} from '../apps/api/router.mjs';
 
-async function fixture(t) {
+async function fixture(t, verification) {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sirna-goal-http-')));
   const tasks = new TaskStore(path.join(root, 'tasks.sqlite'));
   const goal = new GoalStore({root});
   const task = tasks.createTask({id: randomUUID(), piSessionId: randomUUID()}, randomUUID());
-  const server = createAppServer({taskStore: tasks, agentRuntime: {runtimeInfo: () => ({})}, goalStore: goal});
+  const server = createAppServer({taskStore: tasks, agentRuntime: {runtimeInfo: () => ({})}, goalStore: goal, ...(verification ? {goalVerification: verification} : {})});
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -77,5 +77,45 @@ test('Goal HTTP completion request exposes verifying instead of claiming complet
   assert.equal(completion.status, 200);
   assert.equal((await completion.json()).goal.status, 'verifying');
   assert.equal(f.goal.get(f.task.id).status, 'verifying');
+});
+
+test('enabled verification port returns 202 and exposes task verification status', async t => {
+  const verificationId = randomUUID();
+  const submitted = [];
+  const verification = {
+    request: async goal => { submitted.push(goal); return {id: verificationId, status: 'waiting'}; },
+    list: taskId => submitted.filter(goal => goal.taskId === taskId).map(goal => ({id: verificationId, taskId, status: 'waiting', goalRevision: goal.revision})),
+    get: (taskId, id) => id === verificationId ? {id, taskId, status: 'waiting'} : undefined,
+  };
+  const f = await fixture(t, verification);
+  const created = await (await f.request(f.task.id, 'POST', {objective: '完成报告'})).json();
+  const progressed = await f.request(f.task.id, 'PATCH', {action: 'agent_update', status: 'progress', completedItemIds: created.goal.plan.items.map(item => item.id), expectedRevision: created.goal.revision});
+  const current = (await progressed.json()).goal;
+  const completion = await f.request(f.task.id, 'PATCH', {action: 'agent_update', status: 'complete', expectedRevision: current.revision});
+  assert.equal(completion.status, 202);
+  const body = await completion.json();
+  assert.equal(body.goal.status, 'verifying');
+  assert.deepEqual(body.verification, {id: verificationId, status: 'waiting'});
+  assert.equal((await (await fetch(`${f.base}/v1/tasks/${f.task.id}/goal-verifications`)).json()).verifications.length, 1);
+  assert.equal((await (await fetch(`${f.base}/v1/tasks/${f.task.id}/goal-verifications/${verificationId}`)).json()).verification.id, verificationId);
+});
+
+test('failed verification request returns an error and restores the Goal to active', async t => {
+  const verification = {request: async () => { throw new Error('verification backend unavailable'); }};
+  const f = await fixture(t, verification);
+  const created = await (await f.request(f.task.id, 'POST', {objective: '完成报告'})).json();
+  const progressed = await f.request(f.task.id, 'PATCH', {
+    action: 'agent_update',
+    status: 'progress',
+    completedItemIds: created.goal.plan.items.map(item => item.id),
+    expectedRevision: created.goal.revision,
+  });
+  const current = (await progressed.json()).goal;
+  const completion = await f.request(f.task.id, 'PATCH', {action: 'agent_update', status: 'complete', expectedRevision: current.revision});
+  assert.equal(completion.status, 409);
+  assert.match((await completion.json()).error, /verification backend unavailable/);
+  const restored = f.goal.get(f.task.id);
+  assert.equal(restored.status, 'active');
+  assert.match(restored.latestVerificationFeedback, /验证请求未能建立/);
 });
 

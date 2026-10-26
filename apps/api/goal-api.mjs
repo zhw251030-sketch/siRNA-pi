@@ -17,7 +17,7 @@ function asBody(input) {
   return input;
 }
 
-export function createGoalApi({taskStore, goalStore, readJsonBody, sendJson, appendObjective} = {}) {
+export function createGoalApi({taskStore, goalStore, readJsonBody, sendJson, appendObjective, verification} = {}) {
   if (!taskStore || !goalStore || typeof readJsonBody !== 'function' || typeof sendJson !== 'function') {
     throw new TypeError('Goal API requires taskStore, goalStore, readJsonBody and sendJson');
   }
@@ -54,7 +54,20 @@ export function createGoalApi({taskStore, goalStore, readJsonBody, sendJson, app
               input.status === 'progress' ? input.completedItemIds : input.reason,
               input.expectedRevision);
           } else throw new Error('PATCH 需要 action。');
-          sendJson(response, 200, {goal});
+          if (goal.status === 'verifying' && verification?.request) {
+            try {
+              const run = await verification.request(goal, 'completion_request');
+              sendJson(response, 202, {goal, verification: {id: run.id, status: run.status}});
+            } catch (error) {
+              // The state transition already happened before the asynchronous
+              // request. Roll it back so a failed enqueue cannot strand the
+              // Goal in verifying forever.
+              try { goalStore.continueAfterVerification(goal.taskId, goal.revision, '验证请求未能建立，请稍后重试。'); } catch {}
+              throw error;
+            }
+          } else {
+            sendJson(response, 200, {goal});
+          }
           return true;
         }
         if (request.method === 'DELETE') {

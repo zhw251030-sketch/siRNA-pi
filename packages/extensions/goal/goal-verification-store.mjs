@@ -59,6 +59,7 @@ export class GoalVerificationStore {
   close() { if (this.#db) { this.#db.close(); this.#db = undefined; } }
   #transaction(work) { this.#db.exec('BEGIN IMMEDIATE'); try { const result = work(); this.#db.exec('COMMIT'); return result; } catch (error) { try { this.#db.exec('ROLLBACK'); } catch {} throw error; } }
   get(id) { checkId(id); return record(this.#db.prepare('SELECT * FROM verification_runs WHERE id=?').get(id)); }
+  listForTask(taskId) { checkId(taskId, 'taskId'); return this.#db.prepare('SELECT * FROM verification_runs WHERE task_id=? ORDER BY created_at DESC,id DESC').all(taskId).map(record); }
   getForGoalRevision(goalId, goalRevision, trigger) {
     checkId(goalId, 'goalId'); if (!Number.isSafeInteger(goalRevision) || goalRevision < 1 || !triggers.has(trigger)) fail('invalid verification lookup');
     return record(this.#db.prepare('SELECT * FROM verification_runs WHERE goal_id=? AND goal_revision=? AND trigger=?').get(goalId, goalRevision, trigger));

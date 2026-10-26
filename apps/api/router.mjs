@@ -61,7 +61,7 @@ async function readBody(request, maxBytes=1048576) {
 
 // HTTP only coordinates transport. Task state and runtime execution stay in
 // their own packages, matching the reference repository's responsibility split.
-export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolMaintenance, toolApproval, toolRepair, toolCurationPreview, toolCuration, toolCurationBuild, toolCurationCoordinator, goalStore, taskMessages: sharedTaskMessages } = {}) {
+export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolMaintenance, toolApproval, toolRepair, toolCurationPreview, toolCuration, toolCurationBuild, toolCurationCoordinator, goalStore, goalVerification, taskMessages: sharedTaskMessages } = {}) {
   const taskMessages = sharedTaskMessages ?? new TaskMessageService({ taskStore, agentRuntime, workspaceFiles });
   const goalApi = goalStore ? createGoalApi({
     taskStore,
@@ -69,6 +69,7 @@ export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolM
     readJsonBody: request => readBody(request, 64 * 1024),
     sendJson: reply,
     appendObjective: (taskId, content, requestId) => taskStore.appendConversationUserMessage(taskId, content, requestId),
+    verification: goalVerification?.port ?? goalVerification,
   }) : undefined;
   const activeTurns = new Set();
   const track = (operation) => {
@@ -192,6 +193,16 @@ export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolM
       const goalRoute = /^\/v1\/tasks\/([^/]+)\/goal$/.exec(pathname);
       if (goalRoute && goalApi) {
         return goalApi.handle(request, response, goalRoute[1]);
+      }
+      const goalVerificationsRoute = /^\/v1\/tasks\/([^/]+)\/goal-verifications(?:\/([^/]+))?$/.exec(pathname);
+      if (goalVerificationsRoute && request.method === 'GET') {
+        if (!goalVerification) return reply(response, 503, {error: 'Goal 验证服务尚未配置。'});
+        if (!taskStore.getTask(goalVerificationsRoute[1])) return reply(response, 404, {error: '没有找到这个任务。'});
+        if (goalVerificationsRoute[2]) {
+          const run = (goalVerification.port ?? goalVerification).get?.(goalVerificationsRoute[1], goalVerificationsRoute[2]);
+          return run ? reply(response, 200, {verification: run}) : reply(response, 404, {error: '没有找到这个验证请求。'});
+        }
+        return reply(response, 200, {verifications: (goalVerification.port ?? goalVerification).list?.(goalVerificationsRoute[1]) ?? []});
       }
       const filesRoute = /^\/v1\/tasks\/([^/]+)\/files(?:\/(input|output)\/([^/]+))?$/.exec(pathname);
       if (request.method === 'POST' && filesRoute && !filesRoute[2]) {

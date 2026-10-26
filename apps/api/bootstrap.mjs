@@ -38,6 +38,8 @@ import { createToolCurationBuildService } from "../../packages/extensions/tool-c
 import { ToolGapStore } from "../../packages/extensions/tool-curation/tool-gap-store.mjs";
 import { createToolGapService } from "../../packages/extensions/tool-curation/tool-gap-service.mjs";
 import { GoalStore } from "../../packages/extensions/goal/goal-store.mjs";
+import { createGoalVerificationRuntime } from "../../packages/extensions/goal/goal-verification-runtime.mjs";
+import { createDeterministicGoalVerifier } from "../../packages/extensions/goal/goal-verification-fake.mjs";
 import { createApiShutdown, startApiServices, createCurationBuildRegistrationPolicy, createCurationAutomationReadiness } from "./service-lifecycle.mjs";
 
 process.umask(0o077);
@@ -72,6 +74,16 @@ const goalStore = new GoalStore({root: projectRoot});
 const recovered = taskStore.recoverInterruptedTasks();
 const workspaceFiles = new TaskFiles({ root: projectRoot, agentRuntime });
 const taskMessages=new TaskMessageService({taskStore,agentRuntime,workspaceFiles,onSettled:run=>toolCurationCoordinator?.observeRun(run)});
+// Verification is opt-in. This local deterministic adapter is only for
+// learning the lifecycle; a real Agent Compose verifier is a later step.
+const goalVerification = createGoalVerificationRuntime({
+  root: projectRoot,
+  taskStore,
+  workspaceFiles,
+  goalStore,
+  enabled: process.env.SIRNA_GOAL_VERIFICATION === 'deterministic',
+  verifier: createDeterministicGoalVerifier(),
+});
 const maintenanceStore=new ToolMaintenanceStore({root:projectRoot});
 const toolAutomation=new ToolAutomationStore({root:projectRoot});
 const isVerified = proposalId => {
@@ -113,13 +125,14 @@ toolCurationCoordinator=createToolCurationCoordinator({root:projectRoot,taskStor
   approveTool:(proposalId,actor)=>approveRegisteredToolProposal(proposalId,actor,{root:projectRoot}),
   automaticApproval:process.env.SIRNA_AUTOMATIC_APPROVAL==='1',
   isReady:createCurationAutomationReadiness({taskMessages,agentRuntime}),isTaskBusy:taskId=>taskMessages.isTaskBusy(taskId),intervalMs:1000,maxReviews:3});
-const server = createAppServer({ taskStore, agentRuntime, workspaceFiles, taskMessages, goalStore, toolMaintenance, toolApproval, toolRepair, toolCurationPreview, toolCuration, toolCurationBuild, toolCurationCoordinator });
+const server = createAppServer({ taskStore, agentRuntime, workspaceFiles, taskMessages, goalStore, goalVerification, toolMaintenance, toolApproval, toolRepair, toolCurationPreview, toolCuration, toolCurationBuild, toolCurationCoordinator });
 const shutdown = createApiShutdown({server,toolMaintenance,toolApproval,toolRepair,toolCuration,toolCurationBuild,toolCurationCoordinator,toolsServer,
-  stores:[taskStore,goalStore,maintenanceStore,toolAutomation,toolApprovalStore,repairStore,curationStore,curationBuildStore,gapStore],rpcs:[rpc,curatorRpc]});
+  goalVerification,
+  stores:[taskStore,goalStore,maintenanceStore,toolAutomation,toolApprovalStore,repairStore,curationStore,curationBuildStore,gapStore,...(goalVerification ? [goalVerification.store] : [])],rpcs:[rpc,curatorRpc]});
 const shutdownFailure = () => {console.error('服务停止未完全确认，请检查项目内私有运行记录。');process.exitCode=1;};
 server.listen(3000, "127.0.0.1", () => {
   // Never recover or claim jobs until this instance owns the listening socket.
-  try {startApiServices({server,toolRepair,toolCurationBuild,toolMaintenance,toolCuration,toolApproval,toolCurationCoordinator});}
+  try {startApiServices({server,toolRepair,toolCurationBuild,toolMaintenance,toolCuration,toolApproval,toolCurationCoordinator,goalVerification});}
   catch {shutdownFailure();void shutdown().catch(shutdownFailure);return;}
   console.log(`siRNA-pi: http://127.0.0.1:3000/ ; runtime=agent-compose ; recovered=${recovered.length}`);
 });
