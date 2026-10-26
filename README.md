@@ -6,7 +6,7 @@
 
 ## 当前进度
 
-最新：第13B步完成 GoalCoordinator 调度内核。它在任务空闲且没有待处理用户输入时领取 lease，使用 `goal:<goalId>:<turn>` requestId，失败退避，重启回收遗留 lease，派发不被接受时退还预算；本轮只用假执行端测试，真实自动回合仍默认关闭。Goal 创建后保存到独立 `runtime/goal/goals.sqlite`，完成申请仍必须先完成所有必需工作项。真实 TaskMessageService 适配、独立证据包/Verifier、Memory/Data Pool、Workbench 和 Black-box仍待实现。逐文件说明见 [Goal自动续作协调器](docs/40-Goal自动续作协调器.md)。
+最新：第13C-A步完成 Goal 完成验证门控。Agent 的完成申请只能把 `active` 变为 `verifying`；独立验证通过后才允许 `completeVerified`，证据不足回到 `active` 并保存反馈，验证基础设施故障进入 `paused`。本轮未启动 verifier 或模型。GoalCoordinator 仍默认不启动真实自动回合；下一步冻结不可变 Verification Bundle。详见 [Goal完成验证门控](docs/41-Goal完成验证门控.md)。
 
 上一阶段第12F步完成持久化 approval job/worker 与协调器、bootstrap、生命周期和 HTTP 入队整合。默认 `SIRNA_AUTOMATIC_APPROVAL=0`，只有明确设置为 `1` 才允许自动入队；HTTP 和 coordinator 不直接调用批准服务，worker 才调用可信的 `approveRegisteredToolProposal`，并以 durable terminal 推进 `completed`/`failed`。个人仓库使用独立 `runtime/tool-approval/jobs.sqlite`，参考仓库使用共享 registry maintenance queue；职责边界一致、存储布局不同。机制和差异见 [自动批准边界](docs/38-自动批准边界.md)。
 
@@ -51,6 +51,7 @@
 - 2026-10-21：第10O步完成明确合同拒绝反馈，并用独立新任务d72bc8cc…补齐合法替代与独立验证。根候选32b9a044…领域2/3、基准1/2对基线1/2；Pi一轮修订改用Math.min/Math.max，替代5fc8293d…领域3/3、基准2/2对基线1/2、净增1，现verified待人工批准。测试、基线、权限及parent等冻结合同未变。两次propose均成功、0工具错误，所以真实模型轮未经历409拒绝后改正；该反馈仅在真实Pi适配器的无模型夹具和离线集成中触发。第10N失败历史保留。详见 [明确拒绝反馈与修订闭环](docs/28-明确拒绝反馈与修订闭环.md)。
 - 第10O步验收：15次模型响应、16次Pi工具调用、113340 tokens，实际费用未知；4构建和22验证容器及新guest均释放。旧270份证据、22份原生文件、2个旧guest及正式1.0.1保持，仅在空闲时重建项目controller和relay两个管理容器。完整1223项测试：Windows1210通过/13跳过，Linux1221通过/2跳过，均0失败。
 - 2026-10-26：第13B步完成 GoalCoordinator 调度内核：新增 `goal-coordinator.mjs`，补齐 `GoalStore.releaseLease()`，验证空闲/待输入门控、requestId、拒绝退还、失败退避、重启恢复和并发去重；本轮不接真实 TaskMessageService、不产生模型请求。详见 [Goal自动续作协调器](docs/40-Goal自动续作协调器.md)。
+- 2026-10-26：第13C-A步完成 Goal 完成验证门控：Agent 完成申请进入 `verifying`，只有 revision 匹配的 `completeVerified` 才能进入 `complete`；验证失败和验证基础设施故障分别回到 `active`/`paused`，并增加 checkpoint 路径。详见 [Goal完成验证门控](docs/41-Goal完成验证门控.md)。
 - 当前正式工具和六个构建工具均可由新网页任务使用；正式工具保持1.0.1，未批准候选不进入正式目录。下一步对照原仓库实现从任务轨迹发现候选能力的真正Curator；当前受控修订成功不等于自动自进化。原版automation会自动批准，个人保留人工门是范围收紧，批准仍使用可信CLI。CPU配额仍不可用，开机自启未配置。
 
 安装位置、文件解释和验证记录见 [第 1 步 A：安装与运行 Pi](docs/01-安装与运行Pi.md)。服务器项目目录是 `/home/hanwen/Project/project/siNRA-pi/`，按用户指定拼写保留。

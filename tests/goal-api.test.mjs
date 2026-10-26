@@ -64,3 +64,18 @@ test('Goal HTTP rejects unknown task, duplicate unfinished goal and malformed fi
   assert.equal((await f.request(f.task.id, 'PATCH', {action: 'agent_update', status: 'progress', completedItemIds: ['bad']})).status, 409);
 });
 
+test('Goal HTTP completion request exposes verifying instead of claiming completion', async t => {
+  const f = await fixture(t);
+  const createdResponse = await f.request(f.task.id, 'POST', {objective: '完成第一阶段；完成第二阶段'});
+  const created = await createdResponse.json();
+  let goal = created.goal;
+  const progressed = await f.request(f.task.id, 'PATCH', {
+    action: 'agent_update', status: 'progress', completedItemIds: goal.plan.items.map(item => item.id), expectedRevision: goal.revision,
+  });
+  goal = (await progressed.json()).goal;
+  const completion = await f.request(f.task.id, 'PATCH', {action: 'agent_update', status: 'complete', expectedRevision: goal.revision});
+  assert.equal(completion.status, 200);
+  assert.equal((await completion.json()).goal.status, 'verifying');
+  assert.equal(f.goal.get(f.task.id).status, 'verifying');
+});
+

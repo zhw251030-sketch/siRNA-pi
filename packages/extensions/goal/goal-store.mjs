@@ -139,9 +139,9 @@ export class GoalStore {
       const goal = this.get(taskId); if (!goal) fail('This task does not have a Goal');
       if (expectedRevision !== undefined && goal.revision !== expectedRevision) fail(`Goal revision changed from ${expectedRevision} to ${goal.revision}; retry`);
       const text = safeText(reason ?? 'blocked without a reason', 'reason', 1000);
-      if (goal.status !== 'active') fail(`A Goal in ${goal.status} state cannot become blocked`);
+      if (!['active', 'verifying'].includes(goal.status)) fail(`A Goal in ${goal.status} state cannot become blocked`);
       const timestamp = now();
-      this.#db.prepare("UPDATE task_goals SET status='blocked', blocked_reason=?, revision=revision+1, updated_at=? WHERE task_id=? AND status='active'")
+      this.#db.prepare("UPDATE task_goals SET status='blocked', blocked_reason=?, revision=revision+1, updated_at=? WHERE task_id=? AND status IN ('active','verifying')")
         .run(text, timestamp, taskId);
       return this.get(taskId);
     });
@@ -150,13 +150,83 @@ export class GoalStore {
     checkId(taskId);
     return this.#transaction(() => {
       const goal = this.get(taskId); if (!goal) fail('This task does not have a Goal');
-      if (goal.status !== 'active') fail(`A Goal in ${goal.status} state cannot complete`);
+      if (goal.status === 'verifying') return goal;
+      if (goal.status === 'complete') return goal;
+      if (goal.status !== 'active') fail(`A Goal in ${goal.status} state cannot request completion`);
       if (expectedRevision !== undefined && goal.revision !== expectedRevision) fail(`Goal revision changed from ${expectedRevision} to ${goal.revision}; retry`);
       const pending = pendingRequiredWorkItems(goal.plan);
       if (pending.length) fail(`Goal completion is not ready; pending work: ${pending.map(item => item.id).join(', ')}`);
       const timestamp = now();
-      this.#db.prepare("UPDATE task_goals SET status='complete', lease_id=NULL, lease_expires_at=NULL, revision=revision+1, updated_at=? WHERE task_id=? AND status='active'")
+      this.#db.prepare("UPDATE task_goals SET status='verifying', blocked_reason=NULL, verification_feedback=NULL, lease_id=NULL, lease_expires_at=NULL, revision=revision+1, updated_at=? WHERE task_id=? AND status='active'")
         .run(timestamp, taskId);
+      return this.get(taskId);
+    });
+  }
+  completeVerified(taskId, expectedRevision) {
+    checkId(taskId);
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) fail('expectedRevision must be a positive integer');
+    return this.#transaction(() => {
+      const goal = this.get(taskId); if (!goal) fail('This task does not have a Goal');
+      if (goal.status === 'complete') return goal;
+      if (goal.status !== 'verifying') fail(`A Goal in ${goal.status} state cannot be verified complete`);
+      if (goal.revision !== expectedRevision) fail(`Goal revision changed from ${expectedRevision} to ${goal.revision}; verification result is stale`);
+      const timestamp = now();
+      this.#db.prepare("UPDATE task_goals SET status='complete', blocked_reason=NULL, verification_feedback=NULL, lease_id=NULL, lease_expires_at=NULL, revision=revision+1, updated_at=? WHERE task_id=? AND status='verifying' AND revision=?")
+        .run(timestamp, taskId, expectedRevision);
+      return this.get(taskId);
+    });
+  }
+  continueAfterVerification(taskId, expectedRevision, feedback) {
+    checkId(taskId);
+    const normalized = typeof feedback === 'string' ? feedback.replace(/\s+/g, ' ').trim() : '';
+    if (!normalized || normalized.length > 8000) fail('verification feedback must contain 1 to 8000 characters');
+    return this.#transaction(() => {
+      const goal = this.get(taskId); if (!goal) fail('This task does not have a Goal');
+      if (goal.status !== 'verifying') fail(`A Goal in ${goal.status} state cannot resume after verification`);
+      if (goal.revision !== expectedRevision) fail(`Goal revision changed from ${expectedRevision} to ${goal.revision}; verification result is stale`);
+      const timestamp = now();
+      this.#db.prepare("UPDATE task_goals SET status='active', blocked_reason=NULL, verification_feedback=?, consecutive_failed_turns=0, consecutive_stalled_turns=0, lease_id=NULL, lease_expires_at=NULL, revision=revision+1, updated_at=? WHERE task_id=? AND status='verifying' AND revision=?")
+        .run(normalized, timestamp, taskId, expectedRevision);
+      return this.get(taskId);
+    });
+  }
+  pauseAfterVerification(taskId, expectedRevision, reason) {
+    checkId(taskId);
+    const normalized = typeof reason === 'string' ? reason.replace(/\s+/g, ' ').trim() : '';
+    if (!normalized || normalized.length > 8000) fail('verification infrastructure reason must contain 1 to 8000 characters');
+    return this.#transaction(() => {
+      const goal = this.get(taskId); if (!goal) fail('This task does not have a Goal');
+      if (goal.status !== 'verifying') fail(`A Goal in ${goal.status} state cannot pause after verification`);
+      if (goal.revision !== expectedRevision) fail(`Goal revision changed from ${expectedRevision} to ${goal.revision}; verification result is stale`);
+      const timestamp = now();
+      this.#db.prepare("UPDATE task_goals SET status='paused', blocked_reason=?, verification_feedback=NULL, lease_id=NULL, lease_expires_at=NULL, revision=revision+1, updated_at=? WHERE task_id=? AND status='verifying' AND revision=?")
+        .run(normalized, timestamp, taskId, expectedRevision);
+      return this.get(taskId);
+    });
+  }
+  requestCheckpoint(taskId, expectedRevision) {
+    checkId(taskId);
+    return this.#transaction(() => {
+      const goal = this.get(taskId); if (!goal) fail('This task does not have a Goal');
+      if (goal.status !== 'active') fail(`A Goal in ${goal.status} state cannot request a checkpoint`);
+      if (expectedRevision !== undefined && goal.revision !== expectedRevision) fail(`Goal revision changed from ${expectedRevision} to ${goal.revision}; retry`);
+      const timestamp = now();
+      this.#db.prepare("UPDATE task_goals SET status='verifying', verification_feedback=NULL, lease_id=NULL, lease_expires_at=NULL, revision=revision+1, updated_at=? WHERE task_id=? AND status='active'")
+        .run(timestamp, taskId);
+      return this.get(taskId);
+    });
+  }
+  continueAfterCheckpoint(taskId, expectedRevision, feedback) {
+    checkId(taskId);
+    const normalized = feedback === undefined ? '' : typeof feedback === 'string' ? feedback.replace(/\s+/g, ' ').trim() : '';
+    if (normalized.length > 8000) fail('verification feedback cannot exceed 8000 characters');
+    return this.#transaction(() => {
+      const goal = this.get(taskId); if (!goal) fail('This task does not have a Goal');
+      if (goal.status !== 'verifying') fail(`A Goal in ${goal.status} state cannot resume after a checkpoint`);
+      if (goal.revision !== expectedRevision) fail(`Goal revision changed from ${expectedRevision} to ${goal.revision}; checkpoint result is stale`);
+      const timestamp = now();
+      this.#db.prepare("UPDATE task_goals SET status='active', verification_feedback=?, lease_id=NULL, lease_expires_at=NULL, revision=revision+1, updated_at=? WHERE task_id=? AND status='verifying' AND revision=?")
+        .run(normalized || null, timestamp, taskId, expectedRevision);
       return this.get(taskId);
     });
   }
@@ -185,9 +255,13 @@ export class GoalStore {
     });
   }
   recordExternalFeedback(taskId, feedback) {
-    checkId(taskId); const text = safeText(feedback, 'feedback', 2000);
-    this.#db.prepare('UPDATE task_goals SET verification_feedback=?, revision=revision+1, updated_at=? WHERE task_id=?').run(text, now(), taskId);
-    return this.get(taskId);
+    checkId(taskId); const text = safeText(feedback, 'feedback', 8000);
+    return this.#transaction(() => {
+      const goal = this.get(taskId); if (!goal) fail('This task does not have a Goal');
+      if (goal.status !== 'active') fail(`A Goal in ${goal.status} state cannot receive external feedback`);
+      this.#db.prepare('UPDATE task_goals SET verification_feedback=?, revision=revision+1, updated_at=? WHERE task_id=? AND status=\'active\'').run(text, now(), taskId);
+      return this.get(taskId);
+    });
   }
   acquireLease(taskId, durationMs = 30 * 60 * 1000) {
     checkId(taskId);

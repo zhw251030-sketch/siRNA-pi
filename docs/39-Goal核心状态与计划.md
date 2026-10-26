@@ -12,6 +12,7 @@
 | HTTP Goal API | apps/api/extensions/goal-api.ts | apps/api/goal-api.mjs + apps/api/router.mjs |
 | 目标与任务消息的关系 | goal-api.ts 创建 objective 消息 | TaskStore.appendConversationUserMessage() |
 | 自动续作协调器 | packages/extensions/goal/goal-coordinator.ts | packages/extensions/goal/goal-coordinator.mjs（13B，默认不启动真实自动回合） |
+| 完成状态验证门控 | packages/extensions/goal/goal-store.ts 的 verifying/completeVerified 路径 | packages/extensions/goal/goal-store.mjs（13C-A） |
 
 ## 为什么需要 Goal
 
@@ -57,7 +58,7 @@ node --test tests/goal-core.test.mjs tests/goal-api.test.mjs tests/goal-tools.te
 13A 完成了“目标有地方保存、状态不能被模型直接绕过、完成有计划门槛”。它没有声称完成原仓库的全部 Goal 贡献：
 
 1. 13B 已接 GoalCoordinator 调度内核：只有任务空闲、没有待处理用户输入时才领取 lease，使用 goal:<goalId>:<turn> requestId 发起有限自动回合，并在重启时回收遗留 lease。当前只用假 GoalTurnPort 测试，尚未接入 bootstrap 的真实 TaskMessageService。
-2. 13C 接 GoalVerificationBundle/Store/Policy/Coordinator：把完成申请冻结成不可变证据包，由没有任务执行权限的独立 verifier 检查文件、消息、工具回执，再决定 complete、继续或 blocked。
+2. 13C-B 接 GoalVerificationBundle/Store/Policy/Coordinator：把 verifying 状态冻结成不可变证据包，由没有任务执行权限的独立 verifier 检查文件、消息、工具回执，再决定 complete、继续或 paused。
 3. 后续再接 Memory、Data Pool、Design Workbench 和 Black-box；它们依赖 Goal 的 taskId、revision 和证据边界。
 
 因此，本阶段可以证明 Goal 状态机和接口工作，不能证明 Agent 已经能自主完成复杂科学任务，也不能把“所有计划项已标记 done”当作独立实验结果。

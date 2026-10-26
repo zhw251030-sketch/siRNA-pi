@@ -103,3 +103,47 @@ test('GoalStore rejects duplicate unfinished goals and only accepts safe statuse
   store.close();
 });
 
+test('Goal completion is a verification gate with revision-protected terminal transitions', t => {
+  const {root} = fixture(t);
+  const taskId = randomUUID();
+  const store = new GoalStore({root});
+  store.create(taskId, '完成第一阶段；完成第二阶段', 3);
+  let goal = store.updateProgress(taskId, ['step-1', 'step-2']);
+  goal = store.updateFromAgent(taskId, 'complete', undefined, goal.revision);
+  assert.equal(goal.status, 'verifying');
+  assert.throws(() => store.completeVerified(taskId, goal.revision - 1), /revision/i);
+  assert.equal(store.get(taskId).status, 'verifying');
+  const completed = store.completeVerified(taskId, goal.revision);
+  assert.equal(completed.status, 'complete');
+  assert.equal(store.completeVerified(taskId, completed.revision).status, 'complete');
+  assert.throws(() => store.continueAfterVerification(taskId, completed.revision, '需要补充'), /complete|state/i);
+  store.close();
+});
+
+test('verification failure returns the Goal to active with bounded feedback', t => {
+  const {root} = fixture(t);
+  const taskId = randomUUID();
+  const store = new GoalStore({root});
+  store.create(taskId, '先做阶段检查');
+  const verifying = store.requestCheckpoint(taskId);
+  assert.equal(verifying.status, 'verifying');
+  const active = store.continueAfterCheckpoint(verifying.taskId, verifying.revision, '输出文件还缺少摘要');
+  assert.equal(active.status, 'active');
+  assert.equal(active.latestVerificationFeedback, '输出文件还缺少摘要');
+  assert.throws(() => store.continueAfterCheckpoint(taskId, active.revision, 'x'.repeat(8001)), /8000/i);
+  store.close();
+});
+
+test('verification infrastructure failure pauses the Goal and stale results cannot overwrite it', t => {
+  const {root} = fixture(t);
+  const taskId = randomUUID();
+  const store = new GoalStore({root});
+  store.create(taskId, '等待独立检查');
+  const verifying = store.requestCheckpoint(taskId);
+  const paused = store.pauseAfterVerification(taskId, verifying.revision, '验证服务暂时不可用');
+  assert.equal(paused.status, 'paused');
+  assert.equal(paused.blockedReason, '验证服务暂时不可用');
+  assert.throws(() => store.completeVerified(taskId, verifying.revision), /paused|state|revision/i);
+  store.close();
+});
+
