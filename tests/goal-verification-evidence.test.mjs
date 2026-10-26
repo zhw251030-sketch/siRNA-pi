@@ -9,6 +9,7 @@ import {GoalStore} from '../packages/extensions/goal/goal-store.mjs';
 import {GoalVerificationBundleBuilder} from '../packages/extensions/goal/goal-verification-bundle.mjs';
 import {GoalVerificationStore} from '../packages/extensions/goal/goal-verification-store.mjs';
 import {createGoalVerificationEvidenceAccess} from '../packages/extensions/goal/goal-verification-evidence.mjs';
+import {GoalVerificationEvidenceResolver} from '../packages/extensions/goal/goal-verification-evidence-resolver.mjs';
 
 function fixture(t) {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sirna-goal-evidence-')));
@@ -68,7 +69,8 @@ test('artifact checks read only the immutable snapshot and save deterministic re
   const artifactId = f.bundle.artifacts[0].id;
   const checked = await f.access.checkArtifact({verificationId: f.bundle.verificationId, artifactId, operation: 'json_array_length', expected: {equals: 2}});
   assert.equal(checked.check.result.passed, true);
-  assert.equal(checked.evidence.evidenceId, `check:${checked.check.id}`);
+  assert.match(checked.evidence.evidenceId, /^[0-9a-f-]{36}$/);
+  assert.equal(checked.evidence.method, 'deterministic_check');
   assert.equal(f.store.getCheck(checked.check.id, f.bundle.verificationId).resultSha256, checked.check.resultSha256);
   const snapshot = path.join(f.root, 'snapshots', f.bundle.verificationId, f.bundle.artifacts[0].snapshotPath);
   fs.chmodSync(snapshot, 0o600);
@@ -83,4 +85,41 @@ test('evidence access refuses records outside a running verification', async t =
   f.store.attachBundle(request.id, bundle);
   const access = createGoalVerificationEvidenceAccess({store: f.store, bundles: f.bundles});
   await assert.rejects(() => access.checkArtifact({verificationId: request.id, artifactId: bundle.artifacts[0].id, operation: 'exists'}), /pending/i);
+});
+
+test('evidence resolver persists random stable units for bundle content', async t => {
+  const f = await runningFixture(t);
+  const resolver = new GoalVerificationEvidenceResolver(f.store, f.bundles);
+  const first = resolver.prepareBundle(f.store.get(f.bundle.verificationId));
+  const second = resolver.prepareBundle(f.store.get(f.bundle.verificationId));
+  assert.deepEqual(first.map(unit => unit.id), second.map(unit => unit.id));
+  assert.equal(first.length, 1);
+  assert.match(first[0].id, /^[0-9a-f-]{36}$/);
+  assert.equal(first[0].method, 'artifact_read');
+  const artifact = resolver.materializeArtifact(f.store.get(f.bundle.verificationId), f.bundle.artifacts[0].id, '[artifact excerpt]', 'chars:0-17');
+  assert.match(artifact.id, /^[0-9a-f-]{36}$/);
+  assert.equal(artifact.id.startsWith('artifact:'), false);
+  assert.equal(f.store.getEvidenceUnit(artifact.id, f.bundle.verificationId).dedupeKey, artifact.dedupeKey);
+});
+
+test('evidence resolver materializes scholarly records and deterministic checks with deduplication', async t => {
+  const f = await runningFixture(t);
+  const resolver = new GoalVerificationEvidenceResolver(f.store, f.bundles);
+  const retrieval = f.store.recordRetrieval({
+    verificationId: f.bundle.verificationId,
+    kind: 'search', provider: 'openalex', query: 'RNA interference',
+    sourceUrl: 'https://api.openalex.org/works?search=RNA%20interference',
+    fetchedAt: '2026-10-26T00:00:00.000Z', contentType: 'application/json',
+    responseText: JSON.stringify({results: [{doi: 'https://doi.org/10.1000/Example', title: 'Example'}]}),
+  });
+  const first = resolver.materializeRetrieval(retrieval);
+  const second = resolver.materializeRetrieval(retrieval);
+  assert.equal(first.length, 1);
+  assert.deepEqual(first.map(unit => unit.id), second.map(unit => unit.id));
+  assert.equal(first[0].sourceId, 'DOI:10.1000/example');
+  assert.equal(first[0].locator, '/results/0');
+  const check = f.store.recordCheck({verificationId: f.bundle.verificationId, artifactId: f.bundle.artifacts[0].id, operation: 'exists', executedAt: '2026-10-26T00:00:00.000Z', artifactSha256: f.bundle.artifacts[0].sha256, result: {passed: true}});
+  const checkUnit = resolver.materializeCheck(check);
+  assert.match(checkUnit.id, /^[0-9a-f-]{36}$/);
+  assert.equal(f.store.listEvidenceUnits(f.bundle.verificationId).length, first.length + 1);
 });

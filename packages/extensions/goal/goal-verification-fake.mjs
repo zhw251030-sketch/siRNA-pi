@@ -15,6 +15,9 @@ export function createDeterministicGoalVerifier() {
       const requirements = [];
       const successfulTool = run.bundle.toolReceipts.find(receipt => !receipt.isError);
       const output = run.bundle.artifacts.find(artifact => artifact.kind === 'output');
+      const evidenceUnits = run.evidenceUnits ?? [];
+      const successfulToolEvidence = successfulTool && evidenceUnits.find(unit => unit.method === 'tool_receipt' && unit.sourceUrl === `tool-receipt://${successfulTool.eventId}`);
+      const outputEvidence = output && evidenceUnits.find(unit => unit.method === 'artifact_read' && unit.sourceUrl === `artifact://${output.id}`);
       let allSatisfied = true;
       for (const criterion of run.bundle.acceptanceCriteria) {
         const needsExternal = criterion.requiredEvidence.includes('external');
@@ -28,12 +31,12 @@ export function createDeterministicGoalVerifier() {
           claimIds.push(id);
         } else if (needsExecution) {
           const id = `claim-${criterion.id}-execution`;
-          claims.push({id, category: 'tool_result', importance: 'major', verdict: successfulTool ? 'supported' : 'insufficient_evidence', statement: criterion.text, evidence: successfulTool ? [{evidenceId: `tool:${successfulTool.eventId}`}] : []});
-          claimIds.push(id); if (!successfulTool) allSatisfied = false;
+          claims.push({id, category: 'tool_result', importance: 'major', verdict: successfulToolEvidence ? 'supported' : 'insufficient_evidence', statement: criterion.text, evidence: successfulToolEvidence ? [{evidenceId: successfulToolEvidence.id}] : []});
+          claimIds.push(id); if (!successfulToolEvidence) allSatisfied = false;
         } else if (needsArtifact || output) {
           const id = `claim-${criterion.id}-artifact`;
-          claims.push({id, category: 'artifact', importance: 'major', verdict: output ? 'supported' : 'insufficient_evidence', statement: criterion.text, evidence: output ? [{evidenceId: `artifact:${output.id}`}] : []});
-          claimIds.push(id); if (!output) allSatisfied = false;
+          claims.push({id, category: 'artifact', importance: 'major', verdict: outputEvidence ? 'supported' : 'insufficient_evidence', statement: criterion.text, evidence: outputEvidence ? [{evidenceId: outputEvidence.id}] : []});
+          claimIds.push(id); if (!outputEvidence) allSatisfied = false;
         } else {
           allSatisfied = false;
           const id = `claim-${criterion.id}-independent`;

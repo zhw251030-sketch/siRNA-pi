@@ -14,7 +14,12 @@ export class GoalEvidenceReferenceError extends Error {
 function record(value) { return value && typeof value === 'object' && !Array.isArray(value) ? value : undefined; }
 function text(value) { return typeof value === 'string' && value.trim() ? value.trim() : undefined; }
 
-export function verificationEvidenceUnits(bundle) {
+export function verificationEvidenceUnits(bundle, persisted = []) {
+  if (Array.isArray(persisted) && persisted.length) return persisted.map(unit => ({
+    evidenceId: unit.id, method: unit.method, ...(unit.retrievalId ? {retrievalId: unit.retrievalId} : {}),
+    sourceUrl: unit.sourceUrl, ...(unit.sourceId ? {sourceId: unit.sourceId} : {}), ...(unit.title ? {title: unit.title} : {}),
+    excerpt: unit.excerpt, fetchedAt: unit.fetchedAt, contentSha256: unit.contentSha256, ...(unit.locator ? {locator: unit.locator} : {}),
+  }));
   const units = [];
   for (const artifact of bundle.artifacts ?? []) units.push({
     evidenceId: `artifact:${artifact.id}`, method: 'artifact_read', sourceUrl: `artifact://${artifact.id}`,
@@ -34,11 +39,11 @@ export function verificationEvidenceUnits(bundle) {
   return units;
 }
 
-export function resolveVerificationProposal(bundle, proposal) {
+export function resolveVerificationProposal(bundle, proposal, persistedEvidenceUnits = []) {
   if (!record(proposal) || proposal.protocolVersion !== GOAL_VERIFICATION_REVIEW_PROTOCOL) throw new Error('verifier proposal protocol is invalid');
   if (!['pass', 'fail'].includes(proposal.decision)) throw new Error('verifier proposal decision is invalid');
   if (!Array.isArray(proposal.claims) || !Array.isArray(proposal.requirements)) throw new Error('verifier proposal must contain claims and requirements');
-  const units = new Map(verificationEvidenceUnits(bundle).map(unit => [unit.evidenceId, unit]));
+  const units = new Map(verificationEvidenceUnits(bundle, persistedEvidenceUnits).map(unit => [unit.evidenceId, unit]));
   const findings = [];
   const claims = proposal.claims.map((claim, index) => {
     if (!record(claim) || !text(claim.id) || !Array.isArray(claim.evidence)) throw new Error(`claim ${index + 1} is malformed`);
@@ -59,6 +64,7 @@ export function resolveVerificationProposal(bundle, proposal) {
 
 function methodMatches(run, claim) {
   return claim.evidence.every(evidence => {
+    if (evidence.method === 'retrieval') return Boolean(evidence.retrievalId && evidence.sourceUrl?.startsWith('https://'));
     if (evidence.method === 'artifact_read') return evidence.sourceUrl?.startsWith('artifact://') && run.bundle.artifacts.some(item => `artifact://${item.id}` === evidence.sourceUrl);
     if (evidence.method === 'message_quote') return evidence.sourceUrl?.startsWith('message://') && run.bundle.messages.some(item => `message://${item.id}` === evidence.sourceUrl);
     if (evidence.method === 'tool_receipt') return evidence.sourceUrl?.startsWith('tool-receipt://') && run.bundle.toolReceipts.some(item => `tool-receipt://${item.eventId}` === evidence.sourceUrl);
@@ -110,7 +116,17 @@ export function evaluateVerificationResult(run, result) {
       if (!matched) add('REQUIREMENT_EVIDENCE_CLASS_MISMATCH', `验收项 ${requirement.criterionId} 需要 ${evidenceClass} 类证据。`, {criterionId: requirement.criterionId, evidenceClass});
     }
     const min = criteria.get(requirement.criterionId).minimumExternalSources;
-    if (min) add('EXTERNAL_SOURCE_COVERAGE_INSUFFICIENT', `验收项 ${requirement.criterionId} 要求 ${min} 个外部来源，但当前没有受控检索。`, {criterionId: requirement.criterionId, expectedCount: min, observedCount: 0});
+    if (min) {
+      const sourceIds = new Set();
+      let sourceSpecificClaims = 0;
+      for (const claim of linked) {
+        if (!accepted.has(claim.id) || claim.category !== 'external_fact') continue;
+        const claimSources = new Set((claim.evidence ?? []).filter(evidence => evidence.method === 'retrieval' && evidence.sourceId).map(evidence => evidence.sourceId));
+        if (claimSources.size) { sourceSpecificClaims++; for (const source of claimSources) sourceIds.add(source); }
+      }
+      const observedCount = Math.min(sourceIds.size, sourceSpecificClaims);
+      if (observedCount < min) add('EXTERNAL_SOURCE_COVERAGE_INSUFFICIENT', `验收项 ${requirement.criterionId} 要求至少 ${min} 个独立外部来源，当前可计入 ${observedCount} 个。`, {criterionId: requirement.criterionId, expectedCount: min, observedCount});
+    }
   }
   for (const criterion of criteria.values()) if (!seen.has(criterion.id)) add('MISSING_OBJECTIVE_CRITERION', `未验收目标条目 ${criterion.id}：${criterion.text}`, {criterionId: criterion.id});
   const unique = [...new Map(findings.map(finding => [`${finding.code}\0${finding.criterionId ?? ''}\0${finding.claimId ?? ''}\0${finding.field ?? ''}`, finding])).values()];

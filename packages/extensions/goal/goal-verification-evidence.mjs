@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import {GoalVerificationEvidenceResolver, modelEvidenceUnit} from './goal-verification-evidence-resolver.mjs';
 
 // This first Evidence access layer is deliberately offline. It accepts only
 // a response that was already fetched by a trusted caller and turns it into
@@ -113,31 +114,6 @@ function searchUrl(provider, query, limit) {
   }
   throw new Error('search provider is invalid');
 }
-function resultItems(provider, parsed) {
-  if (provider === 'openalex') return Array.isArray(parsed?.results) ? parsed.results : [];
-  if (provider === 'crossref') return Array.isArray(parsed?.message?.items) ? parsed.message.items : [];
-  return Array.isArray(parsed?.resultList?.result) ? parsed.resultList.result : [];
-}
-function itemUrl(item) {
-  return typeof item?.doi === 'string' ? (item.doi.startsWith('http') ? item.doi : `https://doi.org/${item.doi}`)
-    : typeof item?.id === 'string' && /^https?:\/\//i.test(item.id) ? item.id
-      : typeof item?.url === 'string' && /^https?:\/\//i.test(item.url) ? item.url : undefined;
-}
-function retrievalUnits(receipt, items) {
-  return items.slice(0, 20).map((item, index) => {
-    const serialized = JSON.stringify(item);
-    const excerpt = serialized.length > MAX_EXCERPT_CHARS ? `${serialized.slice(0, MAX_EXCERPT_CHARS - 1)}…` : serialized;
-    return {
-      evidenceId: `retrieval:${receipt.id}:${index}`,
-      method: 'retrieval',
-      ...(itemUrl(item) ? {sourceUrl: itemUrl(item)} : {}),
-      ...(typeof item?.title === 'string' ? {title: item.title} : typeof item?.display_name === 'string' ? {title: item.display_name} : {}),
-      excerpt,
-      fetchedAt: receipt.fetchedAt,
-      contentSha256: sha256(Buffer.from(excerpt, 'utf8')),
-    };
-  });
-}
 function rows(text) {
   const result = [];
   let row = [], field = '', quoted = false;
@@ -164,9 +140,10 @@ function countExpectation(observed, expected) {
   return {observed, expected: Object.fromEntries(entries.map(key => [key, expected[key]])), passed};
 }
 
-export function createGoalVerificationEvidenceAccess({store, bundles, fetchImpl = globalThis.fetch} = {}) {
+export function createGoalVerificationEvidenceAccess({store, bundles, fetchImpl = globalThis.fetch, resolver} = {}) {
   if (!store || typeof store.get !== 'function' || typeof store.recordRetrieval !== 'function' || !bundles || typeof bundles.readArtifact !== 'function') throw new TypeError('Goal verification evidence access requires store and bundle builder');
   if (typeof fetchImpl !== 'function') throw new TypeError('Goal verification evidence access requires fetch');
+  const evidenceResolver = resolver ?? new GoalVerificationEvidenceResolver(store, bundles);
   const running = verificationId => {
     const run = store.get(verificationId);
     if (!run) throw new Error('verification request not found');
@@ -206,7 +183,7 @@ export function createGoalVerificationEvidenceAccess({store, bundles, fetchImpl 
           detail: `Provider returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`,
           nextAction: 'Retry this provider or use another controlled scholarly provider.'});
       }
-      const evidenceUnits = retrievalUnits(receipt, resultItems(provider, parsed));
+      const evidenceUnits = evidenceResolver.materializeRetrieval(receipt).map(modelEvidenceUnit);
       const {responseText: _storedResponse, ...metadata} = receipt;
       return {...metadata, evidenceUnits, resultCount: evidenceUnits.length, evidenceStatus: evidenceUnits.length ? 'available' : 'not_found'};
     },
@@ -218,9 +195,7 @@ export function createGoalVerificationEvidenceAccess({store, bundles, fetchImpl 
       const receipt = store.recordRetrieval({verificationId, kind: 'fetch', provider: new URL(retrieved.url).hostname,
         sourceUrl: retrieved.url, fetchedAt: retrieved.fetchedAt,
         ...(retrieved.contentType ? {contentType: retrieved.contentType} : {}), responseText: retrieved.responseText});
-      const excerpt = retrieved.responseText.length > MAX_EXCERPT_CHARS ? `${retrieved.responseText.slice(0, MAX_EXCERPT_CHARS - 1)}…` : retrieved.responseText;
-      const evidenceUnits = excerpt ? [{evidenceId: `retrieval:${receipt.id}:0`, method: 'retrieval', sourceUrl: receipt.sourceUrl,
-        excerpt, fetchedAt: receipt.fetchedAt, contentSha256: sha256(Buffer.from(excerpt, 'utf8'))}] : [];
+      const evidenceUnits = evidenceResolver.materializeRetrieval(receipt).map(modelEvidenceUnit);
       const {responseText: _storedResponse, ...metadata} = receipt;
       return {...metadata, evidenceUnits, evidenceStatus: evidenceUnits.length ? 'available' : 'not_found'};
     },
@@ -253,9 +228,9 @@ export function createGoalVerificationEvidenceAccess({store, bundles, fetchImpl 
         catch (error) { result = {passed: false, error: error instanceof Error ? error.message : String(error)}; }
       }
       const check = store.recordCheck({verificationId, artifactId, operation, executedAt: new Date().toISOString(), artifactSha256: artifact.sha256, result});
-      const evidence = {evidenceId: `check:${check.id}`, method: 'deterministic_check', sourceUrl: `check://${check.id}`, title: `${operation} on ${artifact.name}`, excerpt: JSON.stringify(result), fetchedAt: check.executedAt, contentSha256: check.resultSha256};
-      return {check, evidence};
+      return {check, evidence: modelEvidenceUnit(evidenceResolver.materializeCheck(check))};
     },
+    resolver: evidenceResolver,
     limits: {maxRetrievalBytes: MAX_RETRIEVAL_BYTES, maxExcerptChars: MAX_EXCERPT_CHARS, maxRedirects: MAX_REDIRECTS, allowedHosts: [...allowedHosts]},
   };
 }

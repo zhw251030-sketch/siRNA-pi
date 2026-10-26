@@ -1,8 +1,12 @@
 # siRNA-pi 协作规则
 
-## 最新完成：第13C-G步（2026-10-26）
+## 最新完成：第13C-H步（2026-10-26）
 
-已在13C-F访问服务上增加受控学术 search/fetch：`goal-verification-evidence.mjs` 只允许固定 HTTPS allowlist，GET、最多3次手动重定向和1.5MB流式响应上限；OpenAlex/Crossref/Europe PMC 使用固定查询 URL，404与provider错误分类处理，receipt 保存完整响应但返回 verifier 的结果去掉 `responseText`。`goal-verification-access.mjs` 和 `apps/api/router.mjs` 接入 token-scoped search/fetch。新增 fake-fetch 边界测试已通过；本轮没有真实网络或模型调用。持久 Evidence Resolver、attempt、真实 Agent Compose verifier 仍未接入，下一步是 Evidence Resolver。详见 `docs/47-受控学术检索与来源抓取.md`。
+已在13C-G受控 search/fetch 上增加 `goal-verification-evidence-resolver.mjs` 和 `verification_evidence_units` 表。Resolver 为 bundle、message、artifact、tool receipt、retrieval、deterministic check 生成随机 UUID evidence unit，按 `(verificationId,dedupeKey)` 幂等重放；`goal-verification-coordinator.mjs` 在 running 后预建 inventory，`goal-verification-policy.mjs` 解析当前验证的持久 evidenceId，确定性假 verifier 也已改用后端 ID。完整 `npm test` 为1568项、1552通过、16平台跳过、0失败；本轮没有真实网络或模型调用。完整 attempt/retry feedback、真实 Agent Compose verifier 仍未接入，下一步是 attempt/retry。详见 `docs/48-持久EvidenceResolver与证据单元.md`。
+
+## 历史完成：第13C-G步（2026-10-26）
+
+已在13C-F访问服务上增加受控学术 search/fetch：`goal-verification-evidence.mjs` 只允许固定 HTTPS allowlist，GET、最多3次手动重定向和1.5MB流式响应上限；OpenAlex/Crossref/Europe PMC 使用固定查询 URL，404与provider错误分类处理，receipt 保存完整响应但返回 verifier 的结果去掉 `responseText`。`goal-verification-access.mjs` 和 `apps/api/router.mjs` 接入 token-scoped search/fetch。新增 fake-fetch 边界测试已通过；本轮没有真实网络或模型调用。持久 Evidence Resolver、attempt、真实 Agent Compose verifier 当时仍未接入，随后已在13C-H完成 Resolver。详见 `docs/47-受控学术检索与来源抓取.md`。
 
 ## 历史完成：第13C-F步（2026-10-26）
 

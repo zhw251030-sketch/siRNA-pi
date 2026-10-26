@@ -1,5 +1,6 @@
 import {randomUUID} from 'node:crypto';
 import {resolveVerificationProposal, evaluateVerificationResult} from './goal-verification-policy.mjs';
+import {GoalVerificationEvidenceResolver} from './goal-verification-evidence-resolver.mjs';
 
 const MAX_ATTEMPTS = 3;
 
@@ -12,6 +13,7 @@ export class GoalVerificationCoordinator {
   constructor(goals, store, bundles, verifier, options = {}) {
     if (!goals || !store || !bundles || !verifier || typeof verifier.verify !== 'function') throw new TypeError('GoalVerificationCoordinator requires goals, store, bundles and verifier');
     this.goals = goals; this.store = store; this.bundles = bundles; this.verifier = verifier;
+    this.evidenceResolver = options.evidenceResolver ?? new GoalVerificationEvidenceResolver(store, bundles);
     this.intervalMs = options.intervalMs ?? 1000; this.autoRun = options.autoRun ?? true; this.onTerminal = options.onTerminal;
   }
   start() { if (this.#timer) return; void this.runOnce(); this.#timer = setInterval(() => void this.runOnce(), this.intervalMs); this.#timer.unref?.(); }
@@ -50,12 +52,17 @@ export class GoalVerificationCoordinator {
       // while this verification is running.
       const accessToken = this.store.issueAccessToken();
       active = this.store.begin(id, accessToken);
+      this.evidenceResolver.prepareBundle(active);
+      // The deterministic learning verifier receives the same backend-generated
+      // inventory that a real verifier would obtain through the access service.
+      // Real Agent Compose runs still use token-scoped access methods.
+      active.evidenceUnits = this.evidenceResolver.list(active.id);
       let lastError;
       for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         this.store.startAttempt(id, attempt);
         try {
           const proposal = await this.verifier.verify(active, accessToken);
-          const resolved = resolveVerificationProposal(active.bundle, proposal);
+          const resolved = resolveVerificationProposal(active.bundle, proposal, this.evidenceResolver.list(active.id));
           const evaluation = evaluateVerificationResult(active, resolved);
           this.store.finishAttempt({verificationId: id, attemptNumber: attempt, status: 'accepted', proposal: resolved});
           const completed = this.store.finish(id, evaluation);

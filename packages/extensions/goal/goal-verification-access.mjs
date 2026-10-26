@@ -1,5 +1,6 @@
 const MAX_CONTEXT_CHARS = 16_000;
 const MAX_EVIDENCE_UNITS = 5;
+import {modelEvidenceUnit} from './goal-verification-evidence-resolver.mjs';
 
 function boundedInteger(value, fallback, minimum, maximum, label) {
   if (value === undefined) return fallback;
@@ -81,6 +82,7 @@ export function createGoalVerificationAccess({store, bundles, evidence} = {}) {
   if (!store || typeof store.authorize !== 'function') throw new TypeError('Goal verification access requires a token-aware store');
   if (!bundles || typeof bundles.readArtifact !== 'function') throw new TypeError('Goal verification access requires a bundle builder');
   if (!evidence || typeof evidence.checkArtifact !== 'function') throw new TypeError('Goal verification access requires evidence access');
+  const resolver = evidence.resolver;
 
   const authorize = input => {
     const verificationId = requireString(input?.verificationId, 'verificationId');
@@ -92,7 +94,7 @@ export function createGoalVerificationAccess({store, bundles, evidence} = {}) {
     bundle(input) {
       const run = authorize(input);
       const bundle = redactedBundle(run.bundle);
-      const evidenceUnitCount = (bundle.messages?.length ?? 0)
+      const evidenceUnitCount = resolver ? resolver.prepareBundle(run).length : (bundle.messages?.length ?? 0)
         + (bundle.artifacts?.length ?? 0)
         + (bundle.toolReceipts?.length ?? 0);
       return {
@@ -124,13 +126,16 @@ export function createGoalVerificationAccess({store, bundles, evidence} = {}) {
       const message = (run.bundle.messages ?? []).find(item => item.id === messageId);
       if (!message) throw new Error('message does not belong to this verification bundle');
       const window = sliceText(message.content ?? '', input?.offset, input?.maxChars);
+      const unit = resolver
+        ? resolver.materializeMessage(run, message.id, window.content, `chars:${window.offset}-${window.nextOffset}`)
+        : messageEvidence(message, window.content, window.offset, window.nextOffset);
       return {
         message: {
           id: message.id, role: message.role, sequence: message.sequence, status: message.status,
           createdAt: message.createdAt, sha256: message.sha256, contentCharacters: message.content.length,
         },
         ...window,
-        evidenceUnits: [messageEvidence(message, window.content, window.offset, window.nextOffset)],
+        evidenceUnits: [resolver ? modelEvidenceUnit(unit) : unit],
       };
     },
 
@@ -145,19 +150,24 @@ export function createGoalVerificationAccess({store, bundles, evidence} = {}) {
       try { content = new TextDecoder('utf-8', {fatal: true}).decode(data); }
       catch { return {artifact, encoding: 'binary', metadataOnly: true}; }
       const window = sliceText(content, input?.offset, input?.maxChars);
+      const unit = resolver
+        ? resolver.materializeArtifact(run, artifact.id, window.content, `chars:${window.offset}-${window.nextOffset}`)
+        : artifactEvidence(artifact, window.content, window.offset, window.nextOffset);
       return {
         artifact,
         encoding: 'utf8',
         ...window,
-        evidenceUnits: [artifactEvidence(artifact, window.content, window.offset, window.nextOffset)],
+        evidenceUnits: [resolver ? modelEvidenceUnit(unit) : unit],
       };
     },
 
     evidence(input) {
       const run = authorize(input);
+      if (resolver) resolver.prepareBundle(run);
+      const persisted = resolver ? resolver.list(run.id).map(modelEvidenceUnit) : [];
       const retrievals = typeof store.listRetrievals === 'function' ? store.listRetrievals(run.id) : [];
       const checks = typeof store.listChecks === 'function' ? store.listChecks(run.id) : [];
-      const units = [
+      const units = resolver ? persisted : [
         ...(run.bundle.messages ?? []).map(message => ({evidenceId: `message:${message.id}`, method: 'message_quote', sourceUrl: `message://${message.id}`, contentCharacters: message.content.length})),
         ...(run.bundle.artifacts ?? []).map(artifact => ({evidenceId: `artifact:${artifact.id}`, method: 'artifact_read', sourceUrl: `artifact://${artifact.id}`, title: artifact.name, contentSha256: artifact.sha256})),
         ...(run.bundle.toolReceipts ?? []).map(receipt => ({evidenceId: `tool:${receipt.eventId}`, method: 'tool_receipt', toolName: receipt.toolName, resultSha256: receipt.resultSha256})),

@@ -88,7 +88,26 @@ export class GoalVerificationStore {
         artifact_sha256 TEXT NOT NULL,
         result_json TEXT NOT NULL,
         result_sha256 TEXT NOT NULL
-      );`);
+      );
+      CREATE TABLE IF NOT EXISTS verification_evidence_units (
+        id TEXT PRIMARY KEY NOT NULL,
+        verification_id TEXT NOT NULL REFERENCES verification_runs(id) ON DELETE CASCADE,
+        method TEXT NOT NULL,
+        retrieval_id TEXT,
+        source_url TEXT NOT NULL,
+        source_id TEXT,
+        title TEXT,
+        excerpt TEXT NOT NULL,
+        fetched_at TEXT NOT NULL,
+        content_sha256 TEXT NOT NULL,
+        locator TEXT,
+        dedupe_key TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(verification_id, dedupe_key)
+      );
+      CREATE INDEX IF NOT EXISTS verification_evidence_units_idx
+        ON verification_evidence_units(verification_id, created_at, id)
+      `);
     const runColumns = new Set(this.#db.prepare('PRAGMA table_info(verification_runs)').all().map(row => row.name));
     if (!runColumns.has('access_token_sha256')) this.#db.exec('ALTER TABLE verification_runs ADD COLUMN access_token_sha256 TEXT');
   }
@@ -241,5 +260,49 @@ export class GoalVerificationStore {
   listChecks(verificationId) {
     checkId(verificationId);
     return this.#db.prepare('SELECT id FROM verification_checks WHERE verification_id=? ORDER BY executed_at,id').all(verificationId).map(row => this.getCheck(row.id, verificationId));
+  }
+  recordEvidenceUnit({verificationId, method, retrievalId, sourceUrl, sourceId, title, excerpt, fetchedAt, contentSha256, locator, dedupeKey} = {}) {
+    checkId(verificationId); this.#running(verificationId);
+    if (!['retrieval', 'artifact_read', 'message_quote', 'tool_receipt', 'deterministic_check'].includes(method)) fail('evidence method is invalid');
+    const url = text(sourceUrl, 'evidence sourceUrl', 4000);
+    const body = text(excerpt, 'evidence excerpt', 16_000);
+    const fetched = text(fetchedAt, 'evidence fetchedAt', 100);
+    const key = text(dedupeKey, 'evidence dedupeKey', 1000);
+    hash(contentSha256, 'evidence contentSha256');
+    if (retrievalId !== undefined) checkId(retrievalId, 'retrievalId');
+    const id = randomUUID();
+    this.#db.prepare(`INSERT OR IGNORE INTO verification_evidence_units
+      (id, verification_id, method, retrieval_id, source_url, source_id, title, excerpt, fetched_at, content_sha256, locator, dedupe_key, created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      id, verificationId, method, retrievalId ?? null, url,
+      sourceId === undefined ? null : text(sourceId, 'evidence sourceId', 500),
+      title === undefined ? null : text(title, 'evidence title', 1000), body, fetched,
+      contentSha256.toLowerCase(), locator === undefined ? null : text(locator, 'evidence locator', 1000), key, now(),
+    );
+    const stored = this.#db.prepare('SELECT * FROM verification_evidence_units WHERE verification_id=? AND dedupe_key=?').get(verificationId, key);
+    if (!stored) fail('evidence unit could not be persisted');
+    return {
+      id: stored.id, verificationId: stored.verification_id, method: stored.method,
+      ...(stored.retrieval_id ? {retrievalId: stored.retrieval_id} : {}), sourceUrl: stored.source_url,
+      ...(stored.source_id ? {sourceId: stored.source_id} : {}), ...(stored.title ? {title: stored.title} : {}),
+      excerpt: stored.excerpt, fetchedAt: stored.fetched_at, contentSha256: stored.content_sha256,
+      ...(stored.locator ? {locator: stored.locator} : {}), dedupeKey: stored.dedupe_key, createdAt: stored.created_at,
+    };
+  }
+  getEvidenceUnit(id, verificationId) {
+    checkId(id, 'evidenceId'); checkId(verificationId);
+    const row = this.#db.prepare('SELECT * FROM verification_evidence_units WHERE id=? AND verification_id=?').get(id, verificationId);
+    if (!row) return undefined;
+    return {
+      id: row.id, verificationId: row.verification_id, method: row.method,
+      ...(row.retrieval_id ? {retrievalId: row.retrieval_id} : {}), sourceUrl: row.source_url,
+      ...(row.source_id ? {sourceId: row.source_id} : {}), ...(row.title ? {title: row.title} : {}),
+      excerpt: row.excerpt, fetchedAt: row.fetched_at, contentSha256: row.content_sha256,
+      ...(row.locator ? {locator: row.locator} : {}), dedupeKey: row.dedupe_key, createdAt: row.created_at,
+    };
+  }
+  listEvidenceUnits(verificationId) {
+    checkId(verificationId);
+    return this.#db.prepare('SELECT id FROM verification_evidence_units WHERE verification_id=? ORDER BY created_at,id').all(verificationId).map(row => this.getEvidenceUnit(row.id, verificationId));
   }
 }
