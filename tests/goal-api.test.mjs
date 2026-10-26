@@ -117,7 +117,7 @@ test('token-scoped verification access uses POST-only route and binds the path i
   const mismatch = await fetch(`${f.base}/v1/goal-verifications/${verificationId}/bundle`, {
     method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({verificationId: randomUUID(), accessToken: 'access-token-for-test'}),
   });
-  assert.equal(mismatch.status, 404);
+  assert.equal(mismatch.status, 400);
   const get = await fetch(`${f.base}/v1/goal-verifications/${verificationId}/bundle`);
   assert.equal(get.status, 405);
 });

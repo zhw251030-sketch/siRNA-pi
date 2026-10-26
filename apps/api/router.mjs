@@ -194,7 +194,7 @@ export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolM
       if (goalRoute && goalApi) {
         return goalApi.handle(request, response, goalRoute[1]);
       }
-      const goalVerificationAccessRoute = /^\/v1\/goal-verifications\/([^/]+)\/(bundle|message|artifact|evidence|check)$/.exec(pathname);
+      const goalVerificationAccessRoute = /^\/v1\/goal-verifications\/([0-9a-f-]{36})\/(bundle|message|artifact|evidence|check)$/.exec(pathname);
       if (goalVerificationAccessRoute) {
         if (!goalVerification?.access) return reply(response, 503, {error: 'Goal 验证访问服务尚未配置。'});
         if (request.method !== 'POST') {
@@ -214,7 +214,7 @@ export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolM
           const message = error instanceof Error ? error.message : String(error);
           const status = Number.isInteger(error?.statusCode) ? error.statusCode
             : /token|expired/i.test(message) ? 403
-              : /not found|does not belong|does not match/i.test(message) ? 404 : 400;
+              : /not found|does not belong/i.test(message) ? 404 : 400;
           return reply(response, status, {error: message});
         }
       }

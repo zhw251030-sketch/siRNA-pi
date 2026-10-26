@@ -92,13 +92,22 @@ export function createGoalVerificationAccess({store, bundles, evidence} = {}) {
     bundle(input) {
       const run = authorize(input);
       const bundle = redactedBundle(run.bundle);
+      const evidenceUnitCount = (bundle.messages?.length ?? 0)
+        + (bundle.artifacts?.length ?? 0)
+        + (bundle.toolReceipts?.length ?? 0);
       return {
+        // Keep the protocol fields at the top level like the reference
+        // Access Service. The nested copy is retained for this learning
+        // repository's first direct callers and can be removed at a later
+        // compatibility boundary.
+        ...bundle,
         verificationId: run.id,
         taskId: run.taskId,
         goalId: run.goalId,
         goalRevision: run.goalRevision,
         trigger: run.trigger,
         status: run.status,
+        evidenceUnitCount,
         bundle,
         contentAccess: {
           messages: 'Use message with messageId, offset and maxChars.',

@@ -129,7 +129,7 @@ export class GoalVerificationStore {
     if (typeof accessToken !== 'string' || accessToken.length < 20 || accessToken.length > 200) fail('access token is invalid');
     return this.#transaction(() => {
       const current = this.get(id); if (!current) fail('verification request not found');
-      if (!current.bundle) fail('verification bundle is missing');
+      if (!current.bundle?.bundleSha256) fail('verification bundle is missing or incomplete');
       if (!['pending', 'running'].includes(current.status)) fail(`verification request is ${current.status}`);
       this.#db.prepare("UPDATE verification_runs SET status='running', access_token_sha256=?, updated_at=?, error=NULL WHERE id=? AND status IN ('pending','running')")
         .run(sha256(accessToken), now(), id);
@@ -178,14 +178,14 @@ export class GoalVerificationStore {
     const actual = sha256(accessToken);
     if (typeof expected !== 'string' || expected.length !== actual.length || !timingSafeEqual(Buffer.from(expected), Buffer.from(actual))) fail('verification access token is invalid or expired');
     const run = this.get(id);
-    if (!run?.bundle) fail('verification bundle is missing');
+    if (!run?.bundle?.bundleSha256) fail('verification bundle is missing or incomplete');
     return run;
   }
   #running(id) {
     const run = this.get(id);
     if (!run) fail('verification request not found');
     if (run.status !== 'running') fail(`verification request is ${run.status}`);
-    if (!run.bundle) fail('verification bundle is missing');
+    if (!run.bundle?.bundleSha256) fail('verification bundle is missing or incomplete');
     return run;
   }
   recordRetrieval({verificationId, kind, provider, query, sourceUrl, fetchedAt, contentType, responseText} = {}) {
