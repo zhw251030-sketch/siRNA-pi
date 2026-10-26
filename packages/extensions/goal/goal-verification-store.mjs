@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {createHash, randomUUID} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -7,9 +8,18 @@ const statuses = new Set(['waiting', 'pending', 'running', 'passed', 'failed', '
 const triggers = new Set(['completion_request', 'checkpoint']);
 const now = () => new Date().toISOString();
 const fail = message => { throw new Error(message); };
+const sha256 = value => createHash('sha256').update(value).digest('hex');
+const canonical = value => {
+  if (value === undefined || value === null) return JSON.stringify(value ?? null);
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (typeof value === 'object') return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`;
+  return JSON.stringify(value);
+};
+const hashJson = value => sha256(canonical(value));
 function checkId(value, label = 'verificationId') { if (typeof value !== 'string' || !uuid.test(value)) fail(`${label} must be a UUID v4`); return value; }
 function text(value, label, max = 8000) { if (typeof value !== 'string' || !value.trim() || value.length > max || /[\u0000-\u001f\u007f]/.test(value)) fail(`${label} must be bounded text`); return value.replace(/\s+/g, ' ').trim(); }
 function json(value) { return value == null ? undefined : JSON.parse(value); }
+function hash(value, label = 'sha256') { if (typeof value !== 'string' || !/^[a-f0-9]{64}$/i.test(value)) fail(`${label} must be a SHA-256 hex digest`); return value.toLowerCase(); }
 function record(row) {
   if (!row) return undefined;
   return {
@@ -54,6 +64,29 @@ export class GoalVerificationStore {
         status TEXT NOT NULL CHECK(status IN ('running','accepted','error')),
         proposal_json TEXT, diagnostics TEXT, created_at TEXT NOT NULL, completed_at TEXT,
         PRIMARY KEY(verification_id, attempt_number)
+      );
+      CREATE TABLE IF NOT EXISTS verification_retrievals (
+        id TEXT PRIMARY KEY NOT NULL,
+        verification_id TEXT NOT NULL REFERENCES verification_runs(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK(kind IN ('search','fetch')),
+        provider TEXT NOT NULL,
+        query TEXT,
+        source_url TEXT NOT NULL,
+        fetched_at TEXT NOT NULL,
+        content_type TEXT,
+        content_sha256 TEXT NOT NULL,
+        response_text TEXT NOT NULL,
+        UNIQUE(verification_id, kind, source_url, content_sha256)
+      );
+      CREATE TABLE IF NOT EXISTS verification_checks (
+        id TEXT PRIMARY KEY NOT NULL,
+        verification_id TEXT NOT NULL REFERENCES verification_runs(id) ON DELETE CASCADE,
+        artifact_id TEXT NOT NULL,
+        operation TEXT NOT NULL CHECK(operation IN ('exists','text_stats','json_valid','json_array_length','csv_row_count')),
+        executed_at TEXT NOT NULL,
+        artifact_sha256 TEXT NOT NULL,
+        result_json TEXT NOT NULL,
+        result_sha256 TEXT NOT NULL
       );`);
   }
   close() { if (this.#db) { this.#db.close(); this.#db = undefined; } }
@@ -131,4 +164,65 @@ export class GoalVerificationStore {
     return this.listAttempts(verificationId).find(item => item.attemptNumber === attemptNumber);
   }
   listAttempts(id) { checkId(id); return this.#db.prepare('SELECT * FROM verification_attempts WHERE verification_id=? ORDER BY attempt_number').all(id).map(attemptRecord); }
+  #running(id) {
+    const run = this.get(id);
+    if (!run) fail('verification request not found');
+    if (run.status !== 'running') fail(`verification request is ${run.status}`);
+    if (!run.bundle) fail('verification bundle is missing');
+    return run;
+  }
+  recordRetrieval({verificationId, kind, provider, query, sourceUrl, fetchedAt, contentType, responseText} = {}) {
+    checkId(verificationId);
+    this.#running(verificationId);
+    if (!['search', 'fetch'].includes(kind)) fail('retrieval kind is invalid');
+    const providerText = text(provider, 'retrieval provider', 100);
+    const url = text(sourceUrl, 'retrieval sourceUrl', 4000);
+    const fetched = text(fetchedAt, 'retrieval fetchedAt', 100);
+    if (typeof responseText !== 'string' || Buffer.byteLength(responseText, 'utf8') > 1_500_000) fail('retrieval response exceeds 1500000 bytes');
+    const id = randomUUID();
+    const contentSha256 = sha256(Buffer.from(responseText, 'utf8'));
+    this.#db.prepare(`INSERT OR IGNORE INTO verification_retrievals
+      (id, verification_id, kind, provider, query, source_url, fetched_at, content_type, content_sha256, response_text)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`).run(id, verificationId, kind, providerText, query === undefined ? null : text(query, 'retrieval query', 1000), url, fetched, contentType === undefined ? null : text(contentType, 'retrieval contentType', 200), contentSha256, responseText);
+    const stored = this.#db.prepare('SELECT * FROM verification_retrievals WHERE verification_id=? AND kind=? AND source_url=? AND content_sha256=?').get(verificationId, kind, url, contentSha256);
+    if (!stored) fail('retrieval receipt could not be persisted');
+    return {
+      id: stored.id, verificationId: stored.verification_id, kind: stored.kind, provider: stored.provider,
+      ...(stored.query ? {query: stored.query} : {}), sourceUrl: stored.source_url, fetchedAt: stored.fetched_at,
+      ...(stored.content_type ? {contentType: stored.content_type} : {}), contentSha256: stored.content_sha256,
+      responseText: stored.response_text,
+    };
+  }
+  getRetrieval(id, verificationId) {
+    checkId(id); checkId(verificationId);
+    const row = this.#db.prepare('SELECT * FROM verification_retrievals WHERE id=? AND verification_id=?').get(id, verificationId);
+    if (!row) return undefined;
+    return {id: row.id, verificationId: row.verification_id, kind: row.kind, provider: row.provider,
+      ...(row.query ? {query: row.query} : {}), sourceUrl: row.source_url, fetchedAt: row.fetched_at,
+      ...(row.content_type ? {contentType: row.content_type} : {}), contentSha256: row.content_sha256, responseText: row.response_text};
+  }
+  listRetrievals(verificationId) {
+    checkId(verificationId);
+    return this.#db.prepare('SELECT id FROM verification_retrievals WHERE verification_id=? ORDER BY fetched_at,id').all(verificationId).map(row => this.getRetrieval(row.id, verificationId));
+  }
+  recordCheck({verificationId, artifactId, operation, executedAt, artifactSha256, result} = {}) {
+    checkId(verificationId); this.#running(verificationId); text(artifactId, 'artifactId', 500); text(executedAt, 'executedAt', 100); hash(artifactSha256, 'artifactSha256');
+    if (!['exists', 'text_stats', 'json_valid', 'json_array_length', 'csv_row_count'].includes(operation)) fail('check operation is invalid');
+    if (!result || typeof result !== 'object' || Array.isArray(result)) fail('check result must be an object');
+    const check = {id: randomUUID(), verificationId, artifactId, operation, executedAt, artifactSha256: artifactSha256.toLowerCase(), result, resultSha256: hashJson(result)};
+    this.#db.prepare(`INSERT INTO verification_checks
+      (id, verification_id, artifact_id, operation, executed_at, artifact_sha256, result_json, result_sha256)
+      VALUES (?,?,?,?,?,?,?,?)`).run(check.id, verificationId, artifactId, operation, executedAt, check.artifactSha256, JSON.stringify(result), check.resultSha256);
+    return check;
+  }
+  getCheck(id, verificationId) {
+    checkId(id); checkId(verificationId);
+    const row = this.#db.prepare('SELECT * FROM verification_checks WHERE id=? AND verification_id=?').get(id, verificationId);
+    if (!row) return undefined;
+    return {id: row.id, verificationId: row.verification_id, artifactId: row.artifact_id, operation: row.operation, executedAt: row.executed_at, artifactSha256: row.artifact_sha256, result: JSON.parse(row.result_json), resultSha256: row.result_sha256};
+  }
+  listChecks(verificationId) {
+    checkId(verificationId);
+    return this.#db.prepare('SELECT id FROM verification_checks WHERE verification_id=? ORDER BY executed_at,id').all(verificationId).map(row => this.getCheck(row.id, verificationId));
+  }
 }

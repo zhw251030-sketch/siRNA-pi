@@ -2,6 +2,7 @@ import path from 'node:path';
 import {GoalVerificationStore} from './goal-verification-store.mjs';
 import {GoalVerificationBundleBuilder} from './goal-verification-bundle.mjs';
 import {GoalVerificationCoordinator} from './goal-verification-coordinator.mjs';
+import {createGoalVerificationEvidenceAccess} from './goal-verification-evidence.mjs';
 
 // The reference project creates this optional extension beside the Goal API.
 // Keeping construction here means the ordinary task service can remain unaware
@@ -13,6 +14,7 @@ export function createGoalVerificationRuntime({root, taskStore, workspaceFiles, 
     workspaceFiles,
     snapshotRoot: path.join(root, 'runtime', 'goal-verifications'),
   });
+  const evidence = createGoalVerificationEvidenceAccess({store, bundles});
   const coordinator = new GoalVerificationCoordinator(goalStore, store, bundles, verifier, {autoRun});
   const port = {
     request: (goal, trigger = 'completion_request') => coordinator.request(goal, trigger),
@@ -22,5 +24,5 @@ export function createGoalVerificationRuntime({root, taskStore, workspaceFiles, 
       return run?.taskId === taskId ? run : undefined;
     },
   };
-  return {store, bundles, coordinator, port, start: () => coordinator.start(), stop: () => coordinator.stop(), close: () => store.close()};
+  return {store, bundles, evidence, coordinator, port, start: () => coordinator.start(), stop: () => coordinator.stop(), close: () => store.close()};
 }
