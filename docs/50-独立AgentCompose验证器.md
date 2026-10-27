@@ -1,6 +1,6 @@
-# 第 13C-J 步：独立 Agent Compose Verifier 的离线接线
+# 第 13C-J 步：独立 Agent Compose Verifier 的真实接线与 Goal 验收
 
-日期：2026-10-27。
+日期：2026-10-27。离线接线、内部网络回环和一次受控真实 MiniMax 验收均已完成。
 
 ## 这一步解决什么问题
 
@@ -52,9 +52,9 @@
 - `SIRNA_GOAL_VERIFICATION=deterministic`：使用本地确定性 verifier，继续作为离线回归路径；
 - `SIRNA_GOAL_VERIFICATION=agent-compose`：创建独立 `goal-verifier` runtime，并使用上面的 Agent Compose adapter。
 
-本轮还要处理一个与原仓库不同的部署适配：本项目的 API 进程在宿主机上，不能让 verifier guest 访问 guest 自己的 `127.0.0.1`。因此 `apps/api/bootstrap.mjs` 在显式设置 `SIRNA_GOAL_VERIFIER_API_HOST` 时，保留网页用的 `127.0.0.1:3000`，并复用同一个请求处理器在 Docker 私有网桥地址上开启第二个内部端口（默认 `172.18.0.1:3001`）。路由只额外允许这个明确的内部 host；没有设置环境变量时不会开启第二监听器。
+本轮还要处理一个与原仓库不同的部署适配：本项目的 API 进程在宿主机上，不能让 verifier guest 访问 guest 自己的 `127.0.0.1`。因此 `apps/api/bootstrap.mjs` 在显式设置 `SIRNA_GOAL_VERIFIER_API_HOST` 时，保留网页用的 `127.0.0.1:3000`，并复用同一个请求处理器在 Docker 私有网桥地址上开启第二个内部端口（默认 `172.18.0.1:3001`）。远端验收时按用户确认绑定到 `192.168.1.169:3001`；路由只额外允许这个明确的内部 host，没有把网页 API 暴露到服务器外网。
 
-远端启动入口是 `sh scripts/start-project-web-agent-compose.sh`。它设置 `SIRNA_GOAL_VERIFICATION=agent-compose`、内部网桥地址和端口；`agent-compose.yml` 中 verifier MCP 使用 `http://172.18.0.1:3001`。这相当于原仓库中 verifier 访问同一 Compose 网络内 `sirna-agent` 服务的效果，但没有把网页 API 暴露到服务器外网。若 Docker 网络被重新创建，应先用 `sh scripts/project-docker.sh network inspect sirna-pi_default` 读取新的 Gateway，再通过 `SIRNA_GOAL_VERIFIER_API_HOST` 覆盖默认值。
+远端启动入口是 `sh scripts/start-project-web-agent-compose.sh`。它设置 `SIRNA_GOAL_VERIFICATION=agent-compose`、内部地址和端口；`agent-compose.yml` 中 verifier MCP 使用 `http://192.168.1.169:3001`。这相当于原仓库中 verifier 访问同一 Compose 网络内 `sirna-agent` 服务的效果，但没有把网页 API 暴露到服务器外网。若 Docker 网络被重新创建，应先读取新的可达地址，再通过 `SIRNA_GOAL_VERIFIER_API_HOST` 覆盖默认值。
 
 ## 验收结果
 
@@ -65,4 +65,4 @@
 - `apps/mcp/goal-verifier.mjs`：实际 MCP stdio server；
 - `agent-compose.yml`、guest Dockerfile、`pi.sh`：独立 verifier profile 的静态接线。
 
-定向运行结果为 29 项测试，28 项通过，1 项 Windows 平台跳过，0 项失败；新增的内部 listener 测试证明同一 API handler 可以安全复用且仍执行 host 白名单。远端已完成 guest 镜像构建、管理容器重建和配置发现；下一步是启动上述内部 API listener，使用 verifier guest 做无模型网络/MCP 回环验收，再决定是否进行一次受控 MiniMax verifier 请求。这一步不应与已有 designer 任务混用。
+定向离线测试、内部 listener 测试和策略回归全部通过；最新完整 `npm test` 为 1592 项，1576 通过、16 项 Windows 平台跳过、0 失败。远端真实 Goal `55426f18-22b1-4088-99ac-eb7378a58149` 经历了证据解析修复、确定性检查策略修复和 JSON 协议提示修复，最终 Verification `398b298e-63c0-49b8-aa39-3a4027b5138b` 为 `passed`，Goal 状态为 `complete`。这证明了独立容器、内部网络、MCP 工具回执、冻结证据和独立完成门控的最小真实闭环；下一步应把同一链路用于真实文件产出、受控检索和失败后修订场景。
