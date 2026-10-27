@@ -11,6 +11,7 @@ import { RuntimeRouter } from "../../packages/agent-runtime/runtime-router.mjs";
 import { TaskStore } from "../../packages/task-core/task-store.mjs";
 import { TaskFiles } from "../../packages/task-core/task-files.mjs";
 import { createAppServer } from "./router.mjs";
+import { createGoalVerifierInternalHandler } from "./goal-verifier-internal-listener.mjs";
 import { createToolCallLeases } from "../../packages/capability-platform/tool-call-leases.mjs";
 import { discoverApprovedTools } from "../../packages/capability-platform/tool-approved-execution.mjs";
 import { createDockerValidationRunner } from "../../packages/capability-platform/tool-validation-runner.mjs";
@@ -143,7 +144,7 @@ if (internalApiHost !== undefined && (!/^[A-Za-z0-9.-]+$/.test(internalApiHost) 
 const server = createAppServer({ taskStore, agentRuntime, workspaceFiles, taskMessages, goalStore, goalVerification, toolMaintenance, toolApproval, toolRepair, toolCurationPreview, toolCuration, toolCurationBuild, toolCurationCoordinator,
   ...(internalApiHost ? {allowedHosts: [internalApiHost]} : {}) });
 const internalApiServer = goalVerificationMode === 'agent-compose' && internalApiHost
-  ? createServer(server.requestHandler)
+  ? createServer(createGoalVerifierInternalHandler(server.requestHandler))
   : undefined;
 if (internalApiServer) {
   internalApiServer.requestTimeout = 15000;
