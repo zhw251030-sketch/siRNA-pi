@@ -6,7 +6,7 @@
 
 ## 当前进度
 
-最新：第13C-J步已完成独立 Agent Compose verifier 的真实网络、文件产出与 Goal 验收。远端 verifier 容器通过 `192.168.1.169:3001` 调用内部健康工具并验证真实 `result.json` 输出；工具回执、冻结 artifact、deterministic check 和 Goal revision 门控均已真实通过。本轮还按原仓库补齐 `deterministic_check` 证据策略和非 JSON verifier 输出的 `protocol_failed` 重试路径。详见 [独立 Agent Compose 验证器](docs/50-独立AgentCompose验证器.md) 和 [真实网络验收记录](docs/analysis/2026-10-27-agent-compose-goal-verifier-network.md)。
+最新：第13C-J步已完成独立 Agent Compose verifier 的真实网络、文件产出与 Goal 验收。随后进行的13C-K受控外部检索实验已验证 OpenAlex/Europe PMC retrieval receipt 能被独立 verifier 真实取得，并暴露执行 Agent 尚未拥有学术检索工具、以及模型没有稳定把 retrieval evidenceId 写入 external claim 的边界；策略正确拒绝未完成证据绑定的 Goal。详见 [独立 Agent Compose 验证器](docs/50-独立AgentCompose验证器.md)、[真实网络验收记录](docs/analysis/2026-10-27-agent-compose-goal-verifier-network.md) 和 [受控外部检索 Goal 记录](docs/analysis/2026-10-27-controlled-retrieval-goal.md)。
 
 上一阶段第12F步完成持久化 approval job/worker 与协调器、bootstrap、生命周期和 HTTP 入队整合。默认 `SIRNA_AUTOMATIC_APPROVAL=0`，只有明确设置为 `1` 才允许自动入队；HTTP 和 coordinator 不直接调用批准服务，worker 才调用可信的 `approveRegisteredToolProposal`，并以 durable terminal 推进 `completed`/`failed`。个人仓库使用独立 `runtime/tool-approval/jobs.sqlite`，参考仓库使用共享 registry maintenance queue；职责边界一致、存储布局不同。机制和差异见 [自动批准边界](docs/38-自动批准边界.md)。
 
