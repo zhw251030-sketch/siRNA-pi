@@ -6,7 +6,7 @@
 
 ## 当前进度
 
-最新：第13C-J步已完成独立 Agent Compose verifier 的真实网络、文件产出与 Goal 验收。随后进行的13C-K受控外部检索实验已验证 OpenAlex/Europe PMC retrieval receipt 能被独立 verifier 真实取得，并暴露执行 Agent 尚未拥有学术检索工具、以及模型没有稳定把 retrieval evidenceId 写入 external claim 的边界；策略正确拒绝未完成证据绑定的 Goal。详见 [独立 Agent Compose 验证器](docs/50-独立AgentCompose验证器.md)、[真实网络验收记录](docs/analysis/2026-10-27-agent-compose-goal-verifier-network.md) 和 [受控外部检索 Goal 记录](docs/analysis/2026-10-27-controlled-retrieval-goal.md)。
+最新：第13C-J步已完成独立 Agent Compose verifier 的真实网络、文件产出与 Goal 验收；第13C-K暴露了执行 Agent 缺少学术检索工具和外部证据绑定不稳定的问题；第13C-L已把参考仓库的 Goal 反馈续跑链路接入实际网页服务。现在验证失败会持久化反馈，由 `GoalCoordinator` 通过 lease 自动派发下一轮 Agent；policy 同时修复了合法 retrieval evidence 被误判的问题，并补齐来源计数和证据类别回放。服务器已真实重启验收，历史检索 Goal 的反馈续跑成功触发；由于执行侧工具缺口，旧实验已暂停，未声称业务 Goal 完成。详见 [独立 Agent Compose 验证器](docs/50-独立AgentCompose验证器.md)、[受控外部检索 Goal 记录](docs/analysis/2026-10-27-controlled-retrieval-goal.md) 和 [Goal 反馈续跑实时验收](docs/analysis/2026-10-27-goal-coordinator-live.md)。
 
 上一阶段第12F步完成持久化 approval job/worker 与协调器、bootstrap、生命周期和 HTTP 入队整合。默认 `SIRNA_AUTOMATIC_APPROVAL=0`，只有明确设置为 `1` 才允许自动入队；HTTP 和 coordinator 不直接调用批准服务，worker 才调用可信的 `approveRegisteredToolProposal`，并以 durable terminal 推进 `completed`/`failed`。个人仓库使用独立 `runtime/tool-approval/jobs.sqlite`，参考仓库使用共享 registry maintenance queue；职责边界一致、存储布局不同。机制和差异见 [自动批准边界](docs/38-自动批准边界.md)。
 
@@ -60,6 +60,7 @@
 - 2026-10-26：第13C-G步增加受控学术 `search/fetch`。OpenAlex/Crossref/Europe PMC 使用固定 URL，来源只允许 HTTPS allowlist，手动重定向最多3次，响应最多1.5MB；404/provider错误分类，原始 responseText 不返回 verifier。新增 fake-fetch 边界测试，尚未访问真实网络或调用模型。详见 [受控学术检索与来源抓取](docs/47-受控学术检索与来源抓取.md)。
 - 2026-10-26：第13C-H步增加持久 `GoalVerificationEvidenceResolver` 和 `verification_evidence_units` 表。随机 UUID、`(verificationId,dedupeKey)` 去重、检索 JSON locator/sourceId、check/message/artifact 后端物化和 policy 解析均已接通；旧确定性 verifier 改用后端 evidenceId。完整 `npm test` 为1568项、1552通过、16平台跳过、0失败；没有真实网络或模型调用。详见 [持久 EvidenceResolver 与证据单元](docs/48-持久EvidenceResolver与证据单元.md)。
 - 2026-10-26：第13C-I步增加 attempt 表字段、`protocol_failed` 状态、token 脱敏 prompt、raw proposal、阶段诊断和 bounded retry；新增 `/attempt` token-scoped POST 读取接口。未知 evidenceId 的第一次失败可在第二次只修复 `resolve_evidence` 后成功；重启遗留 running attempt 会从下一编号恢复。完整 `npm test` 为1571项、1555通过、16平台跳过、0失败。详见 [验证 Attempt、诊断和阶段重试](docs/49-验证Attempt与阶段重试.md)。
+- 2026-10-27：第13C-L步把 GoalCoordinator 接入实际 Goal API、TaskMessageService、网页服务生命周期和服务器启动；补齐 `isIdle`/`hasPendingUserInput`、反馈续跑、requestId、失败退避和关闭排空。policy 增加 retrieval external claim、artifact 错绑及多来源 source-specific 回放，并修复合法 retrieval claim 的误拒绝。完整 `npm test` 为1598项，1582通过、16平台跳过、0失败；服务器提交 `a964044` 重启后真实恢复历史 Goal 并发送带 verifier feedback 的续跑消息，旧实验随后暂停保留证据。详见 [Goal反馈续跑实时验收](docs/analysis/2026-10-27-goal-coordinator-live.md)。
 - 当前正式工具和六个构建工具均可由新网页任务使用；正式工具保持1.0.1，未批准候选不进入正式目录。独立 verifier 已完成健康接口和真实文件产出的最小闭环；下一步应把同一冻结证据链用于受控学术检索、故意失败→反馈→修订和多 Goal 组合，再评估更复杂的 Curator 与自进化实验。当前受控修订成功不等于自动自进化。原版automation会自动批准，个人保留人工门是范围收紧，批准仍使用可信CLI。CPU配额仍不可用，开机自启未配置。
 
 安装位置、文件解释和验证记录见 [第 1 步 A：安装与运行 Pi](docs/01-安装与运行Pi.md)。服务器项目目录是 `/home/hanwen/Project/project/siNRA-pi/`，按用户指定拼写保留。
