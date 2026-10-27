@@ -50,6 +50,25 @@ function deferred() {
   return { promise, resolve };
 }
 
+test('Goal idle probe confirms Agent Compose workspace state and fails closed on uncertainty', async t => {
+  const dir = fs.mkdtempSync(path.join(fixtureRoot, 'idle-probe-'));
+  const store = new TaskStore(path.join(dir, 'tasks.sqlite'));
+  let uncertain = false;
+  let checks = 0;
+  const runtime = {
+    async describe() { return {backend: 'agent-compose', stopUnconfirmed: uncertain, runtimeReleased: false}; },
+    async assertWorkspaceIdle() { checks++; },
+  };
+  const service = new TaskMessageService({taskStore: store, agentRuntime: runtime});
+  const task = store.createTask({id: randomUUID()});
+  t.after(() => { store.close(); fs.rmSync(dir, {recursive: true, force: true}); });
+  assert.equal(await service.isIdle(task.id), true);
+  assert.equal(checks, 1);
+  uncertain = true;
+  assert.equal(await service.isIdle(task.id), false);
+  assert.equal(checks, 1);
+});
+
 test('server task identity reaches runtime and approved-call evidence survives SQLite reopen', async t => {
   const callId = randomUUID();
   const f = fixture(t, async (input, emit, runId) => {

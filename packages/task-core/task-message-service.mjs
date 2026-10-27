@@ -56,8 +56,19 @@ export class TaskMessageService {
 
   async isIdle(taskId) {
     const task = this.taskStore.getTask(taskId);
-    if (!task || task.status === 'stopped') return false;
-    return !this.isTaskBusy(taskId);
+    if (!task || task.status === 'stopped' || this.isTaskBusy(taskId)) return false;
+    try {
+      const description = await this.agentRuntime?.describe?.(task.executionSessionId);
+      if (description?.backend !== 'agent-compose' || description.stopUnconfirmed === true || description.runtimeReleased === true) return false;
+      if (typeof this.agentRuntime?.assertWorkspaceIdle === 'function') {
+        await this.agentRuntime.assertWorkspaceIdle(task.executionSessionId);
+      }
+      return !this.isTaskBusy(taskId) && this.taskStore.getTask(taskId)?.status !== 'running';
+    } catch {
+      // An unknown daemon state must block automatic Goal work. The next
+      // coordinator tick can retry after the runtime becomes inspectable.
+      return false;
+    }
   }
 
   async createTask(requestId) {
