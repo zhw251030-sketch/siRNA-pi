@@ -6,7 +6,7 @@
 
 ## 当前进度
 
-最新：第13C-I步已增加完整的验证 attempt 和阶段重试。未知 evidenceId 只触发 `resolve_evidence` 修复，普通协议错误进入 `review` 修复；每轮保存 session/run、脱敏 prompt、raw proposal 和 diagnostics，最多三次。真实 Agent Compose verifier 仍未接入。详见 [验证 Attempt、诊断和阶段重试](docs/49-验证Attempt与阶段重试.md)。
+最新：第13C-J步已完成独立 Agent Compose verifier 的离线接线。新增 verifier chat 适配器、8个只读 MCP 验证工具、独立 `goal-verifier` 运行角色、guest guard 和环境变量模式选择；默认仍不启动真实 verifier。Linux 容器访问 API 的网络验收和一次受控真实 MiniMax 请求尚未执行。详见 [独立 Agent Compose 验证器](docs/50-独立AgentCompose验证器.md)。
 
 上一阶段第12F步完成持久化 approval job/worker 与协调器、bootstrap、生命周期和 HTTP 入队整合。默认 `SIRNA_AUTOMATIC_APPROVAL=0`，只有明确设置为 `1` 才允许自动入队；HTTP 和 coordinator 不直接调用批准服务，worker 才调用可信的 `approveRegisteredToolProposal`，并以 durable terminal 推进 `completed`/`failed`。个人仓库使用独立 `runtime/tool-approval/jobs.sqlite`，参考仓库使用共享 registry maintenance queue；职责边界一致、存储布局不同。机制和差异见 [自动批准边界](docs/38-自动批准边界.md)。
 

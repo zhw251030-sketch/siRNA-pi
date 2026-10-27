@@ -1,6 +1,10 @@
 # siRNA-pi 协作规则
 
-## 最新完成：第13C-I步（2026-10-26）
+## 最新完成：第13C-J步（2026-10-27）
+
+已完成独立 Agent Compose verifier 的离线接线：新增 `goal-verification-agent-compose.mjs` chat 适配器、`apps/mcp/goal-verifier.mjs` 八个只读工具、独立 `goal-verifier` Compose 角色、guest guard 和 `SIRNA_GOAL_VERIFICATION=agent-compose` 选择路径。默认仍是 `off`，不会启动真实 verifier；Linux 容器到 API 的网络回环和真实 MiniMax 请求尚未验收。定向 28 项测试为27通过、1平台跳过、0失败；完整 `npm test` 为1579项、1563通过、16平台跳过、0失败。详见 `docs/50-独立AgentCompose验证器.md`。
+
+## 历史完成：第13C-I步（2026-10-26）
 
 已在13C-H持久 Evidence Resolver 上增加验证 attempt 和阶段重试：`verification_attempts` 保存 session/run、脱敏 prompt、raw proposal、diagnostics，支持 `protocol_failed`；`goal-verification-coordinator.mjs` 区分 `EVIDENCE_REFERENCE_INVALID/resolve_evidence` 与 `VERIFIER_OUTPUT_INVALID/review`，最多三次，重启遗留 running attempt 会从下一编号恢复；`goal-verification-access.mjs` 和 `apps/api/router.mjs` 增加 token-scoped `/attempt` 读取。新增未知 evidenceId 二次成功、脱敏和恢复测试；完整 `npm test` 为1571项、1555通过、16平台跳过、0失败；本轮无真实网络、模型或 Agent Compose 调用。真实独立 Agent Compose verifier 仍未接入，下一步是协议回放和真实 verifier。详见 `docs/49-验证Attempt与阶段重试.md`。
 

@@ -36,7 +36,7 @@ export class AgentComposeRuntime {
     this.root = path.resolve(root);
     this.store = new ComposeSessionStore(this.root, {agentName});
     this.agentName = this.store.agentName;
-    if (agentName === 'tool-curator' && (toolCallLeases || toolBuildersAvailable)) throw new Error('Curator cannot receive host tool leases or builders');
+    if (['tool-curator', 'goal-verifier'].includes(agentName) && (toolCallLeases || toolBuildersAvailable)) throw new Error(`${agentName} cannot receive host tool leases or builders`);
     this.executor = executor;
     this.rpc = rpc;
     this.toolCallLeases = toolCallLeases;
@@ -274,7 +274,7 @@ export class AgentComposeRuntime {
     try { return await operation; } finally { this.releasing.delete(id); }
   }
   async run(request, emit, externalSignal) {
-    if (this.agentName === 'tool-curator' && request.prepareWorkspace !== undefined) throw new Error('Curator workspace hydration is forbidden');
+    if (['tool-curator', 'goal-verifier'].includes(this.agentName) && request.prepareWorkspace !== undefined) throw new Error(`${this.agentName} workspace hydration is forbidden`);
     const id = request.sessionId;
     if (this.active.has(id)) throw new Error('Execution session is already running');
     if (this.releasing.has(id)) throw new Error('Execution session is ending');
@@ -368,8 +368,9 @@ export class AgentComposeRuntime {
       // Register before RPC's abort handler so intent is durable before StopRun.
       signal.addEventListener('abort', rememberUserCancel, { once: true });
       if (signal.aborted) rememberUserCancel();
+      const directPrompt = ['tool-curator', 'goal-verifier'].includes(this.agentName);
       let snapshot = await this.rpc.run({ projectId: session.projectId, agentName: this.agentName, sandboxId: session.sandboxId,
-        prompt: this.agentName === 'tool-curator' ? request.message : '当前任务工作目录是 /workspace。输入资料在 input/，结果请写入 output/。可使用 read/write 和显式配置的 mcp 工具，保留其他文件。不要读取或展示隐藏的任务连接配置。\n' +
+        prompt: directPrompt ? request.message : '当前任务工作目录是 /workspace。输入资料在 input/，结果请写入 output/。可使用 read/write 和显式配置的 mcp 工具，保留其他文件。不要读取或展示隐藏的任务连接配置。\n' +
           inputContext + '\n用户消息：\n' + request.message }, {
         signal,
         onStarted: task => {

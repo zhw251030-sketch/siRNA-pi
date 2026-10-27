@@ -5,8 +5,15 @@ import { randomUUID } from 'node:crypto';
 export const executionId = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 export const sandboxIdPattern = /^[a-f0-9]{64}$/;
 export function composeRole(agentName = 'designer') {
-  if (!['designer', 'tool-curator'].includes(agentName)) throw new Error('Invalid Compose agent role');
+  if (!['designer', 'tool-curator', 'goal-verifier'].includes(agentName)) throw new Error('Invalid Compose agent role');
   return agentName;
+}
+
+export function roleStorage(agentName = 'designer') {
+  composeRole(agentName);
+  if (agentName === 'tool-curator') return {sessions: 'runtime/tool-curation/sessions', events: 'runtime/tool-curation/events'};
+  if (agentName === 'goal-verifier') return {sessions: 'runtime/goal-verifier/sessions', events: 'runtime/goal-verifier/events'};
+  return {sessions: 'runtime/compose-sessions', events: 'runtime/compose-web'};
 }
 
 export function ensureDirectory(root, relative) {
@@ -25,8 +32,9 @@ export class ComposeSessionStore {
   constructor(root, {agentName = 'designer'} = {}) {
     this.root = path.resolve(root);
     this.agentName = composeRole(agentName);
-    this.directory = ensureDirectory(this.root, agentName === 'designer' ? 'runtime/compose-sessions' : 'runtime/tool-curation/sessions');
-    this.eventsDirectory = agentName === 'designer' ? 'runtime/compose-web' : 'runtime/tool-curation/events';
+    const storage = roleStorage(agentName);
+    this.directory = ensureDirectory(this.root, storage.sessions);
+    this.eventsDirectory = storage.events;
     ensureDirectory(this.root, this.eventsDirectory);
   }
   file(id) {

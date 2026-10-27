@@ -6,6 +6,7 @@
 !containers/agent-compose-guest/
 !containers/agent-compose-guest/Dockerfile
 !containers/agent-compose-guest/pi.sh
+!containers/agent-compose-guest/goal-verifier-guard.mjs
 !containers/agent-compose-guest/patch-mcp-config.mjs
 !containers/agent-compose-guest/patch-mcp-refresh.mjs
 !containers/agent-compose-guest/patch-mcp-builder-timeout.mjs
@@ -25,6 +26,7 @@
 !apps/mcp/approved-server.mjs
 !apps/mcp/remote-client.mjs
 !apps/mcp/remote-server.mjs
+!apps/mcp/goal-verifier.mjs
 !apps/mcp/tool-builder-client.mjs
 !scripts/
 !scripts/verify-guest-mcp.mjs

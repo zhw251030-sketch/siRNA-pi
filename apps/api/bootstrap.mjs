@@ -40,6 +40,7 @@ import { createToolGapService } from "../../packages/extensions/tool-curation/to
 import { GoalStore } from "../../packages/extensions/goal/goal-store.mjs";
 import { createGoalVerificationRuntime } from "../../packages/extensions/goal/goal-verification-runtime.mjs";
 import { createDeterministicGoalVerifier } from "../../packages/extensions/goal/goal-verification-fake.mjs";
+import { createRuntimeGoalVerifier } from "../../packages/extensions/goal/goal-verification-agent-compose.mjs";
 import { createApiShutdown, startApiServices, createCurationBuildRegistrationPolicy, createCurationAutomationReadiness } from "./service-lifecycle.mjs";
 
 process.umask(0o077);
@@ -74,15 +75,23 @@ const goalStore = new GoalStore({root: projectRoot});
 const recovered = taskStore.recoverInterruptedTasks();
 const workspaceFiles = new TaskFiles({ root: projectRoot, agentRuntime });
 const taskMessages=new TaskMessageService({taskStore,agentRuntime,workspaceFiles,onSettled:run=>toolCurationCoordinator?.observeRun(run)});
-// Verification is opt-in. This local deterministic adapter is only for
-// learning the lifecycle; a real Agent Compose verifier is a later step.
+const goalVerificationMode = process.env.SIRNA_GOAL_VERIFICATION ?? 'off';
+const goalVerifierRuntime = goalVerificationMode === 'agent-compose'
+  ? new AgentComposeRuntime({root: projectRoot, agentName: 'goal-verifier', executor: createComposeExecutor(projectRoot, {agentName: 'goal-verifier'}), rpc})
+  : undefined;
+const goalVerifier = goalVerificationMode === 'agent-compose'
+  ? createRuntimeGoalVerifier(goalVerifierRuntime)
+  : createDeterministicGoalVerifier();
+// Verification is opt-in. deterministic is the offline learning adapter;
+// agent-compose uses the isolated goal-verifier profile and read-only MCP.
+// The default off mode creates no verifier sandbox and sends no model request.
 const goalVerification = createGoalVerificationRuntime({
   root: projectRoot,
   taskStore,
   workspaceFiles,
   goalStore,
-  enabled: process.env.SIRNA_GOAL_VERIFICATION === 'deterministic',
-  verifier: createDeterministicGoalVerifier(),
+  enabled: ['deterministic', 'agent-compose'].includes(goalVerificationMode),
+  verifier: goalVerifier,
 });
 const maintenanceStore=new ToolMaintenanceStore({root:projectRoot});
 const toolAutomation=new ToolAutomationStore({root:projectRoot});

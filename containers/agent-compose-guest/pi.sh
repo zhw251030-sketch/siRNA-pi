@@ -14,6 +14,13 @@ umask 077
 mkdir -p "$PI_CODING_AGENT_DIR"
 cp /opt/sirna-pi/settings.json "$PI_CODING_AGENT_DIR/settings.json"
 
+if [ "${SIRNA_GOAL_VERIFIER:-}" = "1" ]; then
+  exec /usr/bin/node /opt/sirna-pi/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js \
+    --no-extensions -e /opt/sirna-pi/goal-verifier-guard.mjs \
+    --no-skills --no-prompt-templates --no-themes --no-context-files \
+    --no-approve --offline --tools mcp --thinking off "$@"
+fi
+
 # Preserve the runner's model, prompt, session directory and resume arguments.
 exec /usr/bin/node /opt/sirna-pi/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js \
   --no-extensions --no-mcp --no-skills --no-prompt-templates \

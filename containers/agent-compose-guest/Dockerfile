@@ -23,6 +23,7 @@ RUN node /opt/sirna-pi/patch-mcp-refresh.mjs /usr/lib/node_modules/pi-mcp-adapte
 COPY containers/agent-compose-guest/patch-mcp-builder-timeout.mjs /opt/sirna-pi/patch-mcp-builder-timeout.mjs
 RUN node /opt/sirna-pi/patch-mcp-builder-timeout.mjs /usr/lib/node_modules/pi-mcp-adapter
 COPY --chmod=755 containers/agent-compose-guest/pi.sh /usr/local/bin/pi
+COPY containers/agent-compose-guest/goal-verifier-guard.mjs /opt/sirna-pi/goal-verifier-guard.mjs
 RUN test "$(/usr/local/bin/pi --version)" = "1.2.0"
 
 # Inherit the official tini entrypoint and keep-running command.
