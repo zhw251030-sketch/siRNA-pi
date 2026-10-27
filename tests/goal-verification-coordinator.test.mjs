@@ -165,6 +165,33 @@ test('evidence protocol failure retries only resolve_evidence and persists attem
   assert.equal(attempts[1].verifierSessionId, 'session-2');
 });
 
+test('malformed evidence objects trigger a verifier protocol repair before evidence resolution', async t => {
+  const f = fixture(t);
+  const base = createDeterministicGoalVerifier();
+  let calls = 0;
+  const verifier = {
+    async verify(run, token, signal, onStarted, feedback, onPrompt) {
+      calls++;
+      const response = await base.verify(run, token, signal, onStarted, feedback, onPrompt);
+      if (calls === 1) {
+        const claim = response.claims.find(item => item.evidence.length > 0);
+        if (claim) claim.evidence = ['bare-evidence-id'];
+      }
+      return {result: response, sessionId: `session-${calls}`, runId: `run-${calls}`};
+    },
+  };
+  const coordinator = new GoalVerificationCoordinator(f.goals, f.store, f.bundles, verifier, {autoRun: false});
+  const request = await coordinator.request(f.verifying);
+  await coordinator.runVerification(request.id);
+  const run = f.store.get(request.id);
+  assert.equal(run.status, 'passed');
+  assert.equal(calls, 2);
+  const attempts = f.store.listAttempts(request.id);
+  assert.deepEqual(attempts.map(attempt => attempt.status), ['protocol_failed', 'accepted']);
+  assert.match(attempts[0].diagnostics, /RESULT_SCHEMA_INVALID/);
+  assert.match(attempts[0].diagnostics, /bare string/);
+});
+
 test('coordinator closes an interrupted running attempt before resuming from the next attempt number', async t => {
   const f = fixture(t);
   const request = f.store.createRequest(randomUUID(), f.verifying);

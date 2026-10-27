@@ -11,8 +11,56 @@ export class GoalEvidenceReferenceError extends Error {
   constructor(message, findings = []) { super(message); this.name = 'GoalEvidenceReferenceError'; this.findings = findings; }
 }
 
+export class GoalVerificationProtocolError extends Error {
+  constructor(message, findings = []) { super(message); this.name = 'GoalVerificationProtocolError'; this.findings = findings; }
+}
+
 function record(value) { return value && typeof value === 'object' && !Array.isArray(value) ? value : undefined; }
 function text(value) { return typeof value === 'string' && value.trim() ? value.trim() : undefined; }
+
+const claimCategories = new Set(['objective', 'artifact', 'tool_result', 'external_fact']);
+const claimImportance = new Set(['critical', 'major', 'minor']);
+const claimVerdicts = new Set(['supported', 'contradicted', 'insufficient_evidence', 'unverifiable', 'irrelevant']);
+const requirementStatuses = new Set(['satisfied', 'partial', 'missing', 'unsatisfied']);
+
+/**
+ * Check the field-level shape before resolving evidence.  This is deliberately
+ * separate from the evidence policy: a malformed review must be repaired by
+ * the verifier, while a well-formed review that cites an unknown ID belongs to
+ * the evidence-resolution retry path.
+ */
+export function validateVerificationProposal(proposal) {
+  const findings = [];
+  if (!record(proposal) || proposal.protocolVersion !== GOAL_VERIFICATION_REVIEW_PROTOCOL) {
+    findings.push({code: 'RESULT_SCHEMA_INVALID', field: 'protocolVersion', message: 'protocolVersion must match the Goal verification review protocol'});
+  }
+  if (!record(proposal) || !['pass', 'fail'].includes(proposal.decision)) {
+    findings.push({code: 'RESULT_SCHEMA_INVALID', field: 'decision', message: 'decision must be pass or fail'});
+  }
+  if (!Array.isArray(proposal?.claims)) findings.push({code: 'RESULT_SCHEMA_INVALID', field: 'claims', message: 'claims must be an array'});
+  if (!Array.isArray(proposal?.requirements)) findings.push({code: 'RESULT_SCHEMA_INVALID', field: 'requirements', message: 'requirements must be an array'});
+  for (const [index, claim] of (proposal?.claims ?? []).entries()) {
+    const field = `claims[${index}]`;
+    if (!record(claim)) { findings.push({code: 'RESULT_SCHEMA_INVALID', field, message: 'claim must be an object'}); continue; }
+    if (!text(claim.id)) findings.push({code: 'RESULT_SCHEMA_INVALID', field: `${field}.id`, message: 'claim id must be non-empty'});
+    if (!claimCategories.has(claim.category)) findings.push({code: 'RESULT_SCHEMA_INVALID', field: `${field}.category`, message: `category must be one of ${[...claimCategories].join(', ')}`});
+    if (!claimImportance.has(claim.importance)) findings.push({code: 'RESULT_SCHEMA_INVALID', field: `${field}.importance`, message: `importance must be one of ${[...claimImportance].join(', ')}`});
+    if (!claimVerdicts.has(claim.verdict)) findings.push({code: 'RESULT_SCHEMA_INVALID', field: `${field}.verdict`, message: `verdict must be one of ${[...claimVerdicts].join(', ')}`});
+    if (!Array.isArray(claim.evidence)) { findings.push({code: 'RESULT_SCHEMA_INVALID', field: `${field}.evidence`, message: 'evidence must be an array of objects with evidenceId'}); continue; }
+    for (const [evidenceIndex, reference] of claim.evidence.entries()) {
+      if (!record(reference) || !text(reference.evidenceId)) findings.push({code: 'RESULT_SCHEMA_INVALID', field: `${field}.evidence[${evidenceIndex}]`, message: 'each evidence item must be {evidenceId: string}; do not use a bare string'});
+    }
+  }
+  for (const [index, requirement] of (proposal?.requirements ?? []).entries()) {
+    const field = `requirements[${index}]`;
+    if (!record(requirement)) { findings.push({code: 'RESULT_SCHEMA_INVALID', field, message: 'requirement must be an object'}); continue; }
+    if (!text(requirement.criterionId)) findings.push({code: 'RESULT_SCHEMA_INVALID', field: `${field}.criterionId`, message: 'criterionId must be copied from acceptanceCriteria[].id'});
+    if (!requirementStatuses.has(requirement.status)) findings.push({code: 'RESULT_SCHEMA_INVALID', field: `${field}.status`, message: 'status must be satisfied, partial, missing, or unsatisfied'});
+    if (!Array.isArray(requirement.claimIds) || requirement.claimIds.some(id => !text(id))) findings.push({code: 'RESULT_SCHEMA_INVALID', field: `${field}.claimIds`, message: 'claimIds must be an array of non-empty claim IDs'});
+  }
+  if (findings.length) throw new GoalVerificationProtocolError('verifier proposal does not match the field-level protocol', findings);
+  return proposal;
+}
 
 export function verificationEvidenceUnits(bundle, persisted = []) {
   if (Array.isArray(persisted) && persisted.length) return persisted.map(unit => ({
@@ -40,9 +88,7 @@ export function verificationEvidenceUnits(bundle, persisted = []) {
 }
 
 export function resolveVerificationProposal(bundle, proposal, persistedEvidenceUnits = []) {
-  if (!record(proposal) || proposal.protocolVersion !== GOAL_VERIFICATION_REVIEW_PROTOCOL) throw new Error('verifier proposal protocol is invalid');
-  if (!['pass', 'fail'].includes(proposal.decision)) throw new Error('verifier proposal decision is invalid');
-  if (!Array.isArray(proposal.claims) || !Array.isArray(proposal.requirements)) throw new Error('verifier proposal must contain claims and requirements');
+  validateVerificationProposal(proposal);
   const units = new Map(verificationEvidenceUnits(bundle, persistedEvidenceUnits).map(unit => [unit.evidenceId, unit]));
   const findings = [];
   const claims = proposal.claims.map((claim, index) => {
