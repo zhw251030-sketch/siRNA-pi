@@ -103,6 +103,7 @@ test('verification prompt prefers direct retrieval evidence over exhaustive evid
   const prompt = verificationPrompt(run(), 'token-1234567890');
   assert.match(prompt, /search_verification_sources.*fetch_verification_source.*直接复制其中的 evidenceId/s);
   assert.match(prompt, /不要为了穷举工具回执而遍历整个证据目录/);
+  assert.match(prompt, /每个 category=external_fact.*至少要包含.*retrieval evidenceId/);
 });
 
 test('verification prompt spells out policy field names instead of ambiguous near-miss fields', () => {
