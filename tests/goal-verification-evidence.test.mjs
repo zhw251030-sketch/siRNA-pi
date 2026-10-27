@@ -102,6 +102,19 @@ test('evidence resolver persists random stable units for bundle content', async 
   assert.equal(f.store.getEvidenceUnit(artifact.id, f.bundle.verificationId).dedupeKey, artifact.dedupeKey);
 });
 
+test('evidence excerpts preserve ordinary line breaks from task messages', async t => {
+  const f = fixture(t);
+  f.tasks.appendAssistantMessage(f.task.id, '第一行\n第二行', 'complete');
+  const request = f.store.createRequest(randomUUID(), f.verifying);
+  const bundle = await f.bundles.build(request.id, f.verifying);
+  f.store.attachBundle(request.id, bundle);
+  f.store.begin(request.id);
+  const resolver = new GoalVerificationEvidenceResolver(f.store, f.bundles);
+  const unit = resolver.prepareBundle(f.store.get(request.id)).find(item => item.method === 'message_quote');
+  assert.ok(unit);
+  assert.match(unit.excerpt, /第一行\n第二行/);
+});
+
 test('evidence resolver materializes scholarly records and deterministic checks with deduplication', async t => {
   const f = await runningFixture(t);
   const resolver = new GoalVerificationEvidenceResolver(f.store, f.bundles);

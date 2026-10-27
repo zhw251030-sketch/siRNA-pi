@@ -18,6 +18,7 @@ const canonical = value => {
 const hashJson = value => sha256(canonical(value));
 function checkId(value, label = 'verificationId') { if (typeof value !== 'string' || !uuid.test(value)) fail(`${label} must be a UUID v4`); return value; }
 function text(value, label, max = 8000) { if (typeof value !== 'string' || !value.trim() || value.length > max || /[\u0000-\u001f\u007f]/.test(value)) fail(`${label} must be bounded text`); return value.replace(/\s+/g, ' ').trim(); }
+function evidenceText(value, label, max = 16_000) { if (typeof value !== 'string' || !value.trim() || value.length > max || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value)) fail(`${label} must be bounded text`); return value.trim(); }
 function bounded(value, label, max) { if (typeof value !== 'string' || !value.trim() || Buffer.byteLength(value, 'utf8') > max || /[\u0000\u007f]/.test(value)) fail(`${label} must be bounded text`); return value.trim(); }
 function json(value) { return value == null ? undefined : JSON.parse(value); }
 function hash(value, label = 'sha256') { if (typeof value !== 'string' || !/^[a-f0-9]{64}$/i.test(value)) fail(`${label} must be a SHA-256 hex digest`); return value.toLowerCase(); }
@@ -307,7 +308,7 @@ export class GoalVerificationStore {
     checkId(verificationId); this.#running(verificationId);
     if (!['retrieval', 'artifact_read', 'message_quote', 'tool_receipt', 'deterministic_check'].includes(method)) fail('evidence method is invalid');
     const url = text(sourceUrl, 'evidence sourceUrl', 4000);
-    const body = text(excerpt, 'evidence excerpt', 16_000);
+    const body = evidenceText(excerpt, 'evidence excerpt');
     const fetched = text(fetchedAt, 'evidence fetchedAt', 100);
     const key = text(dedupeKey, 'evidence dedupeKey', 1000);
     hash(contentSha256, 'evidence contentSha256');
