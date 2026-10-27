@@ -65,4 +65,4 @@
 - `apps/mcp/goal-verifier.mjs`：实际 MCP stdio server；
 - `agent-compose.yml`、guest Dockerfile、`pi.sh`：独立 verifier profile 的静态接线。
 
-定向离线测试、内部 listener 测试和策略回归全部通过；最新完整 `npm test` 为 1592 项，1576 通过、16 项 Windows 平台跳过、0 失败。远端真实 Goal `55426f18-22b1-4088-99ac-eb7378a58149` 经历了证据解析修复、确定性检查策略修复和 JSON 协议提示修复，最终 Verification `398b298e-63c0-49b8-aa39-3a4027b5138b` 为 `passed`，Goal 状态为 `complete`。这证明了独立容器、内部网络、MCP 工具回执、冻结证据和独立完成门控的最小真实闭环；下一步应把同一链路用于真实文件产出、受控检索和失败后修订场景。
+定向离线测试、内部 listener 测试和策略回归全部通过；最新完整 `npm test` 为 1594 项，1578 通过、16 项 Windows 平台跳过、0 失败。远端健康 Goal `55426f18-22b1-4088-99ac-eb7378a58149` 和真实文件 Goal `2a91d8b1-faa4-46d7-a9d7-158a64e9a754` 均已通过，后者的 Verification `7e17a510-b9e9-403e-9725-5c52213f7eb7` 为 `passed`，同时包含 2 个 artifact 和 3 个成功工具回执。文件验收期间还补齐了原仓库的非 JSON 输出 `protocol_failed` 重试：格式错误只生成 attempt 诊断和修复提示，不重新执行用户任务。这证明了独立容器、内部网络、MCP 工具回执、冻结 artifact、确定性检查、协议修复和独立完成门控能够共同工作；下一步应把同一链路用于受控检索、失败后修订和多 Goal 组合。

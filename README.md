@@ -6,7 +6,7 @@
 
 ## 当前进度
 
-最新：第13C-J步已完成独立 Agent Compose verifier 的真实网络与 Goal 验收。新增 verifier chat 适配器、8个只读 MCP 验证工具、独立 `goal-verifier` 运行角色、guest guard 和环境变量模式选择；远端实际创建 verifier 容器并通过 `192.168.1.169:3001` 调用 `probe_internal_health`，HTTP 200/`ok:true` 的工具回执被独立 verifier 读取，Goal 最终由 `verifying` 转为 `complete`。本轮还按原仓库补齐 `deterministic_check` 证据策略。详见 [独立 Agent Compose 验证器](docs/50-独立AgentCompose验证器.md) 和 [真实网络验收记录](docs/analysis/2026-10-27-agent-compose-goal-verifier-network.md)。
+最新：第13C-J步已完成独立 Agent Compose verifier 的真实网络、文件产出与 Goal 验收。远端 verifier 容器通过 `192.168.1.169:3001` 调用内部健康工具并验证真实 `result.json` 输出；工具回执、冻结 artifact、deterministic check 和 Goal revision 门控均已真实通过。本轮还按原仓库补齐 `deterministic_check` 证据策略和非 JSON verifier 输出的 `protocol_failed` 重试路径。详见 [独立 Agent Compose 验证器](docs/50-独立AgentCompose验证器.md) 和 [真实网络验收记录](docs/analysis/2026-10-27-agent-compose-goal-verifier-network.md)。
 
 上一阶段第12F步完成持久化 approval job/worker 与协调器、bootstrap、生命周期和 HTTP 入队整合。默认 `SIRNA_AUTOMATIC_APPROVAL=0`，只有明确设置为 `1` 才允许自动入队；HTTP 和 coordinator 不直接调用批准服务，worker 才调用可信的 `approveRegisteredToolProposal`，并以 durable terminal 推进 `completed`/`failed`。个人仓库使用独立 `runtime/tool-approval/jobs.sqlite`，参考仓库使用共享 registry maintenance queue；职责边界一致、存储布局不同。机制和差异见 [自动批准边界](docs/38-自动批准边界.md)。
 
@@ -60,7 +60,7 @@
 - 2026-10-26：第13C-G步增加受控学术 `search/fetch`。OpenAlex/Crossref/Europe PMC 使用固定 URL，来源只允许 HTTPS allowlist，手动重定向最多3次，响应最多1.5MB；404/provider错误分类，原始 responseText 不返回 verifier。新增 fake-fetch 边界测试，尚未访问真实网络或调用模型。详见 [受控学术检索与来源抓取](docs/47-受控学术检索与来源抓取.md)。
 - 2026-10-26：第13C-H步增加持久 `GoalVerificationEvidenceResolver` 和 `verification_evidence_units` 表。随机 UUID、`(verificationId,dedupeKey)` 去重、检索 JSON locator/sourceId、check/message/artifact 后端物化和 policy 解析均已接通；旧确定性 verifier 改用后端 evidenceId。完整 `npm test` 为1568项、1552通过、16平台跳过、0失败；没有真实网络或模型调用。详见 [持久 EvidenceResolver 与证据单元](docs/48-持久EvidenceResolver与证据单元.md)。
 - 2026-10-26：第13C-I步增加 attempt 表字段、`protocol_failed` 状态、token 脱敏 prompt、raw proposal、阶段诊断和 bounded retry；新增 `/attempt` token-scoped POST 读取接口。未知 evidenceId 的第一次失败可在第二次只修复 `resolve_evidence` 后成功；重启遗留 running attempt 会从下一编号恢复。完整 `npm test` 为1571项、1555通过、16平台跳过、0失败。详见 [验证 Attempt、诊断和阶段重试](docs/49-验证Attempt与阶段重试.md)。
-- 当前正式工具和六个构建工具均可由新网页任务使用；正式工具保持1.0.1，未批准候选不进入正式目录。独立 verifier 的最小真实闭环已通过；下一步应把同一冻结证据链用于真实文件产出、受控学术检索和失败后修订场景，再评估更复杂的 Goal 组合。当前受控修订成功不等于自动自进化。原版automation会自动批准，个人保留人工门是范围收紧，批准仍使用可信CLI。CPU配额仍不可用，开机自启未配置。
+- 当前正式工具和六个构建工具均可由新网页任务使用；正式工具保持1.0.1，未批准候选不进入正式目录。独立 verifier 已完成健康接口和真实文件产出的最小闭环；下一步应把同一冻结证据链用于受控学术检索、故意失败→反馈→修订和多 Goal 组合，再评估更复杂的 Curator 与自进化实验。当前受控修订成功不等于自动自进化。原版automation会自动批准，个人保留人工门是范围收紧，批准仍使用可信CLI。CPU配额仍不可用，开机自启未配置。
 
 安装位置、文件解释和验证记录见 [第 1 步 A：安装与运行 Pi](docs/01-安装与运行Pi.md)。服务器项目目录是 `/home/hanwen/Project/project/siNRA-pi/`，按用户指定拼写保留。
 

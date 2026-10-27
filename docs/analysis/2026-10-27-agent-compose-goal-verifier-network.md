@@ -64,3 +64,23 @@ Goal PATCH complete
 `goal-verification-policy.mjs` 现在还与原仓库 `goal-verification-policy.ts` 对齐了 `deterministic_check`、verification-scoped `getCheck`、通过检查支撑 artifact/objective/execution 的规则；`tests/goal-verification-policy.test.mjs` 覆盖通过检查、未知检查和带伪造 retrieval ID 的 fail-closed 行为。
 
 本轮最终证明了独立容器、内部网络、模型调用、冻结 bundle、工具回执、确定性检查、策略判定和 Goal 状态转换可以连通。它仍然是一个最小网络接线测试，不代表完整业务任务上的普适成功率；下一步应把同样的验证链路用于真实文件产出、受控检索和失败后修订场景。
+
+## 真实文件产出验收
+
+随后使用同一套 Agent Compose verifier 运行了一个真实文件 Goal，任务 ID 为 `2a91d8b1-faa4-46d7-a9d7-158a64e9a754`。任务先上传 18 字节的 `input:numbers.csv`，内容为 `value` 加上 10、20、30、40 四个数值；Goal 被拆成四个必需工作项：读取输入、计算统计量、生成 `output/result.json`、再次读取确认。
+
+执行 Agent 的真实工具顺序为：
+
+```text
+read /workspace/input/numbers.csv
+write /workspace/output/result.json
+read /workspace/output/result.json
+```
+
+输出文件实际内容为 `{"count":4,"sum":100,"mean":25}`。Bundle 冻结了两个 artifact 和三个成功工具回执；独立 verifier 还执行了 `json_valid`、`exists` 和 `csv_row_count` 确定性检查。
+
+第一次文件验证暴露了一个真实策略问题：模型额外生成了 `claim-7`，把“输出已经确认”标为 `artifact`，但只引用消息和工具回执，没有引用 `artifact_read` 或通过的 `deterministic_check`。策略拒绝了该 claim，Goal 回到 `active`。这保持了原仓库的严格证据语义：工具回执可以证明执行，产物事实必须由冻结产物或确定性检查证明。
+
+随后又暴露了一个协议生命周期问题：模型返回了 12,611 字符的解释和多个 JSON 片段，旧 Coordinator 把“非 JSON”当成验证基础设施错误，直接暂停 Goal。对照原仓库 `GoalVerifierResultProtocolError`、`parseGoalVerificationReviewText` 和 Coordinator 的 `protocol_failed` 分支后，本仓库新增了同等的协议修复路径：保存受限、脱敏的原始输出，写入 attempt 诊断，并通过 `read_verification_attempt` 提示 verifier 修复，而不是重新执行任务。
+
+修复后重新恢复并提交完成申请，Verification `7e17a510-b9e9-403e-9725-5c52213f7eb7` 为 `passed`，Goal 最终状态为 `complete`。这一次验证了真实文件交付、工具执行回执、确定性检查、artifact evidence、Verifier JSON 协议和 Goal revision 门控能够共同工作；仍然不能据此推出跨任务泛化或自动自进化效果。
