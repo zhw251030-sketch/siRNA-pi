@@ -96,6 +96,7 @@ test('verification prompt spells out policy field names instead of ambiguous nea
   assert.match(prompt, /claims\[\]\.supported/);
   assert.match(prompt, /claims\[\]\.criterionIds/);
   assert.match(prompt, /qualityReview\.issues.*空数组/);
+  assert.match(prompt, /category=artifact.*artifact_read.*deterministic_check/);
 });
 
 test('runtime adapter translates AgentComposeRuntime events and keeps sandbox cleanup in finally', async () => {

@@ -117,6 +117,7 @@ export function verificationPrompt(run, accessToken, retryFeedback) {
     '不要自己构造 retrievalId、sourceUrl、sourceId、locator、excerpt、时间戳或哈希（Never construct these fields）；claim.evidence 中只写后端返回的 evidenceId。',
     '注意 evidence 的格式：每个 claim.evidence 元素必须是对象 {"evidenceId":"后端返回的 ID"}，绝不能写成字符串数组、supported 布尔字段或 criterionIds 数组。',
     'qualityReview.issues 是严格的未解决问题列表：如果没有未解决问题，必须输出空数组 []，不要写“无未解决问题”“none”或任何占位字符串；只有确实存在的问题才逐条写入。',
+    '只提交支撑 acceptanceCriteria 的必要 claims，避免添加与目标无关的额外事实。category=artifact 的 claim 必须至少引用后端返回的 artifact_read 或通过的 deterministic_check evidenceId；只有消息或工具回执时，应改为 tool_result/objective，或不要提交该 claim。',
     '验证契约：', JSON.stringify(contract, null, 2),
     '本次验证访问凭证：', JSON.stringify({verificationId: run.id, accessToken}),
   ];
