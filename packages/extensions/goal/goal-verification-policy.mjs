@@ -108,31 +108,33 @@ export function resolveVerificationProposal(bundle, proposal, persistedEvidenceU
   return {...proposal, claims};
 }
 
-function methodMatches(run, claim) {
+function methodMatches(run, claim, context = {}) {
   return claim.evidence.every(evidence => {
     if (evidence.method === 'retrieval') return Boolean(evidence.retrievalId && evidence.sourceUrl?.startsWith('https://'));
     if (evidence.method === 'artifact_read') return evidence.sourceUrl?.startsWith('artifact://') && run.bundle.artifacts.some(item => `artifact://${item.id}` === evidence.sourceUrl);
     if (evidence.method === 'message_quote') return evidence.sourceUrl?.startsWith('message://') && run.bundle.messages.some(item => `message://${item.id}` === evidence.sourceUrl);
     if (evidence.method === 'tool_receipt') return evidence.sourceUrl?.startsWith('tool-receipt://') && run.bundle.toolReceipts.some(item => `tool-receipt://${item.eventId}` === evidence.sourceUrl);
+    if (evidence.method === 'deterministic_check') return evidence.sourceUrl?.startsWith('check://') && Boolean(context.getCheck?.(evidence.sourceUrl.slice('check://'.length)));
     return false;
   });
 }
 function successfulTool(run, claim) { return claim.evidence.some(e => e.method === 'tool_receipt' && run.bundle.toolReceipts.some(r => `tool-receipt://${r.eventId}` === e.sourceUrl && !r.isError)); }
-function artifactEvidence(claim) { return claim.evidence.some(e => e.method === 'artifact_read'); }
-function claimAccepted(run, claim) {
-  if (claim.verdict !== 'supported' || claim.evidence.length === 0 || !methodMatches(run, claim)) return false;
+function passedCheck(claim, context = {}) { return claim.evidence.some(e => e.method === 'deterministic_check' && e.sourceUrl?.startsWith('check://') && context.getCheck?.(e.sourceUrl.slice('check://'.length))?.result?.passed === true); }
+function artifactEvidence(claim, context = {}) { return claim.evidence.some(e => e.method === 'artifact_read') || passedCheck(claim, context); }
+function claimAccepted(run, claim, context = {}) {
+  if (claim.verdict !== 'supported' || claim.evidence.length === 0 || !methodMatches(run, claim, context)) return false;
   if (claim.category === 'external_fact') return claim.evidence.some(e => e.method === 'retrieval');
   if (claim.category === 'tool_result') return successfulTool(run, claim);
-  if (claim.category === 'artifact') return artifactEvidence(claim);
+  if (claim.category === 'artifact') return artifactEvidence(claim, context);
   if (claim.category === 'objective') return claim.evidence.some(e => ['artifact_read', 'tool_receipt'].includes(e.method));
   return false;
 }
 
-export function evaluateVerificationResult(run, result) {
+export function evaluateVerificationResult(run, result, context = {}) {
   const findings = [];
   const add = (code, message, extra = {}) => findings.push({code, message, ...extra});
   const claims = new Map((result.claims ?? []).map(claim => [claim.id, claim]));
-  const accepted = new Set((result.claims ?? []).filter(claim => claimAccepted(run, claim)).map(claim => claim.id));
+  const accepted = new Set((result.claims ?? []).filter(claim => claimAccepted(run, claim, context)).map(claim => claim.id));
   if (result.decision === 'pass') {
     for (const [field, label] of [['internalConsistency', '内部一致性'], ['methodologicalValidity', '方法学有效性'], ['sourceRelevance', '来源相关性'], ['unsupportedPrecision', '数值精度支持']]) {
       if (result.qualityReview?.[field]?.status !== 'pass') add('QUALITY_REVIEW_FAILED', `${label}检查未通过`, {field: `qualityReview.${field}`});
@@ -141,12 +143,12 @@ export function evaluateVerificationResult(run, result) {
   }
   for (const artifact of run.bundle.artifacts ?? []) if (artifact.kind === 'output' && artifact.qualityFlags?.includes('embedded_verifier_instructions')) add('ARTIFACT_CONTAINS_VERIFIER_INSTRUCTIONS', `输出文件 ${artifact.name} 包含面向 verifier 的协议指令。`, {artifactId: artifact.id});
   for (const claim of result.claims ?? []) {
-    if (!methodMatches(run, claim)) add('EVIDENCE_METHOD_MISMATCH', `事实 ${claim.id} 的证据来源与方法不一致。`, {claimId: claim.id});
+    if (!methodMatches(run, claim, context)) add('EVIDENCE_METHOD_MISMATCH', `事实 ${claim.id} 的证据来源与方法不一致。`, {claimId: claim.id});
     if (claim.importance !== 'minor' && claim.verdict !== 'supported') add('UNSUPPORTED_IMPORTANT_CLAIM', `关键事实 ${claim.id} 的判定为 ${claim.verdict}。`, {claimId: claim.id});
     if (claim.verdict !== 'supported') continue;
     if (claim.category === 'external_fact') add('EXTERNAL_FACT_WITHOUT_RETRIEVAL', `外部事实 ${claim.id} 没有受控检索证据。`, {claimId: claim.id});
     if (claim.category === 'tool_result' && !successfulTool(run, claim)) add('TOOL_RESULT_WITHOUT_SUCCESSFUL_RECEIPT', `工具结果 ${claim.id} 没有关联成功回执。`, {claimId: claim.id});
-    if (claim.category === 'artifact' && !artifactEvidence(claim)) add('ARTIFACT_CLAIM_WITHOUT_IMMUTABLE_CHECK', `产物事实 ${claim.id} 没有冻结产物证据。`, {claimId: claim.id});
+    if (claim.category === 'artifact' && !artifactEvidence(claim, context)) add('ARTIFACT_CLAIM_WITHOUT_IMMUTABLE_CHECK', `产物事实 ${claim.id} 没有冻结产物证据。`, {claimId: claim.id});
   }
   const criteria = new Map((run.bundle.acceptanceCriteria ?? []).map(item => [item.id, item]));
   const seen = new Set();

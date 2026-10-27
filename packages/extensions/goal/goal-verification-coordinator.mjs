@@ -96,7 +96,9 @@ export class GoalVerificationCoordinator {
           runId = wrapped && typeof response.runId === 'string' ? response.runId : runId;
           if (sessionId) this.store.setAttemptIdentity(id, attempt, sessionId, runId);
           const resolved = resolveVerificationProposal(active.bundle, proposal, this.evidenceResolver.list(active.id));
-          const evaluation = evaluateVerificationResult(active, resolved);
+          const evaluation = evaluateVerificationResult(active, resolved, {
+            getCheck: checkId => this.store.getCheck(checkId, active.id),
+          });
           this.store.finishAttempt({verificationId: id, attemptNumber: attempt, status: 'accepted', proposal: resolved, rawProposal: proposal, sessionId, runId});
           const completed = this.store.finish(id, evaluation);
           if (completed.trigger === 'checkpoint') this.goals.continueAfterCheckpoint(completed.taskId, completed.goalRevision, completed.status === 'failed' ? completed.evaluation.feedback : undefined);
