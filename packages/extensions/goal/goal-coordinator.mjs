@@ -20,6 +20,9 @@ export function goalContinuationPrompt(lease) {
     '- 一个工作项真正完成后，调用 update_goal status=progress，并提交 completedItemIds。',
     '- 只有所有必需工作项完成后，才调用 update_goal status=complete。完成申请会经过后端完成门控。',
     '- 确实无法继续则调用 update_goal，将状态设为 blocked 并说明原因。',
+    '- 你是执行 Agent；当前回合只使用已注册的 sirna-tools。独立 verifier 才能使用受控学术检索工具。',
+    '- 不要调用 search_verification_sources、fetch_verification_source、verify_controlled_retrieval_record 或其他 verifier-only 工具；不要伪造 retrievalId 或 evidenceId。',
+    '- 如果外部事实是任务要求的一部分，把来源线索（例如 DOI、PMID、来源 URL、标题和对应结论）写入可检查的输出产物或报告，并说明每条线索支持哪条结论；独立 verifier 会重新检索并绑定后端证据。',
     ...feedback,
   ].join('\n');
 }

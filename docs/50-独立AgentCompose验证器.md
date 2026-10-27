@@ -65,8 +65,10 @@
 - `apps/mcp/goal-verifier.mjs`：实际 MCP stdio server；
 - `agent-compose.yml`、guest Dockerfile、`pi.sh`：独立 verifier profile 的静态接线。
 
-定向离线测试、内部 listener 测试和策略回归全部通过；最新完整 `npm test` 为 1599 项，1583 通过、16 项 Windows 平台跳过、0 失败。远端健康 Goal `55426f18-22b1-4088-99ac-eb7378a58149` 和真实文件 Goal `2a91d8b1-faa4-46d7-a9d7-158a64e9a754` 均已通过，后者的 Verification `7e17a510-b9e9-403e-9725-5c52213f7eb7` 为 `passed`，同时包含 2 个 artifact 和 3 个成功工具回执。文件验收期间还补齐了原仓库的非 JSON 输出 `protocol_failed` 重试：格式错误只生成 attempt 诊断和修复提示，不重新执行用户任务。
+定向离线测试、内部 listener 测试和策略回归全部通过；最新完整 `npm test` 为 1600 项，1584 通过、16 项 Windows 平台跳过、0 失败。远端健康 Goal `55426f18-22b1-4088-99ac-eb7378a58149` 和真实文件 Goal `2a91d8b1-faa4-46d7-a9d7-158a64e9a754` 均已通过，后者的 Verification `7e17a510-b9e9-403e-9725-5c52213f7eb7` 为 `passed`，同时包含 2 个 artifact 和 3 个成功工具回执。文件验收期间还补齐了原仓库的非 JSON 输出 `protocol_failed` 重试：格式错误只生成 attempt 诊断和修复提示，不重新执行用户任务。
 
 第13C-L 又把 Goal 反馈续跑接入真实网页服务：`apps/api/goal-api.mjs` 创建参考仓库同形状的 `turnPort`，`bootstrap.mjs` 和 `service-lifecycle.mjs` 负责启动、停止和排空，`TaskMessageService` 暴露空闲/待输入门控。新增的 policy 回放覆盖合法 retrieval external claim、artifact 错绑和多来源 source-specific claim；并修复合法 retrieval claim 被无条件误拒绝的问题。服务器重启后历史 Goal 确实自动收到包含 `latestVerificationFeedback` 的下一轮消息，说明持久 Goal、lease 和真实 Agent turn 已接通；由于执行 Agent 没有学术检索工具，历史实验最终暂停保留证据，没有被写成业务成功。详见 [Goal反馈续跑实时验收](analysis/2026-10-27-goal-coordinator-live.md)。
+
+本轮还把职责边界写入执行 Agent 的 Agent Compose `designer` system prompt 和 Goal continuation prompt：执行 Agent 只使用 `sirna-tools`，不得调用 verifier-only 的 scholarly search/fetch 或伪造 `retrievalId/evidenceId`；需要外部事实时保存 DOI、PMID、URL、标题和对应结论，交给独立 verifier 重新检索。配置回放和续跑提示回放均覆盖这一约束。
 
 13C-K 的受控外部检索实验见 [独立记录](analysis/2026-10-27-controlled-retrieval-goal.md)。它没有被写成成功闭环：OpenAlex/Europe PMC 的真实 retrieval receipt 已经由 verifier 取得，但执行 Agent 没有学术检索工具；现在后端已经锁定 external/artifact/source-counting 证据约束，下一步仍需在有限预算的新 Goal 中提供执行侧检索能力或明确采用 verifier-only retrieval，再验证失败后一次修订能否最终通过。

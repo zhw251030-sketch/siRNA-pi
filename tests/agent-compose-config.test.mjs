@@ -1,0 +1,17 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const config = fs.readFileSync(path.join(root, 'agent-compose.yml'), 'utf8');
+const designer = config.slice(config.indexOf('  designer:'), config.indexOf('  goal-verifier:'));
+
+test('Agent Compose keeps scholarly retrieval in the independent verifier role', () => {
+  assert.match(designer, /mcp_servers:\s+- sirna-tools/);
+  const mcpSection = designer.slice(designer.indexOf('mcp_servers:'), designer.indexOf('driver:'));
+  assert.doesNotMatch(mcpSection, /goal-verifier-tools|search_verification_sources|fetch_verification_source/);
+  assert.match(designer, /independent verifier/);
+  assert.match(designer, /do not invent\s+retrievalId or evidenceId/);
+});

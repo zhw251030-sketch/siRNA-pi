@@ -39,6 +39,10 @@ test('continuation prompt states bounded work and includes verifier feedback', (
   assert.match(prompt, /step-1/);
   assert.match(prompt, /缺少输出文件/);
   assert.match(prompt, /update_goal status=complete/);
+  assert.match(prompt, /独立 verifier/);
+  assert.match(prompt, /search_verification_sources/);
+  assert.match(prompt, /不要伪造 retrievalId 或 evidenceId/);
+  assert.match(prompt, /来源线索/);
 });
 
 test('dispatches only when idle and records a successful accepted lease', async () => {
