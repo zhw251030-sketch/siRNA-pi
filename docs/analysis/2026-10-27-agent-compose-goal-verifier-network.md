@@ -18,7 +18,7 @@ Goal PATCH complete
 
 `apps/api/bootstrap.mjs` 启动两个监听器：网页接口只对本机开放；内部 listener 复用同一个路由处理器，但 `apps/api/goal-verifier-internal-listener.mjs` 只允许 `/health` 和 `/v1/goal-verifications/{id}/{operation}`。`apps/api/router.mjs` 再用 host allow-list 和短期 token 做第二层约束。这样 Agent Compose 容器能访问验证服务，却不能把整个网页 API 当作工具网关。
 
-## 三次真实结果
+## 四次真实结果
 
 ### 第一次：字段契约不足
 
@@ -32,11 +32,20 @@ Goal PATCH complete
 
 修复位于 `packages/extensions/goal/goal-verification-policy.mjs`：先执行字段级校验；格式错误走 `VERIFIER_OUTPUT_INVALID` 的 review 修复路径，真实未知 ID 仍走 `EVIDENCE_REFERENCE_INVALID` 的 resolve-evidence 路径。`tests/goal-verification-coordinator.test.mjs` 新增了 malformed evidence 的两次尝试回归。
 
-### 第三次：协议正确，业务证据不足
+### 第三次：确定性检查证据已建立，但模型带入无关产物声明
 
-第三次结果被协议层接受，策略得到的是合理的业务失败：当前 Goal bundle 没有输出 artifact，也没有成功的工具回执，只有用户消息和受控检索记录，因此不能证明“内部健康接口确实被执行并返回成功”。这次没有 `undefined` 字段、未知验收项或无效 evidence 引用。
+第三次结果被协议层接受，工具回执和 `check_verification_artifact` 都已经进入冻结 bundle。策略正确识别出健康探针满足执行标准，但模型额外生成了 `numbers.csv` 事实，并把 `deterministic_check` 与 artifact 证据混用；旧策略只认可 `artifact_read`，因此报告了 `EVIDENCE_METHOD_MISMATCH`。这次没有 `undefined` 字段、未知验收项或无效 evidence 引用。
 
-这不是网络链路失败，而是证据闭环尚未建立。要让该 Goal 通过，后续需要在任务执行侧产生一个真实的 health probe 工具回执，或把 probe 输出保存为冻结 artifact，再由 verifier 用 `list_verification_evidence` 和 `check_verification_artifact` 引用。
+### 第四次：Goal 通过
+
+策略层补齐了原仓库的 `deterministic_check` 规则：
+
+- 证据 URL 必须是后端生成的 `check://{id}`；
+- `getCheck(id)` 必须在当前 verification 范围内存在；
+- 只有 `result.passed === true` 才能支撑 artifact/objective 事实或 execution 类验收项；
+- 携带伪造 `retrievalId` 的检查证据会 fail-closed。
+
+同时，验证提示明确规定没有问题时 `qualityReview.issues` 必须是空数组 `[]`，不能写“无未解决问题”占位字符串。第四次 Verification `398b298e-63c0-49b8-aa39-3a4027b5138b` 状态为 `passed`，Goal 最终状态为 `complete`。这次没有重新执行任务；它复用了同一个真实工具回执，只重新冻结并验证了证据，符合原仓库“验证失败回到 active、修复后重新验证，不重复用户任务”的语义。
 
 ## 额外修复：受控 fetch 路由
 
@@ -52,4 +61,6 @@ Goal PATCH complete
 | `goal-verification-access.mjs`、`goal-verification-evidence.mjs` | Goal verification access service 与 controlled retrieval |
 | `goal-verifier-internal-listener.mjs` | 原项目中 Agent Compose 与 API 的内部服务边界 |
 
-本轮证明了独立容器、内部网络和模型调用可以连通，也证明了策略会拒绝没有执行证据的完成声明；它还没有证明 Goal 可以通过，因为真正的执行回执尚未进入该任务的冻结 bundle。
+`goal-verification-policy.mjs` 现在还与原仓库 `goal-verification-policy.ts` 对齐了 `deterministic_check`、verification-scoped `getCheck`、通过检查支撑 artifact/objective/execution 的规则；`tests/goal-verification-policy.test.mjs` 覆盖通过检查、未知检查和带伪造 retrieval ID 的 fail-closed 行为。
+
+本轮最终证明了独立容器、内部网络、模型调用、冻结 bundle、工具回执、确定性检查、策略判定和 Goal 状态转换可以连通。它仍然是一个最小网络接线测试，不代表完整业务任务上的普适成功率；下一步应把同样的验证链路用于真实文件产出、受控检索和失败后修订场景。

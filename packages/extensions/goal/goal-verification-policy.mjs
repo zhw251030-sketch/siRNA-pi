@@ -111,10 +111,10 @@ export function resolveVerificationProposal(bundle, proposal, persistedEvidenceU
 function methodMatches(run, claim, context = {}) {
   return claim.evidence.every(evidence => {
     if (evidence.method === 'retrieval') return Boolean(evidence.retrievalId && evidence.sourceUrl?.startsWith('https://'));
-    if (evidence.method === 'artifact_read') return evidence.sourceUrl?.startsWith('artifact://') && run.bundle.artifacts.some(item => `artifact://${item.id}` === evidence.sourceUrl);
-    if (evidence.method === 'message_quote') return evidence.sourceUrl?.startsWith('message://') && run.bundle.messages.some(item => `message://${item.id}` === evidence.sourceUrl);
-    if (evidence.method === 'tool_receipt') return evidence.sourceUrl?.startsWith('tool-receipt://') && run.bundle.toolReceipts.some(item => `tool-receipt://${item.eventId}` === evidence.sourceUrl);
-    if (evidence.method === 'deterministic_check') return evidence.sourceUrl?.startsWith('check://') && Boolean(context.getCheck?.(evidence.sourceUrl.slice('check://'.length)));
+    if (evidence.method === 'artifact_read') return !evidence.retrievalId && evidence.sourceUrl?.startsWith('artifact://') && run.bundle.artifacts.some(item => `artifact://${item.id}` === evidence.sourceUrl);
+    if (evidence.method === 'message_quote') return !evidence.retrievalId && evidence.sourceUrl?.startsWith('message://') && run.bundle.messages.some(item => `message://${item.id}` === evidence.sourceUrl);
+    if (evidence.method === 'tool_receipt') return !evidence.retrievalId && evidence.sourceUrl?.startsWith('tool-receipt://') && run.bundle.toolReceipts.some(item => `tool-receipt://${item.eventId}` === evidence.sourceUrl);
+    if (evidence.method === 'deterministic_check') return !evidence.retrievalId && evidence.sourceUrl?.startsWith('check://') && Boolean(context.getCheck?.(evidence.sourceUrl.slice('check://'.length)));
     return false;
   });
 }
@@ -126,7 +126,7 @@ function claimAccepted(run, claim, context = {}) {
   if (claim.category === 'external_fact') return claim.evidence.some(e => e.method === 'retrieval');
   if (claim.category === 'tool_result') return successfulTool(run, claim);
   if (claim.category === 'artifact') return artifactEvidence(claim, context);
-  if (claim.category === 'objective') return claim.evidence.some(e => ['artifact_read', 'tool_receipt'].includes(e.method));
+  if (claim.category === 'objective') return claim.evidence.some(e => ['artifact_read', 'tool_receipt'].includes(e.method)) || passedCheck(claim, context);
   return false;
 }
 
@@ -160,7 +160,7 @@ export function evaluateVerificationResult(run, result, context = {}) {
     const linked = (requirement.claimIds ?? []).map(id => claims.get(id)).filter(Boolean);
     if (!linked.length || (requirement.claimIds ?? []).some(id => !accepted.has(id))) add('REQUIREMENT_WITHOUT_SUPPORTED_CLAIM', `验收项 ${requirement.criterionId} 没有完整映射到合格事实。`, {criterionId: requirement.criterionId});
     for (const evidenceClass of criteria.get(requirement.criterionId).requiredEvidence ?? []) {
-      const matched = linked.some(claim => accepted.has(claim.id) && (evidenceClass === 'external' ? claim.category === 'external_fact' : evidenceClass === 'execution' ? claim.category === 'tool_result' : evidenceClass === 'artifact' ? claim.category === 'artifact' : true));
+      const matched = linked.some(claim => accepted.has(claim.id) && (evidenceClass === 'external' ? claim.category === 'external_fact' : evidenceClass === 'execution' ? (claim.category === 'tool_result' || passedCheck(claim, context)) : evidenceClass === 'artifact' ? claim.category === 'artifact' : true));
       if (!matched) add('REQUIREMENT_EVIDENCE_CLASS_MISMATCH', `验收项 ${requirement.criterionId} 需要 ${evidenceClass} 类证据。`, {criterionId: requirement.criterionId, evidenceClass});
     }
     const min = criteria.get(requirement.criterionId).minimumExternalSources;
