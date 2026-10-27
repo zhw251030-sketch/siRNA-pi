@@ -32,7 +32,7 @@ export function startApiServices({server,toolMaintenance,toolRepair,toolCuration
   goalVerification?.start?.();
 }
 
-export function createApiShutdown({server,toolMaintenance,toolRepair,toolCuration,toolCurationBuild,toolCurationCoordinator,toolApproval,goalVerification,toolsServer,stores=[],rpc,rpcs=[]}) {
+export function createApiShutdown({server,additionalServers=[],toolMaintenance,toolRepair,toolCuration,toolCurationBuild,toolCurationCoordinator,toolApproval,goalVerification,toolsServer,stores=[],rpc,rpcs=[]}) {
   let pending;
   return function shutdown() {
     if(pending)return pending;
@@ -44,7 +44,9 @@ export function createApiShutdown({server,toolMaintenance,toolRepair,toolCuratio
       let failed=false;
       const attempt=async action=>{try{await action();}catch{failed=true;}};
       try {
-        await attempt(()=>new Promise((resolve,reject)=>server.close(error=>error&&error.code!=='ERR_SERVER_NOT_RUNNING'?reject(error):resolve())));
+        for (const candidate of [server, ...additionalServers].filter(Boolean)) {
+          await attempt(()=>new Promise((resolve,reject)=>candidate.close(error=>error&&error.code!=='ERR_SERVER_NOT_RUNNING'?reject(error):resolve())));
+        }
         await attempt(()=>server.waitForTaskCompletion());
         if((await drainResult).some(item=>item.status==='rejected'))failed=true;
       } finally {

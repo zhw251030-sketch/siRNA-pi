@@ -47,6 +47,6 @@ agents:
       SIRNA_GOAL_VERIFIER:
         value: "1"
       SIRNA_TOOL_REGISTRY_URL:
-        value: http://host.docker.internal:3000
+        value: http://172.18.0.1:3001
     sandbox:
       stopped_runtime_policy: remove

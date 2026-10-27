@@ -61,7 +61,7 @@ async function readBody(request, maxBytes=1048576) {
 
 // HTTP only coordinates transport. Task state and runtime execution stay in
 // their own packages, matching the reference repository's responsibility split.
-export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolMaintenance, toolApproval, toolRepair, toolCurationPreview, toolCuration, toolCurationBuild, toolCurationCoordinator, goalStore, goalVerification, taskMessages: sharedTaskMessages } = {}) {
+export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolMaintenance, toolApproval, toolRepair, toolCurationPreview, toolCuration, toolCurationBuild, toolCurationCoordinator, goalStore, goalVerification, taskMessages: sharedTaskMessages, allowedHosts = [] } = {}) {
   const taskMessages = sharedTaskMessages ?? new TaskMessageService({ taskStore, agentRuntime, workspaceFiles });
   const goalApi = goalStore ? createGoalApi({
     taskStore,
@@ -71,18 +71,20 @@ export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolM
     appendObjective: (taskId, content, requestId) => taskStore.appendConversationUserMessage(taskId, content, requestId),
     verification: goalVerification?.port ?? goalVerification,
   }) : undefined;
+  const allowedHostNames = new Set(['127.0.0.1', 'localhost', ...allowedHosts]);
   const activeTurns = new Set();
   const track = (operation) => {
     activeTurns.add(operation);
     operation.then(() => activeTurns.delete(operation), () => activeTurns.delete(operation));
     return operation;
   };
-  const server = createServer(async (request, response) => {
+  const requestHandler = async (request, response) => {
     response.setHeader("Cache-Control", "no-store");
     response.setHeader("X-Content-Type-Options", "nosniff");
     response.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
     const host = request.headers.host ?? "";
-    if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host) ||
+    const hostName = host.replace(/:\d+$/, '');
+    if (!allowedHostNames.has(hostName) ||
         (request.headers.origin && request.headers.origin !== `http://${host}`)) {
       request.resume();
       return reply(response, 403, { error: "请从本机网页访问此服务。" });
@@ -326,7 +328,11 @@ export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolM
           { error: known ? error.message : "服务处理失败，请检查项目内运行记录。" });
       } else if (!response.destroyed) response.end();
     }
-  });
+  };
+  const server = createServer(requestHandler);
+  // The verifier's private bridge listener reuses exactly this handler. It is
+  // exposed as an explicit capability rather than opening a second public API.
+  server.requestHandler = requestHandler;
   server.requestTimeout = 15000;
   server.headersTimeout = 10000;
   // HTTP connections and accepted agent turns have different lifetimes.

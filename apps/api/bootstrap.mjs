@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { createServer } from "node:http";
 import { projectRoot, ensureProjectDirectory } from "../../packages/agent-runtime/pi-sdk.mjs";
 import { LocalPiRuntime } from "../../packages/agent-runtime/local-pi-runtime.mjs";
 import { AgentComposeRuntime } from "../../packages/agent-runtime/agent-compose-runtime.mjs";
@@ -134,16 +135,37 @@ toolCurationCoordinator=createToolCurationCoordinator({root:projectRoot,taskStor
   approveTool:(proposalId,actor)=>approveRegisteredToolProposal(proposalId,actor,{root:projectRoot}),
   automaticApproval:process.env.SIRNA_AUTOMATIC_APPROVAL==='1',
   isReady:createCurationAutomationReadiness({taskMessages,agentRuntime}),isTaskBusy:taskId=>taskMessages.isTaskBusy(taskId),intervalMs:1000,maxReviews:3});
-const server = createAppServer({ taskStore, agentRuntime, workspaceFiles, taskMessages, goalStore, goalVerification, toolMaintenance, toolApproval, toolRepair, toolCurationPreview, toolCuration, toolCurationBuild, toolCurationCoordinator });
-const shutdown = createApiShutdown({server,toolMaintenance,toolApproval,toolRepair,toolCuration,toolCurationBuild,toolCurationCoordinator,toolsServer,
+const internalApiHost = process.env.SIRNA_GOAL_VERIFIER_API_HOST;
+const internalApiPort = Number(process.env.SIRNA_GOAL_VERIFIER_API_PORT ?? 3001);
+if (internalApiHost !== undefined && (!/^[A-Za-z0-9.-]+$/.test(internalApiHost) || !Number.isInteger(internalApiPort) || internalApiPort < 1024 || internalApiPort > 65535)) {
+  throw new Error('Invalid Goal verifier internal API listener configuration');
+}
+const server = createAppServer({ taskStore, agentRuntime, workspaceFiles, taskMessages, goalStore, goalVerification, toolMaintenance, toolApproval, toolRepair, toolCurationPreview, toolCuration, toolCurationBuild, toolCurationCoordinator,
+  ...(internalApiHost ? {allowedHosts: [internalApiHost]} : {}) });
+const internalApiServer = goalVerificationMode === 'agent-compose' && internalApiHost
+  ? createServer(server.requestHandler)
+  : undefined;
+if (internalApiServer) {
+  internalApiServer.requestTimeout = 15000;
+  internalApiServer.headersTimeout = 10000;
+}
+const shutdown = createApiShutdown({server,additionalServers: internalApiServer ? [internalApiServer] : [],toolMaintenance,toolApproval,toolRepair,toolCurationBuild,toolCurationCoordinator,toolsServer,
   goalVerification,
   stores:[taskStore,goalStore,maintenanceStore,toolAutomation,toolApprovalStore,repairStore,curationStore,curationBuildStore,gapStore,...(goalVerification ? [goalVerification.store] : [])],rpcs:[rpc,curatorRpc]});
 const shutdownFailure = () => {console.error('服务停止未完全确认，请检查项目内私有运行记录。');process.exitCode=1;};
-server.listen(3000, "127.0.0.1", () => {
+server.listen(3000, "127.0.0.1", async () => {
   // Never recover or claim jobs until this instance owns the listening socket.
-  try {startApiServices({server,toolRepair,toolCurationBuild,toolMaintenance,toolCuration,toolApproval,toolCurationCoordinator,goalVerification});}
+  try {
+    if (internalApiServer) {
+      await new Promise((resolve, reject) => {
+        internalApiServer.once('error', reject);
+        internalApiServer.listen(internalApiPort, internalApiHost, resolve);
+      });
+    }
+    startApiServices({server,toolRepair,toolCurationBuild,toolMaintenance,toolCuration,toolApproval,toolCurationCoordinator,goalVerification});
+  }
   catch {shutdownFailure();void shutdown().catch(shutdownFailure);return;}
-  console.log(`siRNA-pi: http://127.0.0.1:3000/ ; runtime=agent-compose ; recovered=${recovered.length}`);
+  console.log(`siRNA-pi: http://127.0.0.1:3000/ ; runtime=agent-compose ; internal=${internalApiServer ? `${internalApiHost}:${internalApiPort}` : 'off'} ; recovered=${recovered.length}`);
 });
 server.on("error", () => { console.error("网页服务启动失败，请检查端口与项目配置。");process.exitCode=1;void shutdown().catch(shutdownFailure);});
 process.once("SIGTERM", () => {void shutdown().catch(shutdownFailure);});
