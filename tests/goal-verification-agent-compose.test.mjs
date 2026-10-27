@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {AgentComposeRuntime} from '../packages/agent-runtime/agent-compose-runtime.mjs';
-import {createAgentComposeGoalVerifier, createRuntimeGoalVerifier, verificationPrompt} from '../packages/extensions/goal/goal-verification-agent-compose.mjs';
+import {createAgentComposeGoalVerifier, createRuntimeGoalVerifier, verificationPrompt, GoalVerifierResultProtocolError} from '../packages/extensions/goal/goal-verification-agent-compose.mjs';
 
 const review = () => ({
   protocolVersion: 'sirna-goal-verification-review/v1', decision: 'fail', summary: '证据不足', feedback: '请补充证据',
@@ -68,6 +68,18 @@ test('Agent Compose verifier sends retry feedback and rejects ambiguous model ou
   );
   assert.match(request.message, /EVIDENCE_REFERENCE_INVALID/);
   assert.match(request.message, /read_verification_attempt/);
+});
+
+test('malformed verifier output carries bounded raw text for coordinator repair', async () => {
+  const chat = {
+    async create() { return {id: 'session-malformed'}; },
+    async run(_request, emit) { emit({type: 'assistant_message', text: `${JSON.stringify(review())}\n${JSON.stringify(review())}`}); },
+    async remove() {},
+  };
+  await assert.rejects(
+    createAgentComposeGoalVerifier(chat).verify(run(), 'short-lived-secret-123456'),
+    error => error instanceof GoalVerifierResultProtocolError && error.rawOutput.includes('protocolVersion'),
+  );
 });
 
 test('verification prompt exposes backend evidence IDs but forbids model-created locators', () => {

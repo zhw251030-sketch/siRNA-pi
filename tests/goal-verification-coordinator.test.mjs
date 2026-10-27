@@ -10,6 +10,7 @@ import {GoalVerificationBundleBuilder} from '../packages/extensions/goal/goal-ve
 import {GoalVerificationStore} from '../packages/extensions/goal/goal-verification-store.mjs';
 import {GoalVerificationCoordinator} from '../packages/extensions/goal/goal-verification-coordinator.mjs';
 import {createDeterministicGoalVerifier} from '../packages/extensions/goal/goal-verification-fake.mjs';
+import {GoalVerifierResultProtocolError} from '../packages/extensions/goal/goal-verification-agent-compose.mjs';
 
 const sha256 = value => createHash('sha256').update(value).digest('hex');
 
@@ -190,6 +191,32 @@ test('malformed evidence objects trigger a verifier protocol repair before evide
   assert.deepEqual(attempts.map(attempt => attempt.status), ['protocol_failed', 'accepted']);
   assert.match(attempts[0].diagnostics, /RESULT_SCHEMA_INVALID/);
   assert.match(attempts[0].diagnostics, /bare string/);
+});
+
+test('malformed raw verifier output is a repairable protocol failure', async t => {
+  const f = fixture(t);
+  const base = createDeterministicGoalVerifier();
+  let calls = 0;
+  let retryFeedback;
+  const verifier = {
+    async verify(run, token, signal, onStarted, feedback) {
+      calls++;
+      retryFeedback = feedback;
+      onStarted?.(`session-${calls}`, `run-${calls}`);
+      if (calls === 1) throw new GoalVerifierResultProtocolError('verifier output must contain exactly one complete JSON object', `prose ${token} {"one":1} {"two":2}`);
+      return {result: await base.verify(run, token, signal, onStarted, feedback), sessionId: `session-${calls}`, runId: `run-${calls}`};
+    },
+  };
+  const coordinator = new GoalVerificationCoordinator(f.goals, f.store, f.bundles, verifier, {autoRun: false});
+  const request = await coordinator.request(f.verifying);
+  await coordinator.runVerification(request.id);
+  assert.equal(f.store.get(request.id).status, 'passed');
+  assert.equal(calls, 2);
+  assert.match(retryFeedback ?? '', /VERIFIER_OUTPUT_INVALID/);
+  const attempts = f.store.listAttempts(request.id);
+  assert.deepEqual(attempts.map(attempt => attempt.status), ['protocol_failed', 'accepted']);
+  assert.match(attempts[0].diagnostics, /previousRawOutput/);
+  assert.doesNotMatch(attempts[0].diagnostics, /interrupted-attempt-token|short-lived/);
 });
 
 test('coordinator closes an interrupted running attempt before resuming from the next attempt number', async t => {

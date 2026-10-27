@@ -1,6 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {resolveVerificationProposal, evaluateVerificationResult, GoalEvidenceReferenceError} from './goal-verification-policy.mjs';
 import {GoalVerificationEvidenceResolver} from './goal-verification-evidence-resolver.mjs';
+import {GoalVerifierResultProtocolError} from './goal-verification-agent-compose.mjs';
 
 const MAX_ATTEMPTS = 3;
 
@@ -9,11 +10,11 @@ function repairReference(verificationId, attemptNumber, code, failedStage) {
   return JSON.stringify({protocolVersion: 'sirna-goal-verification-repair-reference/v1', code, failedStage, failedAttempt: attemptNumber,
     correctionContext: {tool: 'read_verification_attempt', arguments: {verificationId, attemptNumber, field: 'diagnostics', offset: 0, maxChars: 16_000}, pagination: 'Repeat with nextOffset while truncated is true; read field=proposal only when diagnostics requires the prior complete proposal.'}}, null, 2);
 }
-function repairDiagnostics(store, verificationId, attemptNumber, error, response, code, failedStage) {
+function repairDiagnostics(store, verificationId, attemptNumber, error, response, code, failedStage, rawOutput) {
   const raw = response?.result ?? response;
   const findings = error?.findings ?? [{code: code === 'EVIDENCE_REFERENCE_INVALID' ? 'EVIDENCE_REFERENCE_INVALID' : 'RESULT_SCHEMA_INVALID', field: '$', message: safeError(error)}];
   const evidence = store.listEvidenceUnits(verificationId).map(unit => ({evidenceId: unit.id, method: unit.method, ...(unit.sourceId ? {sourceId: unit.sourceId} : {}), ...(unit.title ? {title: unit.title} : {})}));
-  return JSON.stringify({code, failedStage, failedAttempt: attemptNumber, error: safeError(error), findings, previousProposal: raw ?? null, availableEvidence: evidence.slice(0, 200), availableEvidenceTotal: evidence.length,
+  return JSON.stringify({code, failedStage, failedAttempt: attemptNumber, error: safeError(error), findings, ...(rawOutput ? {previousRawOutput: rawOutput} : {}), previousProposal: raw ?? null, availableEvidence: evidence.slice(0, 200), availableEvidenceTotal: evidence.length,
     nextAction: code === 'EVIDENCE_REFERENCE_INVALID' ? 'Replace unknown evidenceId with a backend ID from availableEvidence or mark the claim insufficient_evidence; return a complete replacement review.' : 'Return one complete replacement review object that satisfies the protocol schema.'}, null, 2);
 }
 
@@ -108,14 +109,16 @@ export class GoalVerificationCoordinator {
           return completed;
         } catch (error) {
           lastError = error;
-          if (!verifierReturned) {
+          const protocolFailure = error instanceof GoalVerifierResultProtocolError;
+          if (!verifierReturned && !protocolFailure) {
             this.store.finishAttempt({verificationId: id, attemptNumber: attempt, status: 'error', diagnostics: safeError(error), sessionId, runId});
             throw error;
           }
           const evidenceFailure = error instanceof GoalEvidenceReferenceError;
           const code = evidenceFailure ? 'EVIDENCE_REFERENCE_INVALID' : 'VERIFIER_OUTPUT_INVALID';
           const failedStage = evidenceFailure ? 'resolve_evidence' : 'review';
-          const diagnostics = repairDiagnostics(this.store, id, attempt, error, response, code, failedStage);
+          const rawOutput = protocolFailure ? error.rawOutput.replaceAll(accessToken, '[REDACTED_SHORT_LIVED_ACCESS_TOKEN]') : undefined;
+          const diagnostics = repairDiagnostics(this.store, id, attempt, error, response, code, failedStage, rawOutput);
           this.store.finishAttempt({verificationId: id, attemptNumber: attempt, status: attempt === MAX_ATTEMPTS ? 'error' : 'protocol_failed', rawProposal: response?.result ?? response, diagnostics, sessionId, runId});
           if (attempt === MAX_ATTEMPTS) throw error;
           retryFeedback = repairReference(id, attempt, code, failedStage);

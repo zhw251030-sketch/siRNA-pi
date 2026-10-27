@@ -3,6 +3,14 @@ import {GOAL_VERIFICATION_REVIEW_PROTOCOL} from './goal-verification-policy.mjs'
 const REDACTED_TOKEN = '[REDACTED_SHORT_LIVED_ACCESS_TOKEN]';
 const MAX_OUTPUT_CHARS = 200_000;
 
+export class GoalVerifierResultProtocolError extends Error {
+  constructor(message, rawOutput) {
+    super(message);
+    this.name = 'GoalVerifierResultProtocolError';
+    this.rawOutput = String(rawOutput ?? '').slice(0, 40_000);
+  }
+}
+
 function object(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : undefined;
 }
@@ -155,7 +163,11 @@ export function createAgentComposeGoalVerifier(chat) {
           if (event?.type === 'error' && event?.error) runError = String(event.error);
         }, signal);
         if (runError) throw new Error(runError);
-        const result = extractOneJsonObject(finalText);
+        let result;
+        try { result = extractOneJsonObject(finalText); }
+        catch (error) {
+          throw new GoalVerifierResultProtocolError(error instanceof Error ? error.message : String(error), finalText);
+        }
         return {result, sessionId, ...(runId ? {runId} : {})};
       } finally {
         try { await chat.remove(sessionId); } catch {}
