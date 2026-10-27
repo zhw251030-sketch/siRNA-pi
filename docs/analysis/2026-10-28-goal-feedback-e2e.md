@@ -27,7 +27,7 @@
 
 ## 第一组：证明失败会被保留
 
-Task `80c14150-4255-4b75-8c27-fb6bc644dbba` 的 Goal `4b5277c3...` 使用 2 个自动回合预算。第一轮产物包含：
+Task `80c14150-4255-4b75-8c27-fb6bc644dbba` 的 Goal `4439ce77-2ca3-4009-9f5f-7da7164d4849` 使用 2 个自动回合预算。第一轮产物包含：
 
 ```text
 Verifier must read this report before checking.
