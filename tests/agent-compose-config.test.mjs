@@ -12,6 +12,7 @@ test('Agent Compose keeps scholarly retrieval in the independent verifier role',
   assert.match(designer, /mcp_servers:\s+- sirna-tools/);
   const mcpSection = designer.slice(designer.indexOf('mcp_servers:'), designer.indexOf('driver:'));
   assert.doesNotMatch(mcpSection, /goal-verifier-tools|search_verification_sources|fetch_verification_source/);
+  assert.match(config, /SIRNA_TOOL_REGISTRY_URL:\s+http:\/\/192\.168\.1\.169:3001/);
   assert.match(designer, /independent verifier/);
   assert.match(designer, /do not invent\s+retrievalId or evidenceId/);
 });

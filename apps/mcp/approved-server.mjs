@@ -13,19 +13,20 @@ function publicResult(result){
     Buffer.byteLength(JSON.stringify(result.content))>262144)throw new Error('Invalid public tool result');
   return {content:result.content.map(({text})=>({type:'text',text}))};
 }
-export function createApprovedMcpServer({discover,pollIntervalMs,builderTools=[],reportTools=[]}={}){
+export function createApprovedMcpServer({discover,pollIntervalMs,builderTools=[],reportTools=[],goalTools=[]}={}){
   if(typeof discover!=='function')throw new TypeError('An explicit approved-tool discovery callback is required');
   if(pollIntervalMs!==undefined&&(!Number.isInteger(pollIntervalMs)||pollIntervalMs<10||pollIntervalMs>30000))throw new TypeError('Invalid discovery poll interval');
-  const fixed=new Map(createSirnaTools().map(tool=>[tool.name,tool]));const builders=new Map(builderTools.map(tool=>[tool.name,tool]));let busy=false;
-  if(builders.size!==builderTools.length||[...builders.keys()].some(name=>fixed.has(name)))throw new TypeError('Invalid builder tools');
+  const fixed=new Map(createSirnaTools().map(tool=>[tool.name,tool]));const goals=new Map(goalTools.map(tool=>[tool.name,tool]));const builders=new Map(builderTools.map(tool=>[tool.name,tool]));let busy=false;
+  if(goals.size!==goalTools.length||[...goals.keys()].some(name=>fixed.has(name)))throw new TypeError('Invalid Goal tools');
+  if(builders.size!==builderTools.length||[...builders.keys()].some(name=>fixed.has(name)||goals.has(name)))throw new TypeError('Invalid builder tools');
   const reports=new Map(reportTools.map(tool=>[tool.name,tool]));
-  if(reports.size!==reportTools.length||[...reports.keys()].some(name=>fixed.has(name)||builders.has(name)))throw new TypeError('Invalid report tools');
+  if(reports.size!==reportTools.length||[...reports.keys()].some(name=>fixed.has(name)||goals.has(name)||builders.has(name)))throw new TypeError('Invalid report tools');
   const server=new Server({name:'sirna-approved-tools',version:'0.1.0'},{capabilities:{tools:pollIntervalMs?{listChanged:true}:{}},
     instructions:'Use registered tools for calculations. Approved means adopted after the recorded checks; outputs do not establish biological efficacy. Approved tools take {"input":{...business arguments...}}. File transfers are not supported by this learning step.'});
   async function load(signal){
     let result;try{result=await discover(signal?{signal}:undefined);}catch{throw new Error('Approved tool discovery unavailable');}
     if(!result||!Array.isArray(result.tools)||!Array.isArray(result.rejected)||result.rejected.length)throw new Error('Approved tool discovery unavailable');
-    const tools=new Map([...fixed,...builders,...reports]);
+    const tools=new Map([...fixed,...goals,...builders,...reports]);
     for(const tool of result.tools){
       if(!tool||typeof tool.name!=='string'||!/^[a-z][a-z0-9_]{0,63}$/.test(tool.name)||typeof tool.execute!=='function'||
         typeof tool.description!=='string'||!tool.parameters)throw new Error('Approved tool descriptor unavailable');
@@ -35,7 +36,7 @@ export function createApprovedMcpServer({discover,pollIntervalMs,builderTools=[]
   }
   const descriptors=tools=>[...tools.values()].map(tool=>({
     name:tool.name,title:tool.label,description:tool.description,inputSchema:tool.parameters,
-    annotations:{readOnlyHint:fixed.has(tool.name),destructiveHint:false,idempotentHint:fixed.has(tool.name),openWorldHint:false},
+    annotations:{readOnlyHint:fixed.has(tool.name)||tool.name==='get_goal',destructiveHint:false,idempotentHint:fixed.has(tool.name)||tool.name==='get_goal',openWorldHint:false},
   }));
   let fingerprint;let timer;let polling=false;
   server.setRequestHandler(ListToolsRequestSchema,async(_request,extra)=>{const tools=descriptors(await load(extra.signal));fingerprint=JSON.stringify(tools);return {tools};});
@@ -57,6 +58,11 @@ export function createApprovedMcpServer({discover,pollIntervalMs,builderTools=[]
     if(report){
       try{return publicResult(await report.execute(randomUUID(),request.params.arguments??{},extra.signal));}
       catch{return failure('Tool gap report unavailable; inspect saved reports before explicitly retrying.');}
+    }
+    const goal=goals.get(request.params.name);
+    if(goal){
+      try{return publicResult(await goal.execute(randomUUID(),request.params.arguments??{},extra.signal));}
+      catch{return failure('Goal tool call failed; inspect the current Goal state before retrying.');}
     }
     let tool;try{tool=(await load(extra.signal)).get(request.params.name);}catch{return failure('Approved tool discovery unavailable. Inspect the host registry.');}
     if(!tool)return failure('Unknown siRNA tool');

@@ -10,6 +10,7 @@ mcp_servers:
       SIRNA_APPROVED_TOOLS_URL: http://agent-tools-relay:7420
       SIRNA_TOOL_BUILDER_URL: http://agent-tools-relay:7420
       SIRNA_TOOL_GAP_URL: http://agent-tools-relay:7420
+      SIRNA_TOOL_REGISTRY_URL: http://192.168.1.169:3001
   goal-verifier-tools:
     type: local
     command: /usr/bin/node

@@ -33,6 +33,20 @@ test('host MCP discovers changing descriptors and retains the real fixed tool',a
   assert.equal(JSON.parse(fixed.content[0].text).candidates[0].guide,'U'.repeat(21));
   enabled=false;assert.equal((await client.callTool({name:'summarize_target_sequence',arguments:{input:{}}})).isError,true);
 });
+test('host MCP exposes Goal state tools without exposing verifier retrieval tools',async t=>{
+  const goalTool={name:'get_goal',label:'Get current Goal',description:'Read the current Goal.',parameters:{type:'object',properties:{},additionalProperties:false},execute:async()=>({content:[{type:'text',text:'{"status":"active"}'}]})};
+  const updateTool={name:'update_goal',label:'Update Goal',description:'Update Goal progress.',parameters:{type:'object',properties:{status:{type:'string'}},required:['status'],additionalProperties:false},execute:async(_id,args)=>({content:[{type:'text',text:JSON.stringify(args)}]})};
+  const server=api.createApprovedMcpServer({discover:async()=>({tools:[],rejected:[]}),goalTools:[goalTool,updateTool]});
+  const client=new Client({name:'goal-tool-contract-test',version:'1.0.0'});const [a,b]=InMemoryTransport.createLinkedPair();
+  t.after(async()=>{await client.close();await server.close();});await server.connect(b);await client.connect(a);
+  const listed=await client.listTools();
+  assert.deepEqual(listed.tools.map(tool=>tool.name).slice(-2),['get_goal','update_goal']);
+  assert.equal(listed.tools.at(-2).annotations.readOnlyHint,true);
+  assert.equal(listed.tools.at(-1).annotations.readOnlyHint,false);
+  assert.deepEqual(await client.callTool({name:'get_goal',arguments:{}}),{content:[{type:'text',text:'{"status":"active"}'}]});
+  assert.deepEqual(await client.callTool({name:'update_goal',arguments:{status:'progress'}}),{content:[{type:'text',text:'{"status":"progress"}'}]});
+  assert.equal((await client.callTool({name:'search_verification_sources',arguments:{}})).isError,true);
+});
 test('MCP forwards business arguments with platform call ID and only returns public content',async t=>{
   let observed;
   const client=await connect(t,()=>({tools:[descriptor(async(id,args,signal)=>{
