@@ -24,7 +24,12 @@ export function createGoalTools({registryUrl, taskContextPath, fetchImpl = fetch
     if (typeof registryUrl !== 'string' || !registryUrl) throw new Error('registryUrl is required for Goal tools');
     const response = await fetchImpl(`${registryUrl.replace(/\/$/, '')}/v1/tasks/${encodeURIComponent(context.taskId)}/goal`, {
       method,
-      headers: {'content-type': 'application/json', 'x-sirna-task-id': context.taskId, 'x-sirna-agent-turn-id': context.agentTurnId ?? ''},
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${context.token}`,
+        'x-sirna-task-id': context.taskId,
+        'x-sirna-agent-turn-id': context.agentTurnId ?? '',
+      },
       ...(body === undefined ? {} : {body: JSON.stringify(body)}),
     });
     const raw = await response.text();

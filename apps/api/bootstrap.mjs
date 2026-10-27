@@ -153,7 +153,7 @@ const server = createAppServer({ taskStore, agentRuntime, workspaceFiles, taskMe
   goalCoordinatorEnabled: process.env.SIRNA_GOAL_COORDINATOR !== '0',
   ...(internalApiHost ? {allowedHosts: [internalApiHost]} : {}) });
 const internalApiServer = goalVerificationMode === 'agent-compose' && internalApiHost
-  ? createServer(createGoalVerifierInternalHandler(server.requestHandler))
+  ? createServer(createGoalVerifierInternalHandler(server.requestHandler, {goalApi: server.goalCoordinator, leases: toolCallLeases}))
   : undefined;
 if (internalApiServer) {
   internalApiServer.requestTimeout = 15000;
