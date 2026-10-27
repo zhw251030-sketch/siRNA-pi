@@ -19,7 +19,7 @@
 
 ## 离线验收
 
-新增了 Goal API 的真实 coordinator port 回放、retrieval external claim 正例、artifact 错绑负例、聚合 claim 冒充多来源负例和 source-specific 多来源正例。完整 `npm test` 结果为 1598 项：1582 通过、16 项 Windows 平台跳过、0 失败。
+新增了 Goal API 的真实 coordinator port 回放、retrieval external claim 正例、artifact 错绑负例、聚合 claim 冒充多来源负例和 source-specific 多来源正例；随后补充了 Agent Compose daemon/workspace 空闲状态的 fail-closed 测试。完整 `npm test` 结果为 1599 项：1583 通过、16 项 Windows 平台跳过、0 失败。
 
 ## 服务器实时验收
 
