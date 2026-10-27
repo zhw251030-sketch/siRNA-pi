@@ -210,7 +210,10 @@ export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolM
           const verificationId = goalVerificationAccessRoute[1];
           if (body.verificationId !== undefined && body.verificationId !== verificationId) throw new Error('verification id does not match the route');
           if (typeof body.accessToken !== 'string' || !body.accessToken) throw new Error('accessToken is required');
-          const result = await goalVerification.access.handle(goalVerificationAccessRoute[2], {...body, verificationId});
+          const operation = goalVerificationAccessRoute[2];
+          const signal = ['search', 'fetch'].includes(operation) && typeof AbortSignal?.timeout === 'function'
+            ? AbortSignal.timeout(20_000) : undefined;
+          const result = await goalVerification.access.handle(operation, {...body, verificationId}, signal);
           return reply(response, 200, result);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);

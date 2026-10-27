@@ -229,9 +229,10 @@ export function createGoalVerificationAccess({store, bundles, evidence} = {}) {
       return evidence.fetchSource({verificationId: input.verificationId, url: input.url}, signal);
     },
 
-    handle(kind, input) {
+    handle(kind, input, signal) {
       if (!['bundle', 'message', 'artifact', 'evidence', 'check', 'attempt', 'search', 'fetch'].includes(kind)) throw new Error('verification access operation is not available');
-      return service[kind](input);
+      const operation = kind === 'fetch' ? 'fetchSource' : kind;
+      return service[operation](input, signal);
     },
 
     summary: summarize,

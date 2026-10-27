@@ -114,6 +114,19 @@ test('controlled search and fetch use bounded scholarly routes and return no raw
   assert.equal(f.store.listRetrievals(f.request.id).length, 2);
 });
 
+test('generic access dispatch maps the HTTP fetch operation to fetchSource', async t => {
+  const f = await fixture(t);
+  const evidence = createGoalVerificationEvidenceAccess({
+    store: f.store,
+    bundles: f.bundles,
+    fetchImpl: async () => new Response('retrieved abstract', {status: 200, headers: {'content-type': 'text/plain'}}),
+  });
+  const access = createGoalVerificationAccess({store: f.store, bundles: f.bundles, evidence});
+  const result = await access.handle('fetch', {verificationId: f.request.id, accessToken: f.token, url: 'https://doi.org/10.1000/example'});
+  assert.equal(result.evidenceStatus, 'available');
+  assert.equal(result.responseText, undefined);
+});
+
 test('controlled fetch rejects outside hosts, excessive redirects and oversized bodies', async t => {
   const f = await fixture(t);
   const outside = createGoalVerificationEvidenceAccess({store: f.store, bundles: f.bundles, fetchImpl: async () => new Response('x')});
