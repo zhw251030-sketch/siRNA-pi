@@ -71,6 +71,8 @@
 
 本轮还把职责边界写入执行 Agent 的 Agent Compose `designer` system prompt 和 Goal continuation prompt：执行 Agent 只使用 `sirna-tools`，不得调用 verifier-only 的 scholarly search/fetch 或伪造 `retrievalId/evidenceId`；需要外部事实时保存 DOI、PMID、URL、标题和对应结论，交给独立 verifier 重新检索。配置回放和续跑提示回放均覆盖这一约束。
 
+随后又完成执行侧 Goal 工具的真实网络验收。参考仓库中执行 profile 访问主服务的 `/v1/tasks/:taskId/goal`；个人版网页服务仍只监听 `127.0.0.1:3000`，所以 `192.168.1.169:3001` 内部 listener 现在额外允许当前任务的 Goal 路由，但必须通过 `toolCallLeases` 的 Bearer token、taskId 和 agentTurnId 校验。`packages/extensions/goal/goal-tools.mjs` 发送相同的任务能力头，`apps/api/bootstrap.mjs` 注入共享 Goal API 与 leases；其它网页路由仍被拒绝。真实验收中 `get_goal` 和 `update_goal` 均成功，`step-1` 完成且 revision 推进。逐文件记录见 [Goal 工具真实接线验收](analysis/2026-10-28-goal-tools-live.md)。
+
 随后修复了执行侧 Goal 工具缺口：参考仓库的 `application-profile` 会把 `get_goal`、`create_goal`、`update_goal` 合并进 `sirna-tools` MCP；个人版现在由 `apps/mcp/remote-server.mjs` 通过 `SIRNA_TOOL_REGISTRY_URL` 注入同一组工具，`apps/mcp/approved-server.mjs` 负责发布并区分只读/写入标记。这样执行 Agent 可以更新 Goal 进度，但仍看不到 `goal-verifier-tools` 的 scholarly search/fetch。
 
 部署时还必须同步更新 guest 镜像：`containers/agent-compose-guest/Dockerfile` 显式复制 `packages/extensions/goal/goal-tools.mjs`，并由 `apps/mcp/remote-server.mjs` 默认读取 `/workspace/.sirna-task-context.json`。否则前者会让 guest 导入失败、后者会让 Goal tools 找不到任务身份；两种错误都会表现为普通的 MCP 工具失败，而不是一个可读的 Goal 状态错误。
