@@ -19,6 +19,7 @@ import { DockerEngineClient } from "../../packages/capability-platform/docker-en
 import { createAgentToolsServer } from "./agent-tools.mjs";
 import { listenToolSocket } from "./tool-api-socket.mjs";
 import { createTaskToolBuilders } from "../../packages/capability-platform/task-tool-builders.mjs";
+import { createInternalHealthProbeTool } from "../../packages/capability-platform/internal-health-probe.mjs";
 import { ToolMaintenanceStore } from "../../packages/capability-platform/tool-maintenance-store.mjs";
 import { createToolMaintenance } from "../../packages/capability-platform/tool-maintenance-worker.mjs";
 import { createMaintenanceValidator } from "../../packages/capability-platform/tool-maintenance-validation.mjs";
@@ -66,9 +67,16 @@ const builders = createTaskToolBuilders({root: projectRoot,docker,registrationPo
   if(!toolRepair)throw new Error('Tool repair admission is unavailable');
   return toolRepair.registration(input,context);
 },curationRegistrationPolicy:createCurationBuildRegistrationPolicy(()=>toolCurationBuild)});
+const internalHealthProbe = process.env.SIRNA_ENABLE_INTERNAL_HEALTH_PROBE === '1'
+  ? createInternalHealthProbeTool({url: `http://${process.env.SIRNA_GOAL_VERIFIER_API_HOST ?? '127.0.0.1'}:${process.env.SIRNA_GOAL_VERIFIER_API_PORT ?? '3001'}/health`})
+  : undefined;
 const toolsServer = createAgentToolsServer({ leases: toolCallLeases, builders,
   toolGaps:{report:(input,context)=>{if(!toolGaps)throw Object.assign(new Error('Report service unavailable'),{statusCode:503});return toolGaps.report(input,context);}},
-  discover: ({taskContext}) => discoverApprovedTools({ root: projectRoot, runner, taskContext }) });
+  discover: ({taskContext}) => {
+    const discovered = discoverApprovedTools({ root: projectRoot, runner, taskContext });
+    if (discovered.rejected.length || !internalHealthProbe) return discovered;
+    return {...discovered, tools: [...discovered.tools, internalHealthProbe]};
+  } });
 await listenToolSocket(toolsServer, {root: projectRoot});
 const compose = new AgentComposeRuntime({ root: projectRoot, executor: createComposeExecutor(projectRoot), rpc, toolCallLeases, toolBuildersAvailable:true });
 const agentRuntime = new RuntimeRouter({ compose, legacy: new LocalPiRuntime() });

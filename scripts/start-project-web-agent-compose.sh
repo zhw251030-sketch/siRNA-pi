@@ -13,6 +13,7 @@ fi
 api_host=${SIRNA_GOAL_VERIFIER_API_HOST:-192.168.1.169}
 api_port=${SIRNA_GOAL_VERIFIER_API_PORT:-3001}
 exec env SIRNA_GOAL_VERIFICATION=agent-compose \
+  SIRNA_ENABLE_INTERNAL_HEALTH_PROBE=1 \
   SIRNA_GOAL_VERIFIER_API_HOST="$api_host" \
   SIRNA_GOAL_VERIFIER_API_PORT="$api_port" \
   /home/hanwen/.nvm/versions/node/v24.16.0/bin/node "$project_root/apps/api/bootstrap.mjs"
