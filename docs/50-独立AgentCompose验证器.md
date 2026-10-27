@@ -73,4 +73,6 @@
 
 随后修复了执行侧 Goal 工具缺口：参考仓库的 `application-profile` 会把 `get_goal`、`create_goal`、`update_goal` 合并进 `sirna-tools` MCP；个人版现在由 `apps/mcp/remote-server.mjs` 通过 `SIRNA_TOOL_REGISTRY_URL` 注入同一组工具，`apps/mcp/approved-server.mjs` 负责发布并区分只读/写入标记。这样执行 Agent 可以更新 Goal 进度，但仍看不到 `goal-verifier-tools` 的 scholarly search/fetch。
 
+部署时还必须同步更新 guest 镜像：`containers/agent-compose-guest/Dockerfile` 显式复制 `packages/extensions/goal/goal-tools.mjs`。否则 `remote-server.mjs` 在 guest 内导入失败，MCP 会表现为“连接关闭”，而不是一个可读的 Goal 工具错误。
+
 13C-K 的受控外部检索实验见 [独立记录](analysis/2026-10-27-controlled-retrieval-goal.md)。它没有被写成成功闭环：OpenAlex/Europe PMC 的真实 retrieval receipt 已经由 verifier 取得，但执行 Agent 没有学术检索工具；现在后端已经锁定 external/artifact/source-counting 证据约束，下一步仍需在有限预算的新 Goal 中提供执行侧检索能力或明确采用 verifier-only retrieval，再验证失败后一次修订能否最终通过。

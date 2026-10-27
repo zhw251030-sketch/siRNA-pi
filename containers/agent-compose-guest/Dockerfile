@@ -7,6 +7,7 @@ RUN npm ci --omit=dev --no-audit --no-fund --engine-strict
 
 COPY config/pi/compose-settings.json /opt/sirna-pi/settings.json
 COPY packages/domain/sirna-tools/ /opt/sirna-pi/packages/domain/sirna-tools/
+COPY packages/extensions/goal/goal-tools.mjs /opt/sirna-pi/packages/extensions/goal/goal-tools.mjs
 COPY apps/mcp/ /opt/sirna-pi/apps/mcp/
 COPY scripts/verify-guest-mcp.mjs /opt/sirna-pi/scripts/verify-guest-mcp.mjs
 COPY scripts/verify-guest-tool-gap.mjs /opt/sirna-pi/scripts/verify-guest-tool-gap.mjs
