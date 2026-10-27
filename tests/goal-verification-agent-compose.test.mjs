@@ -99,6 +99,12 @@ test('verification prompt publishes the exact claim and requirement field contra
   assert.match(prompt, /forbiddenNearMissFields/);
 });
 
+test('verification prompt prefers direct retrieval evidence over exhaustive evidence paging', () => {
+  const prompt = verificationPrompt(run(), 'token-1234567890');
+  assert.match(prompt, /search_verification_sources.*fetch_verification_source.*直接复制其中的 evidenceId/s);
+  assert.match(prompt, /不要为了穷举工具回执而遍历整个证据目录/);
+});
+
 test('verification prompt spells out policy field names instead of ambiguous near-miss fields', () => {
   const prompt = verificationPrompt(run(), 'token-1234567890');
   assert.match(prompt, /"criterionId":\s*"copy exactly one backend acceptanceCriteria/);
