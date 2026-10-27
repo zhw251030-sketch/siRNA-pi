@@ -150,6 +150,7 @@ if (internalApiHost !== undefined && (!/^[A-Za-z0-9.-]+$/.test(internalApiHost) 
   throw new Error('Invalid Goal verifier internal API listener configuration');
 }
 const server = createAppServer({ taskStore, agentRuntime, workspaceFiles, taskMessages, goalStore, goalVerification, toolMaintenance, toolApproval, toolRepair, toolCurationPreview, toolCuration, toolCurationBuild, toolCurationCoordinator,
+  goalCoordinatorEnabled: process.env.SIRNA_GOAL_COORDINATOR !== '0',
   ...(internalApiHost ? {allowedHosts: [internalApiHost]} : {}) });
 const internalApiServer = goalVerificationMode === 'agent-compose' && internalApiHost
   ? createServer(createGoalVerifierInternalHandler(server.requestHandler))
@@ -159,7 +160,7 @@ if (internalApiServer) {
   internalApiServer.headersTimeout = 10000;
 }
 const shutdown = createApiShutdown({server,additionalServers: internalApiServer ? [internalApiServer] : [],toolMaintenance,toolApproval,toolRepair,toolCurationBuild,toolCurationCoordinator,toolsServer,
-  goalVerification,
+  goalVerification,goalCoordinator: server.goalCoordinator,
   stores:[taskStore,goalStore,maintenanceStore,toolAutomation,toolApprovalStore,repairStore,curationStore,curationBuildStore,gapStore,...(goalVerification ? [goalVerification.store] : [])],rpcs:[rpc,curatorRpc]});
 const shutdownFailure = () => {console.error('服务停止未完全确认，请检查项目内私有运行记录。');process.exitCode=1;};
 server.listen(3000, "127.0.0.1", async () => {
@@ -171,7 +172,7 @@ server.listen(3000, "127.0.0.1", async () => {
         internalApiServer.listen(internalApiPort, internalApiHost, resolve);
       });
     }
-    startApiServices({server,toolRepair,toolCurationBuild,toolMaintenance,toolCuration,toolApproval,toolCurationCoordinator,goalVerification});
+    startApiServices({server,toolRepair,toolCurationBuild,toolMaintenance,toolCuration,toolApproval,toolCurationCoordinator,goalVerification,goalCoordinator: server.goalCoordinator});
   }
   catch {shutdownFailure();void shutdown().catch(shutdownFailure);return;}
   console.log(`siRNA-pi: http://127.0.0.1:3000/ ; runtime=agent-compose ; internal=${internalApiServer ? `${internalApiHost}:${internalApiPort}` : 'off'} ; recovered=${recovered.length}`);

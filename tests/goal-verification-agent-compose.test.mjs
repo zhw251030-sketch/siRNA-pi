@@ -104,6 +104,8 @@ test('verification prompt prefers direct retrieval evidence over exhaustive evid
   assert.match(prompt, /search_verification_sources.*fetch_verification_source.*直接复制其中的 evidenceId/s);
   assert.match(prompt, /不要为了穷举工具回执而遍历整个证据目录/);
   assert.match(prompt, /每个 category=external_fact.*至少要包含.*retrieval evidenceId/);
+  assert.match(prompt, /minimumExternalSources=N.*source-specific.*external_fact/);
+  assert.match(prompt, /requiredEvidence=external.*external_fact.*requiredEvidence=execution.*tool_result.*requiredEvidence=artifact.*category=artifact/);
 });
 
 test('verification prompt spells out policy field names instead of ambiguous near-miss fields', () => {

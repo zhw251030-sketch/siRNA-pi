@@ -47,3 +47,36 @@ test('unknown deterministic checks fail closed', () => {
   assert.equal(result.decision, 'fail');
   assert.ok(result.findings.some(item => item.code === 'EVIDENCE_METHOD_MISMATCH'));
 });
+
+test('controlled retrieval evidence supports an external fact criterion', () => {
+  const run = {bundle: {artifacts: [], toolReceipts: [], messages: [], acceptanceCriteria: [{id: 'criterion-1', text: '外部来源与目标相关', requiredEvidence: ['external'], minimumExternalSources: 1}]}};
+  const result = evaluateVerificationResult(run, {
+    ...review([{method: 'retrieval', retrievalId: 'retrieval-1', sourceUrl: 'https://api.openalex.org/works/W1', sourceId: 'DOI:10.1000/example'}], {category: 'external_fact'}),
+  }, {});
+  assert.equal(result.decision, 'pass');
+  assert.deepEqual(result.findings, []);
+});
+
+test('external criteria reject artifact evidence and require source-specific retrieval claims', () => {
+  const run = {bundle: {artifacts: [{id: 'output:report.md'}], toolReceipts: [], messages: [], acceptanceCriteria: [{id: 'criterion-1', text: '至少两个独立来源', requiredEvidence: ['external'], minimumExternalSources: 2}]}};
+  const wrongMethod = evaluateVerificationResult(run, review([{method: 'artifact_read', sourceUrl: 'artifact://output:report.md'}], {category: 'external_fact'}), {});
+  assert.equal(wrongMethod.decision, 'fail');
+  assert.ok(wrongMethod.findings.some(item => item.code === 'EXTERNAL_FACT_WITHOUT_RETRIEVAL'));
+  const aggregate = evaluateVerificationResult(run, {
+    ...review([
+      {method: 'retrieval', retrievalId: 'retrieval-1', sourceUrl: 'https://api.openalex.org/works/W1', sourceId: 'DOI:10.1000/a'},
+      {method: 'retrieval', retrievalId: 'retrieval-2', sourceUrl: 'https://api.openalex.org/works/W2', sourceId: 'DOI:10.1000/b'},
+    ], {category: 'external_fact'}),
+  }, {});
+  assert.equal(aggregate.decision, 'fail');
+  assert.ok(aggregate.findings.some(item => item.code === 'EXTERNAL_SOURCE_COVERAGE_INSUFFICIENT'));
+  const sourceSpecific = evaluateVerificationResult(run, {
+    ...review([{method: 'retrieval', retrievalId: 'retrieval-1', sourceUrl: 'https://api.openalex.org/works/W1', sourceId: 'DOI:10.1000/a'}], {category: 'external_fact'}),
+    claims: [
+      {...review([{method: 'retrieval', retrievalId: 'retrieval-1', sourceUrl: 'https://api.openalex.org/works/W1', sourceId: 'DOI:10.1000/a'}], {category: 'external_fact'}).claims[0], id: 'claim-a'},
+      {...review([{method: 'retrieval', retrievalId: 'retrieval-2', sourceUrl: 'https://api.openalex.org/works/W2', sourceId: 'DOI:10.1000/b'}], {category: 'external_fact'}).claims[0], id: 'claim-b'},
+    ],
+    requirements: [{criterionId: 'criterion-1', status: 'satisfied', claimIds: ['claim-a', 'claim-b']}],
+  }, {});
+  assert.equal(sourceSpecific.decision, 'pass');
+});

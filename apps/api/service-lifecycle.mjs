@@ -21,7 +21,7 @@ export function createCurationAutomationReadiness({taskMessages,agentRuntime}) {
   };
 }
 
-export function startApiServices({server,toolMaintenance,toolRepair,toolCuration,toolCurationBuild,toolCurationCoordinator,toolApproval,goalVerification}) {
+export function startApiServices({server,toolMaintenance,toolRepair,toolCuration,toolCurationBuild,toolCurationCoordinator,toolApproval,goalVerification,goalCoordinator}) {
   if (!server.listening) throw Error('Services require ownership of the listening socket.');
   toolRepair?.recover();
   toolCurationBuild?.recover();
@@ -30,13 +30,14 @@ export function startApiServices({server,toolMaintenance,toolRepair,toolCuration
   toolApproval?.start();
   toolCurationCoordinator?.start();
   goalVerification?.start?.();
+  goalCoordinator?.start?.();
 }
 
-export function createApiShutdown({server,additionalServers=[],toolMaintenance,toolRepair,toolCuration,toolCurationBuild,toolCurationCoordinator,toolApproval,goalVerification,toolsServer,stores=[],rpc,rpcs=[]}) {
+export function createApiShutdown({server,additionalServers=[],toolMaintenance,toolRepair,toolCuration,toolCurationBuild,toolCurationCoordinator,toolApproval,goalVerification,goalCoordinator,toolsServer,stores=[],rpc,rpcs=[]}) {
   let pending;
   return function shutdown() {
     if(pending)return pending;
-    const drains=[goalVerification,toolCurationCoordinator,toolApproval,toolMaintenance,toolRepair,toolCuration,toolCurationBuild].filter(Boolean).map(service=>{
+    const drains=[goalCoordinator,goalVerification,toolCurationCoordinator,toolApproval,toolMaintenance,toolRepair,toolCuration,toolCurationBuild].filter(Boolean).map(service=>{
       try{return Promise.resolve(service.stop());}catch(error){return Promise.reject(error);}
     });
     const drainResult=Promise.allSettled(drains);

@@ -146,7 +146,9 @@ export function evaluateVerificationResult(run, result, context = {}) {
     if (!methodMatches(run, claim, context)) add('EVIDENCE_METHOD_MISMATCH', `事实 ${claim.id} 的证据来源与方法不一致。`, {claimId: claim.id});
     if (claim.importance !== 'minor' && claim.verdict !== 'supported') add('UNSUPPORTED_IMPORTANT_CLAIM', `关键事实 ${claim.id} 的判定为 ${claim.verdict}。`, {claimId: claim.id});
     if (claim.verdict !== 'supported') continue;
-    if (claim.category === 'external_fact') add('EXTERNAL_FACT_WITHOUT_RETRIEVAL', `外部事实 ${claim.id} 没有受控检索证据。`, {claimId: claim.id});
+    if (claim.category === 'external_fact' && !claim.evidence.some(evidence => evidence.method === 'retrieval')) {
+      add('EXTERNAL_FACT_WITHOUT_RETRIEVAL', `外部事实 ${claim.id} 没有受控检索证据。`, {claimId: claim.id});
+    }
     if (claim.category === 'tool_result' && !successfulTool(run, claim)) add('TOOL_RESULT_WITHOUT_SUCCESSFUL_RECEIPT', `工具结果 ${claim.id} 没有关联成功回执。`, {claimId: claim.id});
     if (claim.category === 'artifact' && !artifactEvidence(claim, context)) add('ARTIFACT_CLAIM_WITHOUT_IMMUTABLE_CHECK', `产物事实 ${claim.id} 没有冻结产物证据。`, {claimId: claim.id});
   }

@@ -61,15 +61,17 @@ async function readBody(request, maxBytes=1048576) {
 
 // HTTP only coordinates transport. Task state and runtime execution stay in
 // their own packages, matching the reference repository's responsibility split.
-export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolMaintenance, toolApproval, toolRepair, toolCurationPreview, toolCuration, toolCurationBuild, toolCurationCoordinator, goalStore, goalVerification, taskMessages: sharedTaskMessages, allowedHosts = [] } = {}) {
+export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolMaintenance, toolApproval, toolRepair, toolCurationPreview, toolCuration, toolCurationBuild, toolCurationCoordinator, goalStore, goalVerification, goalCoordinatorEnabled = false, taskMessages: sharedTaskMessages, allowedHosts = [] } = {}) {
   const taskMessages = sharedTaskMessages ?? new TaskMessageService({ taskStore, agentRuntime, workspaceFiles });
   const goalApi = goalStore ? createGoalApi({
     taskStore,
     goalStore,
+    taskMessages,
     readJsonBody: request => readBody(request, 64 * 1024),
     sendJson: reply,
     appendObjective: (taskId, content, requestId) => taskStore.appendConversationUserMessage(taskId, content, requestId),
     verification: goalVerification?.port ?? goalVerification,
+    coordinatorEnabled: goalCoordinatorEnabled,
   }) : undefined;
   const allowedHostNames = new Set(['127.0.0.1', 'localhost', ...allowedHosts]);
   const activeTurns = new Set();
@@ -336,6 +338,10 @@ export function createAppServer({ taskStore, agentRuntime, workspaceFiles, toolM
   // The verifier's private bridge listener reuses exactly this handler. It is
   // exposed as an explicit capability rather than opening a second public API.
   server.requestHandler = requestHandler;
+  // Lifecycle owns the HTTP server; expose the optional Goal coordinator on
+  // the same object so it starts only after listen() and stops before stores
+  // close, matching the reference Goal API extension.
+  server.goalCoordinator = goalApi;
   server.requestTimeout = 15000;
   server.headersTimeout = 10000;
   // HTTP connections and accepted agent turns have different lifetimes.

@@ -44,6 +44,22 @@ export class TaskMessageService {
       task?.status === 'running' || task?.status === 'stopped';
   }
 
+  // Goal automation uses the same task admission boundary as the HTTP chat
+  // endpoint.  The reference service exposes these two methods so the Goal
+  // coordinator can avoid dispatching while a turn is active or while a
+  // future UI interaction is being admitted.  This learning implementation
+  // has no interactive approval prompt yet, so pending user input is always
+  // false; keeping the method explicit preserves the extension contract.
+  hasPendingUserInput(_taskId) {
+    return false;
+  }
+
+  async isIdle(taskId) {
+    const task = this.taskStore.getTask(taskId);
+    if (!task || task.status === 'stopped') return false;
+    return !this.isTaskBusy(taskId);
+  }
+
   async createTask(requestId) {
     validateRequestId(requestId);
     const previous = requestId ? this.taskStore.getTaskByCreationRequestId(requestId) : undefined;

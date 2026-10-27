@@ -1,3 +1,5 @@
+import {GoalCoordinator} from '../../packages/extensions/goal/goal-coordinator.mjs';
+
 function asBody(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('request body must be an object');
   const keys = Object.keys(input);
@@ -17,12 +19,45 @@ function asBody(input) {
   return input;
 }
 
-export function createGoalApi({taskStore, goalStore, readJsonBody, sendJson, appendObjective, verification} = {}) {
+export function createGoalApi({taskStore, goalStore, taskMessages, readJsonBody, sendJson, appendObjective, verification, coordinatorEnabled = false} = {}) {
   if (!taskStore || !goalStore || typeof readJsonBody !== 'function' || typeof sendJson !== 'function') {
     throw new TypeError('Goal API requires taskStore, goalStore, readJsonBody and sendJson');
   }
+  const goalToolNames = new Set(['get_goal', 'create_goal', 'update_goal']);
+  const coordinator = coordinatorEnabled && taskMessages ? new GoalCoordinator(goalStore, {
+    isIdle: taskId => taskMessages.isIdle(taskId),
+    hasPendingUserInput: taskId => taskMessages.hasPendingUserInput(taskId),
+    run: async (taskId, prompt, requestId) => {
+      let started;
+      try {
+        started = await taskMessages.start({taskId, message: prompt, requestId}, () => {});
+      } catch (error) {
+        if (error?.statusCode === 409) {
+          return {accepted: false, success: false, productive: false, error: String(error.message ?? error).slice(0, 2000)};
+        }
+        throw error;
+      }
+      const completed = await started.completion;
+      const userMessage = completed.userMessage;
+      const messages = taskStore.listMessages(taskId);
+      const assistantMessage = completed.assistantMessage ?? messages.find(message =>
+        message.role === 'assistant' && message.sequence > userMessage.sequence);
+      const productive = taskStore.listRunEvents(taskId).some(event =>
+        event.userMessageId === userMessage.id && event.type === 'tool_end' &&
+        event.payload?.isError !== true && !goalToolNames.has(String(event.payload?.toolName ?? '')));
+      return {
+        accepted: true,
+        success: assistantMessage?.status === 'complete',
+        productive,
+        ...(assistantMessage?.status === 'failed' ? {error: assistantMessage.content.slice(0, 2000)} : {}),
+      };
+    },
+  }) : undefined;
   return {
     get(taskId) { return goalStore.get(taskId) ?? null; },
+    start() { coordinator?.start(); },
+    stop() { coordinator?.stop(); },
+    wake(taskId, resetBackoff = false) { coordinator?.wake(taskId, resetBackoff); },
     async handle(request, response, taskId) {
       const task = taskStore.getTask(taskId);
       if (!task) { sendJson(response, 404, {error: '没有找到这个任务。'}); return true; }
@@ -40,6 +75,7 @@ export function createGoalApi({taskStore, goalStore, readJsonBody, sendJson, app
           if (typeof appendObjective === 'function') {
             message = appendObjective(taskId, goal.objective, `goal-objective:${goal.goalId}`);
           }
+          coordinator?.wake(taskId, true);
           sendJson(response, 201, {goal, ...(message ? {message} : {})});
           return true;
         }
@@ -47,7 +83,10 @@ export function createGoalApi({taskStore, goalStore, readJsonBody, sendJson, app
           const input = asBody(await readJsonBody(request));
           let goal;
           if (input.action === 'pause') goal = goalStore.pause(taskId);
-          else if (input.action === 'resume') goal = goalStore.resume(taskId, input.additionalTurns);
+          else if (input.action === 'resume') {
+            goal = goalStore.resume(taskId, input.additionalTurns);
+            coordinator?.wake(taskId, true);
+          }
           else if (input.action === 'agent_update') {
             if (!input.status) throw new Error('agent_update 需要 status。');
             goal = goalStore.updateFromAgent(taskId, input.status,

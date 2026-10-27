@@ -151,3 +151,33 @@ test('failed verification request returns an error and restores the Goal to acti
   assert.match(restored.latestVerificationFeedback, /验证请求未能建立/);
 });
 
+test('enabled Goal coordinator dispatches a bounded continuation through the task message port', async t => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sirna-goal-coordinator-http-')));
+  const tasks = new TaskStore(path.join(root, 'tasks.sqlite'));
+  const goal = new GoalStore({root});
+  const task = tasks.createTask({id: randomUUID(), piSessionId: randomUUID()}, randomUUID());
+  const calls = [];
+  const taskMessages = {
+    isIdle: async () => true,
+    hasPendingUserInput: () => false,
+    start: async ({taskId, message, requestId}) => {
+      calls.push({taskId, message, requestId});
+      const userMessage = {id: randomUUID(), taskId, role: 'user', sequence: 1};
+      return {userMessage, completion: Promise.resolve({userMessage, assistantMessage: {role: 'assistant', sequence: 2, status: 'complete', content: 'done'}})};
+    },
+  };
+  const server = createAppServer({taskStore: tasks, agentRuntime: {runtimeInfo: () => ({})}, taskMessages, goalStore: goal, goalCoordinatorEnabled: true});
+  t.after(async () => {
+    server.goalCoordinator?.stop();
+    await new Promise(resolve => server.close(() => resolve()));
+    tasks.close(); goal.close(); fs.rmSync(root, {recursive: true, force: true});
+  });
+  const created = goal.create(task.id, '完成一个协调器工作项', 1);
+  server.goalCoordinator.start();
+  for (let index = 0; index < 20 && calls.length === 0; index++) await new Promise(resolve => setTimeout(resolve, 5));
+  server.goalCoordinator.stop();
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].message, /继续处理当前 Goal：完成一个协调器工作项/);
+  assert.equal(calls[0].requestId, `goal:${created.goalId}:1`);
+});
+
