@@ -73,6 +73,37 @@ export function verificationPrompt(run, accessToken, retryFeedback) {
     protocolVersion: GOAL_VERIFICATION_REVIEW_PROTOCOL,
     decision: 'pass | fail',
     requiredTopLevelKeys: ['protocolVersion', 'decision', 'summary', 'feedback', 'qualityReview', 'requirements', 'claims'],
+    // Keep the field-level shape in the prompt.  The policy layer consumes
+    // these exact names; a loose description of "claims" is enough for a
+    // model to invent near-miss fields such as `supported` or `criterionIds`.
+    resultShape: {
+      qualityReview: {
+        internalConsistency: {status: 'pass | fail | uncertain | not_applicable', rationale: 'why'},
+        methodologicalValidity: {status: 'pass | fail | uncertain | not_applicable', rationale: 'why'},
+        sourceRelevance: {status: 'pass | fail | uncertain | not_applicable', rationale: 'why'},
+        unsupportedPrecision: {status: 'pass | fail | uncertain | not_applicable', rationale: 'why'},
+        issues: ['unresolved issue; empty only when none remain'],
+      },
+      requirements: [{
+        criterionId: 'copy exactly one backend acceptanceCriteria[].id',
+        requirement: 'one objective requirement',
+        status: 'satisfied | partial | missing',
+        rationale: 'why',
+        artifactIds: ['copy known artifact ids, or []'],
+        claimIds: ['claim-1'],
+      }],
+      claims: [{
+        id: 'claim-1',
+        claim: 'claim as written',
+        selfContainedClaim: 'context-independent claim',
+        category: 'objective | artifact | tool_result | external_fact',
+        importance: 'critical | major | minor',
+        verdict: 'supported | contradicted | insufficient_evidence | unverifiable | irrelevant',
+        rationale: 'why',
+        evidence: [{evidenceId: 'copy an evidenceId returned by a verifier tool'}],
+      }],
+    },
+    forbiddenNearMissFields: ['claims[].supported', 'claims[].criterionIds', 'requirements[].criteriaIds'],
     acceptanceCriteria: run?.bundle?.acceptanceCriteria ?? [],
     evidenceUnits: evidenceInventory(run),
     evidenceRule: 'Claims may contain only {evidenceId}; copy IDs returned by verifier tools exactly.',

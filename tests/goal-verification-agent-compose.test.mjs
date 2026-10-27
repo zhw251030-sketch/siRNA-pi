@@ -78,6 +78,25 @@ test('verification prompt exposes backend evidence IDs but forbids model-created
   assert.match(prompt, /token-1234567890/);
 });
 
+test('verification prompt publishes the exact claim and requirement field contract', () => {
+  const prompt = verificationPrompt(run(), 'token-1234567890');
+  assert.match(prompt, /criterionId/);
+  assert.match(prompt, /claimIds/);
+  assert.match(prompt, /verdict.*supported \| contradicted \| insufficient_evidence \| unverifiable \| irrelevant/s);
+  assert.match(prompt, /category.*objective \| artifact \| tool_result \| external_fact/s);
+  assert.match(prompt, /forbiddenNearMissFields/);
+});
+
+test('verification prompt spells out policy field names instead of ambiguous near-miss fields', () => {
+  const prompt = verificationPrompt(run(), 'token-1234567890');
+  assert.match(prompt, /"criterionId":\s*"copy exactly one backend acceptanceCriteria/);
+  assert.match(prompt, /"claimIds":\s*\[\s*"claim-1"/);
+  assert.match(prompt, /"verdict":\s*"supported \| contradicted/);
+  assert.match(prompt, /forbiddenNearMissFields/);
+  assert.match(prompt, /claims\[\]\.supported/);
+  assert.match(prompt, /claims\[\]\.criterionIds/);
+});
+
 test('runtime adapter translates AgentComposeRuntime events and keeps sandbox cleanup in finally', async () => {
   const calls = [];
   const runtime = {
