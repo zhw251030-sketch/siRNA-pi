@@ -71,6 +71,16 @@ test('Builder prompt bounds proposal size and forbids throwaway submission probe
   assert.match(view.prompt,/唯一提交尝试/);
 });
 
+test('Builder prompt exposes static safety rules for candidate and baseline',async t=>{
+  const f=await fixture(t),view=await f.view();
+  assert.match(view.prompt,/候选.*baseline.*静态/);
+  assert.match(view.prompt,/child_process/);
+  assert.match(view.prompt,/spawn/);
+  assert.match(view.prompt,/fs/);
+  assert.match(view.prompt,/网络/);
+  assert.match(view.prompt,/动态执行/);
+});
+
 test('isolated actual Builder and registry bind one candidate atomically and reject a second build session',async t=>{
   let saved;
   const f=await fixture(t,{run:async({service,ctx,root})=>{
