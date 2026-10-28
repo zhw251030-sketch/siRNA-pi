@@ -63,7 +63,10 @@ test('admission rejects stale source/catalog and missing, busy or insufficient e
 test('result validator binds candidates to complete triggering groups and rejects malformed data',async t=>{
   const f=await fixture(t);const trace=buildToolCurationTrace({id:randomUUID(),snapshot:f.preview.snapshot(f.task.id,f.runId)});const run={id:trace.curationId,trace,traceSha256:trace.traceSha256};
   assert.deepEqual(validateToolCurationResult(run,skip(run)),skip(run));assert.deepEqual(parseToolCurationResult(run,JSON.stringify(candidate(run))),candidate(run));
-  assert.ok(toolCurationPrompt(run).includes(trace.traceSha256));
+  const prompt=toolCurationPrompt(run);
+  assert.ok(prompt.includes(trace.traceSha256));
+  assert.match(prompt,/nested candidate object/i);
+  assert.match(prompt,/never put capabilityKey, suggestedToolName, evidenceEventIds, or any other candidate field at the top level/i);
   const mutations=[v=>v.curationId='wrong',v=>v.traceSha256='0'.repeat(64),v=>v.extra=true,v=>v.candidate.capabilityKey='tool:unknown',v=>v.candidate.evidenceEventIds=['foreign'],v=>v.candidate.evidenceEventIds=[],v=>v.candidate.suggestedToolName='Bad-Name',v=>v.candidate.permissions={profile:'controlled_network',networkHosts:['https://evil']},v=>v.candidate.extra=true,v=>v.candidate.buildInstructions=['x'.repeat(2001)],v=>v.candidate.inputContractSketch={nested:{nested:{nested:{nested:{nested:{nested:{nested:{nested:{nested:{nested:{nested:{nested:{nested:{nested:{nested:{nested:{nested:true}}}}}}}}}}}}}}}}},v=>v.summary='x'.repeat(50000)];
   for(const mutate of mutations){const v=candidate(run);mutate(v);assert.throws(()=>validateToolCurationResult(run,v));}
   assert.throws(()=>validateToolCurationResult(run,{...skip(run),candidate:candidate(run).candidate}));
