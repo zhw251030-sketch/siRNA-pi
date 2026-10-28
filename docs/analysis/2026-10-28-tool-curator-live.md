@@ -37,3 +37,11 @@
 - 实现提交：b356697（候选响应契约提示修复）、9b2fce4（verifier/Curator 证据边界修复）。
 
 当前整体位置是：Goal 真实失败反馈续跑已完成，执行侧 Goal 工具已完成令牌接线，Tool Gap→独立 Curator→candidate 也有真实成功证据。仍未完成的是 candidate→Builder→独立验证→人工批准→正式目录的真实新工具交接；自动批准保持关闭，不能把本轮 candidate 当成已发布工具。
+
+## Builder 交接结果
+
+随后通过 build view 读取固定绑定，并提交了 traceSha256、resultSha256、promptSha256 三个摘要。Builder 使用同一个任务运行环境，在 no_external_access、node、空 dependencies、exact repeatability 约束下创建并测试了 fasta_quality_report。它完成了 17 个功能测试和构建产物检查；两项 benchmark 暴露了反向互补和 IUPAC 模式处理的结果契约差异，Builder 继续尝试修正测试与实现。
+
+最终宿主事件已经登记 proposal 1cb0e71b-fae0-4abb-97bf-2ebbeca807b1，工具名 fasta_quality_report，状态 submitted，runtime artifact 和 source/baseline SHA-256 均与登记材料一致，artifactSha256 为 20b8be3052ab6934c3862af3762caa466a2a26b3f403c2a07a6462c2cc17bef4。这个提案的 verified、approved、activated 都是 false。Builder 随后的清理操作产生了未知结果，网页任务因此为 failed，系统没有自动重试；通过宿主只读 show 已确认 proposal 登记和材料完整，所以不能把 Agent turn 的 failed 隐瞒，也不能把 submitted 提案当成已验证工具。
+
+下一步是独立执行候选与 baseline 的验证，检查上述 benchmark 契约问题、净增益和权限边界；只有验证报告通过后，才允许人工批准并分配正式版本。验证和批准仍未执行。
