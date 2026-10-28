@@ -24,7 +24,16 @@ Builder 读取最新提示后完成了：
 
 ## 提交阶段
 
-Builder 随后只做了一次正式 `propose_exploration_tool` 调用。宿主返回 accepted-operation/transport 不确定错误，要求先读取宿主记录。服务器只读执行：
+Builder 随后只做了一次正式 `propose_exploration_tool` 调用。客户端把非成功响应统一包装成了 accepted-operation/transport 不确定错误，表面上像提交传输问题；回读构建会话证据后确认，失败发生在宿主 `propose()` 的提交前置合同检查，尚未进入 registry。
+
+v12 提案实际设置了 `minNetGain: 10`，但只提供了 2 个 `benchmarkCases`。本地用同一合同函数复现得到：
+
+```text
+code: TOOL_PROPOSAL_INVALID
+error: minNetGain cannot exceed the benchmarkCases count
+```
+
+服务器构建事件 `runtime/tool-builds/b49fc5a8-3a3e-4941-8c8a-ee8886bdd65d/events.jsonl` 从 `finalized` 结束，没有 `proposal_submit` 或 `proposal_submission_failed`；因此 registry 未发生写入。服务器只读执行：
 
 ```text
 manage-tool-proposals.mjs list
@@ -37,15 +46,15 @@ manage-tool-proposals.mjs list
 - `runtimeReleased=false`
 - `stopUnconfirmed=true`
 
-因此 v12 没有进入验证，也没有修改 v11 的 `verification_failed` proposal。不能把构建成功或一次 propose 调用误写成 proposal 已登记。
+因此 v12 没有进入验证，也没有修改 v11 的 `verification_failed` proposal。不能把构建成功或一次 propose 调用误写成 proposal 已登记；本轮的“传输不确定”是客户端错误映射掩盖了一个可复现的提案合同错误。
 
 ## 与参考仓库的对应关系
 
 | 原仓库职责 | 本地实现 | v12 证据 |
 | --- | --- | --- |
 | Builder 只提交完整 candidate | `tool-curation-build-contract.mjs`、`tool-build-sessions.mjs` | 候选/baseline 纯离线且 finalize 成功 |
-| finalize 后直接 propose | `tool-builder-tools.mjs`、`tool-build-sessions.mjs` | 只发起一次 direct-submit，但宿主结果未知 |
+| finalize 后直接 propose | `tool-builder-tools.mjs`、`tool-build-sessions.mjs` | 只发起一次 direct-submit，但 `minNetGain` 合同预检拒绝 |
 | proposal 登记后才进入验证 | `tool-validation-service.mjs`、`manage-tool-proposals.mjs` | registry 无 v6，验证未启动 |
 | 不确定结果禁止盲目重试 | `tool-build-sessions.mjs` 与任务生命周期 | 读取 registry 后停止，没有自动重提 |
 
-当前结论是：**静态安全提示已经修复，Builder 构建合同已经通过，但 proposal 提交宿主仍存在不确定/卡顿问题。** 下一步应先释放 v12 runtime，再从宿主提交通道本身入手；继续增加模型提示无法解决一个发生在 accepted operation/transport 层的故障。
+当前结论是：**静态安全提示已经修复，Builder 构建合同已经通过；v12 的失败是 `minNetGain` 与 benchmark 数量不一致造成的提交前置合同拒绝，客户端错误映射使其看起来像 transport uncertainty。** 下一步应修正 Builder prompt 的 `minNetGain <= benchmarkCases.length` 约束，然后用全新 curation/build 任务重跑；不能重放 v12 的同一提交，也不能释放 v11/v12 runtime 作为“已验证”结果。

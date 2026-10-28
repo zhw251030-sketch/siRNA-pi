@@ -71,6 +71,12 @@ test('Builder prompt bounds proposal size and forbids throwaway submission probe
   assert.match(view.prompt,/唯一提交尝试/);
 });
 
+test('Builder prompt bounds minNetGain by the available benchmark cases',async t=>{
+  const f=await fixture(t),view=await f.view();
+  assert.match(view.prompt,/minNetGain.*benchmarkCases\.length/);
+  assert.match(view.prompt,/不超过/);
+});
+
 test('Builder prompt exposes static safety rules for candidate and baseline',async t=>{
   const f=await fixture(t),view=await f.view();
   assert.match(view.prompt,/候选.*baseline.*静态/);
