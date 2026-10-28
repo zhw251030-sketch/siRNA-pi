@@ -55,6 +55,13 @@ test('Builder prompt freezes the actual validation envelope field names',async t
   assert.match(view.prompt,/tool-validation-runner\.mjs/);
 });
 
+test('Builder prompt sends the final proposal directly instead of assembling it through shell',async t=>{
+  const f=await fixture(t),view=await f.view();
+  assert.match(view.prompt,/直接调用\s*propose_exploration_tool/);
+  assert.match(view.prompt,/禁止.*run_tool_build_command/);
+  assert.match(view.prompt,/禁止.*prop\.json/);
+});
+
 test('isolated actual Builder and registry bind one candidate atomically and reject a second build session',async t=>{
   let saved;
   const f=await fixture(t,{run:async({service,ctx,root})=>{

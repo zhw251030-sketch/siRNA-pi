@@ -50,7 +50,7 @@ v09 任务为 `bc11c5e8-f341-49a0-8302-cb534f40606c`，执行 run 为
 - `tests/tool-curation-build.test.mjs`
 - `tests/tool-repair.test.mjs`
 
-新增的两组测试分别锁定 Builder 和 repair prompt 的实际 envelope 字段。完整回归为 1607 项：1591 通过、16 项 Windows 平台跳过、0 失败；服务器和本机的 `git diff --check` 均通过。v09 的真实宿主失败不改变这些本地测试结果，因为失败发生在 proposal 大 payload 的传输边界。
+新增的三组测试分别锁定 Builder 的 envelope 字段、Builder 的 proposal 直传边界和 repair prompt 的实际 envelope 字段。完整本机回归为 1608 项：1592 通过、16 项 Windows 平台跳过、0 失败；本机 `git diff --check` 通过。v09 的真实宿主失败不改变这些本地测试结果，因为失败发生在 proposal 大 payload 的传输边界。
 
 ## 当前边界与下一步
 
