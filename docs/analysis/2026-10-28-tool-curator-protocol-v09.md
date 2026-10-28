@@ -54,4 +54,4 @@ v09 任务为 `bc11c5e8-f341-49a0-8302-cb534f40606c`，执行 run 为
 
 ## 当前边界与下一步
 
-v09 证明协议提示已足以让 Builder 写出正确 envelope 解析和可重复候选，但尚未证明完整的“候选登记 → 14 次验证 → verified → 人工批准 → 激活”闭环。下一步必须先对 v09 runtime 做一次获得确认的生命周期释放并核对 `runtimeReleased:true`，然后针对当前宿主的 proposal 长度边界缩小候选合同或修复传输方式，再开一个全新任务；不能把 finalize 成功误报为 proposal 已提交，也不能复用旧 proposal 的验证状态。
+v09 证明协议提示已足以让 Builder 写出正确 envelope 解析和可重复候选，但尚未证明完整的“候选登记 → 14 次验证 → verified → 人工批准 → 激活”闭环。针对本轮失败原因，已在 `792e2b2` 中加入 transport guard：Builder 必须直接调用 `propose_exploration_tool`，禁止再用 `run_tool_build_command` 拼装 proposal 中间文件；新增回归后本机全套为 1608 项通过/跳过组合。下一步必须先对 v09 runtime 做一次获得确认的生命周期释放并核对 `runtimeReleased:true`，然后开一个全新任务验证这条护栏；不能把 finalize 成功误报为 proposal 已提交，也不能复用旧 proposal 的验证状态。
