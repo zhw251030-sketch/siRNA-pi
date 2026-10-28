@@ -53,6 +53,8 @@ test('Builder prompt freezes the actual validation envelope field names',async t
   assert.match(view.prompt,/toolCallId.*input/);
   assert.match(view.prompt,/envelope\.input.*raw\.sequence/);
   assert.match(view.prompt,/tool-validation-runner\.mjs/);
+  assert.match(view.prompt,/标准输入.*JSON/);
+  assert.match(view.prompt,/stdout.*一个 JSON 对象/);
 });
 
 test('Builder prompt distinguishes business case inputs from the verifier envelope',async t=>{
