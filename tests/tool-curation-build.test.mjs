@@ -47,6 +47,14 @@ test('explicit handoff persists one message across concurrent clicks and restart
   f.tasks.updateExecution(f.task.id,{status:'stopped'});assert.equal((await f.view()).handoff.requestId,a.handoff.requestId);assert.equal((await f.view()).eligible,false);
 });
 
+test('Builder prompt freezes the actual validation envelope field names',async t=>{
+  const f=await fixture(t),view=await f.view();
+  assert.match(view.prompt,/protocolVersion.*sirna-approved-tool-call\/v1/);
+  assert.match(view.prompt,/toolCallId.*input/);
+  assert.match(view.prompt,/envelope\.input.*raw\.sequence/);
+  assert.match(view.prompt,/tool-validation-runner\.mjs/);
+});
+
 test('isolated actual Builder and registry bind one candidate atomically and reject a second build session',async t=>{
   let saved;
   const f=await fixture(t,{run:async({service,ctx,root})=>{

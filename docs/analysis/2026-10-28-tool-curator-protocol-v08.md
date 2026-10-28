@@ -107,3 +107,14 @@ Node、空 dependencies、`exact`、`no_external_access`，没有 parent。后�
 运行时，再决定是否启动新的独立任务。旧 proposal 和失败报告都保持只读留存。
 
 本轮没有修改正式工具目录，也没有把任何候选标成 verified、approved 或 active。
+
+## 针对真实失败增加的合同护栏
+
+v07 的失败暴露出仅把协议写在 Curator candidate 里还不够：Builder 可能在实现时把
+`protocolVersion` 改写成近似字段。现在 `packages/extensions/tool-curation/tool-curation-build-contract.mjs`
+在固定 Builder prompt 中直接写出验证器文件、完整 envelope 形状和禁止读取的错误路径；
+`tests/tool-curation-build.test.mjs` 增加回归断言，确保后续改 prompt 时不会丢掉这条事实。
+
+这项修改只改变 Builder 的说明，不放宽运行时验证、不替候选修补、不自动重试，也不改变
+proposal、verification 或 approval 的状态机。新增提示后的本地全套回归为 1606 项：
+1590 通过、16 项 Windows 平台跳过、0 失败。
