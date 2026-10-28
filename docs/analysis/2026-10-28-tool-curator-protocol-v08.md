@@ -118,3 +118,10 @@ v07 的失败暴露出仅把协议写在 Curator candidate 里还不够：Builde
 这项修改只改变 Builder 的说明，不放宽运行时验证、不替候选修补、不自动重试，也不改变
 proposal、verification 或 approval 的状态机。新增提示后的本地全套回归为 1606 项：
 1590 通过、16 项 Windows 平台跳过、0 失败。
+
+随后同样的协议护栏被加入 `packages/capability-platform/tool-repair-service.mjs` 的修订
+提示。原因是修订 Agent 可能绕过 Curator Builder，直接从 `verification_failed` 报告
+重建候选；如果只有 Builder prompt 有这条说明，修订链仍可能再次把 `protocolVersion`
+误写成 `protocol`。`tests/tool-repair.test.mjs` 现在检查真实持久化修订消息包含
+协议版本、业务输入、`envelope.input` 和 smoke/test/benchmark 合同。修订定向测试为
+38/38，通过后全套回归更新为 1607 项：1591 通过、16 项 Windows 平台跳过、0 失败。

@@ -79,6 +79,15 @@ test('one explicit dispatch saves the complete original proposal and report; wor
   await assert.rejects(f.repair.start(f.id,{...f.body,reportSha256:'c'.repeat(64)}),e=>e.statusCode===409);
 });
 
+test('repair prompt freezes the approved tool-call envelope contract',async t=>{
+  const f=await setup(t);await f.repair.start(f.id,f.body);await f.repair.drain();
+  const user=f.tasks.listMessages(f.task.id).find(m=>m.role==='user');
+  assert.match(user.content,/sirna-approved-tool-call\/v1/);
+  assert.match(user.content,/smokeInput.*testCases.*benchmarkCases/);
+  assert.match(user.content,/只能包含业务参数/);
+  assert.match(user.content,/envelope\.input/);
+});
+
 test('concurrent requests reserve before asynchronous runtime readiness and dispatch only one durable message',async t=>{
   const f=await setup(t);let release;f.runtime.assertWorkspaceIdle=()=>new Promise(r=>release=r);
   const first=f.repair.start(f.id,f.body),second=f.repair.start(f.id,f.body);await new Promise(r=>setImmediate(r));
