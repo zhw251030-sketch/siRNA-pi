@@ -62,6 +62,15 @@ test('Builder prompt sends the final proposal directly instead of assembling it 
   assert.match(view.prompt,/禁止.*prop\.json/);
 });
 
+test('Builder prompt bounds proposal size and forbids throwaway submission probes',async t=>{
+  const f=await fixture(t),view=await f.view();
+  assert.match(view.prompt,/120000/);
+  assert.match(view.prompt,/testCases.*8/);
+  assert.match(view.prompt,/benchmarkCases.*4/);
+  assert.match(view.prompt,/禁止.*throwaway.*probe/);
+  assert.match(view.prompt,/唯一提交尝试/);
+});
+
 test('isolated actual Builder and registry bind one candidate atomically and reject a second build session',async t=>{
   let saved;
   const f=await fixture(t,{run:async({service,ctx,root})=>{
