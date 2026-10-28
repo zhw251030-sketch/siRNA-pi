@@ -66,6 +66,8 @@ test('result validator binds candidates to complete triggering groups and reject
   const prompt=toolCurationPrompt(run);
   assert.ok(prompt.includes(trace.traceSha256));
   assert.match(prompt,/nested candidate object/i);
+  assert.match(prompt,/balanced braces/);
+  assert.match(prompt,/small plain JSON examples/);
   assert.match(prompt,/never put capabilityKey, suggestedToolName, evidenceEventIds, or any other candidate field at the top level/i);
   const mutations=[v=>v.curationId='wrong',v=>v.traceSha256='0'.repeat(64),v=>v.extra=true,v=>v.candidate.capabilityKey='tool:unknown',v=>v.candidate.evidenceEventIds=['foreign'],v=>v.candidate.evidenceEventIds=[],v=>v.candidate.suggestedToolName='Bad-Name',v=>v.candidate.permissions={profile:'controlled_network',networkHosts:['https://evil']},v=>v.candidate.extra=true,v=>v.candidate.buildInstructions=['x'.repeat(2001)],v=>v.candidate.inputContractSketch={nested:{nested:{nested:{nested:{nested:{nested:{nested:{nested:{nested:{nested:{nested:{nested:{nested:{nested:{nested:{nested:{nested:true}}}}}}}}}}}}}}}}},v=>v.summary='x'.repeat(50000)];
   for(const mutate of mutations){const v=candidate(run);mutate(v);assert.throws(()=>validateToolCurationResult(run,v));}
