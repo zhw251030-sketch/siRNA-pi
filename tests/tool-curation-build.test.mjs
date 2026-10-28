@@ -55,6 +55,14 @@ test('Builder prompt freezes the actual validation envelope field names',async t
   assert.match(view.prompt,/tool-validation-runner\.mjs/);
 });
 
+test('Builder prompt distinguishes business case inputs from the verifier envelope',async t=>{
+  const f=await fixture(t),view=await f.view();
+  assert.match(view.prompt,/smokeInput.*testCases.*benchmarkCases/);
+  assert.match(view.prompt,/业务输入/);
+  assert.match(view.prompt,/不要把 protocolVersion、toolCallId、input/);
+  assert.match(view.prompt,/自动补上.*envelope/);
+});
+
 test('Builder prompt sends the final proposal directly instead of assembling it through shell',async t=>{
   const f=await fixture(t),view=await f.view();
   assert.match(view.prompt,/直接调用\s*propose_exploration_tool/);
