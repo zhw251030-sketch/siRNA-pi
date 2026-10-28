@@ -69,6 +69,14 @@ export class GoalVerificationCoordinator {
       // inventory that a real verifier would obtain through the access service.
       // Real Agent Compose runs still use token-scoped access methods.
       active.evidenceUnits = this.evidenceResolver.list(active.id);
+      // The local deterministic verifier has no MCP session. Give it a narrow
+      // internal adapter that performs the same immutable artifact read as the
+      // verifier-only `read_verification_artifact` path. Do not pre-register
+      // artifact metadata: only an actual read may materialize an artifact unit.
+      Object.defineProperty(active, 'readArtifactEvidence', {
+        enumerable: false,
+        value: artifactId => this.evidenceResolver.materializeWholeArtifact(active, artifactId),
+      });
       let retryFeedback;
       let lastError;
       const existingAttempts = this.store.listAttempts(id);

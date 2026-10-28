@@ -86,8 +86,16 @@ test('signals stop at twenty and expose omitted count',()=>{
   const p=build(events);assert.equal(p.signals.length,20);assert.equal(p.limits.omittedSignals,2);
 });
 test('explicit control names exclude verification and gap tools without excluding business repair names',()=>{
-  for(const name of ['get_goal','report_tool_gap','get_verification_bundle','read_verification_artifact','check_verification_artifact','create_tool_build_session','propose_exploration_tool']) assert.equal(build(eventsFor([{}],name)).summary.excludedCalls,1,name);
+  for(const name of ['get_goal','report_tool_gap','get_verification_bundle','read_verification_message','read_verification_artifact','list_verification_evidence','read_verification_attempt','check_verification_artifact','search_verification_sources','fetch_verification_source','create_tool_build_session','propose_exploration_tool']) assert.equal(build(eventsFor([{}],name)).summary.excludedCalls,1,name);
+  for(const name of ['goal_verifier_tools_get_verification_bundle','goal_verifier_tools_read_verification_message','goal_verifier_tools_read_verification_artifact','goal_verifier_tools_list_verification_evidence','goal_verifier_tools_read_verification_attempt','goal_verifier_tools_check_verification_artifact','goal_verifier_tools_search_verification_sources','goal_verifier_tools_fetch_verification_source']) assert.equal(build(eventsFor([{}],name)).summary.excludedCalls,1,name);
   assert.equal(build(eventsFor([{}],'summarize_numeric_range_repair_feedback')).calls.length,1);
+});
+
+test('curation sanitization redacts verifier tokens and evidence identities',()=>{
+  const p=build(eventsFor([{verificationId:'verification-1',verificationToken:'verification-secret',accessToken:'access-secret',retrievalId:'retrieval-1',retrievalToken:'retrieval-secret',evidenceId:'evidence-1',evidenceToken:'evidence-secret'}],'summarize'));
+  const text=JSON.stringify(p);
+  for(const secret of ['verification-1','verification-secret','access-secret','retrieval-1','retrieval-secret','evidence-1','evidence-secret']) assert.equal(text.includes(secret),false,secret);
+  assert.match(text,/\[REDACTED\]/);
 });
 test('MCP start identity is authoritative; prefixed names normalize and conflicting result stays unknown',()=>{
   const events=eventsFor([{tool:'sirna_tools_fetch',args:'{}'}],'mcp',{});

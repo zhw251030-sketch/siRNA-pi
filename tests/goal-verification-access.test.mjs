@@ -51,6 +51,16 @@ test('token-scoped bundle access hides message and tool payload bodies', async t
   assert.throws(() => f.access.bundle({verificationId: f.request.id, accessToken: 'wrong'}), /invalid|expired/i);
 });
 
+test('unread artifact metadata is not exposed as citable evidence', async t => {
+  const f = await fixture(t);
+  const page = f.access.evidence({verificationId: f.request.id, accessToken: f.token});
+  assert.equal(page.evidenceUnits.some(item => item.method === 'artifact_read'), false);
+  const artifact = await f.access.artifact({verificationId: f.request.id, accessToken: f.token, artifactId: f.request.bundle.artifacts[0].id, maxChars: 1});
+  assert.equal(artifact.evidenceUnits[0].method, 'artifact_read');
+  const after = f.access.evidence({verificationId: f.request.id, accessToken: f.token});
+  assert.equal(after.evidenceUnits.some(item => item.method === 'artifact_read'), true);
+});
+
 test('message and artifact access are paginated and bound to the immutable snapshot', async t => {
   const f = await fixture(t);
   const message = f.access.message({verificationId: f.request.id, accessToken: f.token, messageId: f.request.bundle.messages[0].id, offset: 0, maxChars: 1});

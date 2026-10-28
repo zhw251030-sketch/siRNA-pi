@@ -7,13 +7,14 @@ const object = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const canonical = v => Array.isArray(v) ? v.map(canonical) : object(v)
   ? Object.fromEntries(Object.keys(v).sort().map(k => [k, canonical(v[k])])) : v;
 const hash = v => createHash('sha256').update(JSON.stringify(canonical(v))).digest('hex');
-const secret = /^(?:authorization|proxy-authorization|cookies?|set-cookie|api[-_]?key|.*(?:access|refresh)[-_]?token|token|password|passwd|secret|client[-_]?secret|private[-_]?key)$/i;
+const secret = /^(?:authorization|proxy-authorization|cookies?|set-cookie|api[-_]?key|.*(?:access|refresh)[-_]?token|token|password|passwd|secret|client[-_]?secret|private[-_]?key|(?:verification|retrieval|evidence)[-_]?(?:id|token))$/i;
 function textSafe(value) {
   return value.replace(/https?:\/\/[^\s<>"'`]+/gi, raw => {
     try { const u = new URL(raw); u.username='';u.password='';u.search='';u.hash='';return u.href; }
     catch { return '[REDACTED URL]'; }
   }).replace(/(\b(?:authorization|proxy-authorization)\s*[:=]\s*)(?:(?:Bearer|Basic)\s+)?[^\s,;"']+/gi,'$1[REDACTED]')
     .replace(/((?:api[-_]?key|access[-_]?token|refresh[-_]?token|token|password|passwd|secret)\s*[=:]\s*)[^\s,;"']+/gi,'$1[REDACTED]')
+    .replace(/((?:verification|retrieval|evidence)[-_]?(?:id|token)\s*[=:]\s*)[^\s,;"']+/gi,'$1[REDACTED]')
     .replace(/(--(?:api[-_]?key|token|password|secret)\s+)[^\s"']+/gi,'$1[REDACTED]')
     .replace(/("(?:api[-_]?key|authorization|password|token|secret)"\s*:\s*)"(?:\\.|[^"\\])*"/gi,'$1"[REDACTED]"');
 }
@@ -54,9 +55,11 @@ function inputFor(args, mcp) {
 const controls=new Set(['get_goal','create_goal','update_goal','report_tool_gap',
   'create_tool_build_session','cancel_tool_build_session','run_tool_build_command',
   'write_tool_build_file','finalize_tool_build','propose_exploration_tool',
-  'get_verification_bundle','read_verification_artifact','check_verification_artifact',
+  'get_verification_bundle','read_verification_message','read_verification_artifact',
+  'list_verification_evidence','read_verification_attempt','check_verification_artifact',
+  'search_verification_sources','fetch_verification_source',
   'goal_create','goal_update','proposal_submit']);
-const normalizedTool = name => typeof name==='string' ? name.replace(/^sirna_tools_/, '') : '';
+const normalizedTool = name => typeof name==='string' ? name.replace(/^(?:sirna_tools_|goal_verifier_tools_)/, '') : '';
 function excluded(name, mcp, args, details, existing) {
   if(['read','write','edit'].includes(name.toLowerCase())) return 'file_operation';
   if(controls.has(name)) return 'governance_operation';
@@ -100,7 +103,7 @@ export function buildCurationPreview({taskId,runId,userMessageId,objective='',ev
     const mcp=p.toolName==='mcp';
     // pi-mcp-adapter 2.11: start.tool may be server-prefixed; details.tool
     // carries the unprefixed actual name and mcpResult preserves inner errors.
-    const actual=mcp ? (normalizedTool(args?.tool) || 'mcp') : (p.toolName ?? 'unknown');
+    const actual=mcp ? (normalizedTool(args?.tool) || 'mcp') : normalizedTool(p.toolName ?? 'unknown');
     const identityConflict=mcp && details.tool!==undefined && normalizedTool(details.tool)!==actual;
     const reason=excluded(String(actual),mcp,args,details,existing);
     if(reason) {
@@ -138,7 +141,7 @@ export function buildCurationPreview({taskId,runId,userMessageId,objective='',ev
   if(preview.limits.omittedExcludedCalls) preview.limits.displayTruncated=true;
   if(shown.some(c=>c.inputPreview.includes('[truncated]') || c.outputPreview?.includes('[truncated]'))) preview.limits.displayTruncated=true;
   if(gapReports.length){
-    preview.gapReports=gapReports;
+    preview.gapReports=sanitize(gapReports, '', 0, {complete:true});
     preview.eligibleForReview=true;
     preview.sourceSha256=hash({taskId,runId,userMessageId,objective,events,existingTools:[...existing].sort(),gapReports});
     // Complete report payloads cannot be silently reduced to fit an envelope.

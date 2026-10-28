@@ -93,9 +93,7 @@ test('evidence resolver persists random stable units for bundle content', async 
   const first = resolver.prepareBundle(f.store.get(f.bundle.verificationId));
   const second = resolver.prepareBundle(f.store.get(f.bundle.verificationId));
   assert.deepEqual(first.map(unit => unit.id), second.map(unit => unit.id));
-  assert.equal(first.length, 1);
-  assert.match(first[0].id, /^[0-9a-f-]{36}$/);
-  assert.equal(first[0].method, 'artifact_read');
+  assert.deepEqual(first, []);
   const artifact = resolver.materializeArtifact(f.store.get(f.bundle.verificationId), f.bundle.artifacts[0].id, '[artifact excerpt]', 'chars:0-17');
   assert.match(artifact.id, /^[0-9a-f-]{36}$/);
   assert.equal(artifact.id.startsWith('artifact:'), false);

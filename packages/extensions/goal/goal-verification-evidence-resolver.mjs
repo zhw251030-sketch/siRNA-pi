@@ -88,11 +88,6 @@ export class GoalVerificationEvidenceResolver {
       excerpt: chunk.excerpt, fetchedAt: message.createdAt, contentSha256: message.sha256,
       locator: chunk.locator, dedupeKey: `message:${message.id}:${chunk.locator}`,
     });
-    for (const artifact of run.bundle.artifacts ?? []) this.unit({
-      verificationId, method: 'artifact_read', sourceUrl: `artifact://${artifact.id}`, title: artifact.name,
-      excerpt: artifact.encoding === 'binary' ? `[binary artifact: ${artifact.name}]` : `[artifact: ${artifact.name}]`,
-      fetchedAt: artifact.modifiedAt, contentSha256: artifact.sha256, locator: 'metadata', dedupeKey: `artifact:${artifact.id}:metadata`,
-    });
     return this.store.listEvidenceUnits(verificationId);
   }
   materializeRetrieval(retrieval) {

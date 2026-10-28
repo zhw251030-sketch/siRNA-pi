@@ -17,7 +17,11 @@ export function createDeterministicGoalVerifier() {
       const output = run.bundle.artifacts.find(artifact => artifact.kind === 'output');
       const evidenceUnits = run.evidenceUnits ?? [];
       const successfulToolEvidence = successfulTool && evidenceUnits.find(unit => unit.method === 'tool_receipt' && unit.sourceUrl === `tool-receipt://${successfulTool.eventId}`);
-      const outputEvidence = output && evidenceUnits.find(unit => unit.method === 'artifact_read' && unit.sourceUrl === `artifact://${output.id}`);
+      let outputEvidence = output && evidenceUnits.find(unit => unit.method === 'artifact_read' && unit.sourceUrl === `artifact://${output.id}`);
+      if (!outputEvidence && output && typeof run.readArtifactEvidence === 'function') {
+        const materialized = await run.readArtifactEvidence(output.id);
+        outputEvidence = materialized.find(unit => unit.method === 'artifact_read' && unit.sourceUrl === `artifact://${output.id}`);
+      }
       let allSatisfied = true;
       for (const criterion of run.bundle.acceptanceCriteria) {
         const needsExternal = criterion.requiredEvidence.includes('external');
