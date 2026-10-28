@@ -97,6 +97,16 @@ test('curation sanitization redacts verifier tokens and evidence identities',()=
   for(const secret of ['verification-1','verification-secret','access-secret','retrieval-1','retrieval-secret','evidence-1','evidence-secret']) assert.equal(text.includes(secret),false,secret);
   assert.match(text,/\[REDACTED\]/);
 });
+test('replayed verifier-only trace stays excluded and payload-free',()=>{
+  const names=['get_verification_bundle','read_verification_message','read_verification_artifact','list_verification_evidence','read_verification_attempt','check_verification_artifact','search_verification_sources','fetch_verification_source'];
+  const events=names.flatMap((name,i)=>eventsFor([{verificationId:`verification-${i}`,retrievalId:`retrieval-${i}`,evidenceId:`evidence-${i}`,token:`token-${i}`}],`goal_verifier_tools_${name}`).map(event=>({...event,id:`${i}-${event.id}`,payload:{...event.payload,toolCallId:`${i}-${event.payload.toolCallId}`}})));
+  const first=build(events);
+  const replay=build(JSON.parse(JSON.stringify(events)));
+  assert.deepEqual(replay,first);
+  assert.equal(replay.summary.excludedCalls,names.length);
+  assert.equal(replay.calls.length,0);
+  for(const value of ['verification-0','retrieval-0','evidence-0','token-0']) assert.equal(JSON.stringify(replay).includes(value),false,value);
+});
 test('MCP start identity is authoritative; prefixed names normalize and conflicting result stays unknown',()=>{
   const events=eventsFor([{tool:'sirna_tools_fetch',args:'{}'}],'mcp',{});
   assert.equal(build(events).calls[0].actualToolName,'fetch');
